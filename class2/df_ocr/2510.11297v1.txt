@@ -1,0 +1,1859 @@
+arXiv:2510.11297v1 [es.CL] 13 Oct 2025
+
+Are Large Language Models Effective Knowledge Graph Constructors?
+
+Ruirui Chen’, Weifeng Jiang’, Chengwei Qin’, Bo Xiong“,
+Fiona Liausvia', Dongkyu Choi', Boon Kiat Quek!
+Institute of High Performance Computing (IHPC),
+
+Agency for Science, Technology and Research (A*STAR), Singapore
+?Nanyang Technological University, Singapore
+>Hong Kong University of Science and Technology (Guangzhou), China
+4 Stanford University, United States
+
+Abstract
+
+Knowledge graphs (KGs) are vital for
+knowledge-intensive tasks and have shown
+promise in reducing hallucinations in large lan-
+guage models (LLMs). However, construct-
+ing high-quality KGs remains difficult, requir-
+ing accurate information extraction and struc-
+tured representations that support interpretabil-
+ity and downstream utility. Existing LLM-
+based approaches often focus narrowly on en-
+tity and relation extraction, limiting coverage
+to sentence-level contexts or relying on pre-
+defined schemas. We propose a hierarchical
+extraction framework that organizes informa-
+tion at multiple levels, enabling the creation
+of semantically rich and well-structured KGs.
+Using state-of-the-art LLMs, we extract and
+construct knowledge graphs and evaluate them
+comprehensively from both structural and se-
+mantic perspectives. Our results highlight the
+strengths and shortcomings of current LLMs
+in KG construction and identify key challenges
+for future work. To advance research in this
+area, we also release a curated dataset of LLM-
+generated KGs derived from research papers
+on children’s mental well-being. This resource
+aims to foster more transparent, reliable, and
+impactful applications in high-stakes domains
+such as healthcare.
+
+1 Introduction
+
+Knowledge graphs, a widely used knowledge rep-
+resentation approach comprising entities and rela-
+tionships, are instrumental in storing factual infor-
+mation (Vrande¢ié and Krétzsch, 2014; Pan et al.,
+2024). Leveraging knowledge graphs as a source
+of external information has shown promising po-
+tential in mitigating hallucinations in large lan-
+guage models (LLMs) (Agrawal et al., 2024; Sui
+et al., 2025) and enabling more effective knowl-
+edge editing (Chen et al., 2024c). The automatic
+construction of knowledge graphs remains an ac-
+tive area of research, with challenges such as re-
+
+ducing schema dependency and addressing en-
+tity deduplication (Zhang and Soh, 2024). Cur-
+rently, knowledge graphs are typically built ei-
+ther by generating data using LLMs (Wu et al.,
+2024) or by extracting factual information from
+documents (Chen et al., 2024b; Zhang and Soh,
+2024). In this work, we focus on the latter ap-
+proach—constructing knowledge graphs grounded
+in verifiable facts—as a means of advancing trust-
+worthy AI systems (Chatila et al., 2021; Li et al.,
+2023; Huang et al., 2024). This fact-based con-
+struction paradigm also represents the mainstream
+methodology in knowledge graph construction.
+
+While the existing knowledge graph construction
+methods are effective for information extraction
+(Zhang et al., 2022; Chen and Bertozzi, 2023; Zhu
+et al., 2024; Zhang and Soh, 2024), we contend that
+knowledge graph construction involves more than
+just extracting facts. In addition to high-quality re-
+lational triple extraction, tasks such as coreference
+resolution, entity and relation deduplication, and
+source tracing are critical for building meaningful
+and coherent knowledge graphs. Although there is
+a common perception that domain-specific applica-
+tions typically come with predefined schemas or on-
+tologies (Chen et al., 2024b; Niu et al., 2025), this
+is not always the case. In fact, even some domain
+applications may lack a well-defined ontology, and
+constructing one for general-purpose applications
+remains particularly challenging due to their broad
+and diverse nature. Furthermore, we argue that
+current evaluation methods require improvement
+(Zhang and Soh, 2024), rather than relying solely
+on token-level comparisons (Castro Ferreira et al.,
+2020), evaluations should incorporate semantic-
+level assessments to better reflect the actual quality
+and utility of the constructed knowledge graphs.
+
+To build a knowledge graph that is both easy
+to interpret and effective for downstream applica-
+tions such as chatbots, we identify the following
+essential components:
+
+
+Abstraction
+
+Triples from Abstraction
+
+(infant television viewing at 12 months of age, is_an_instance_of, infant media exposure),
+(coginitive skills at 4.5 years of age, is_an_instance_of, child cognitive development)
+(source_file: abstract)
+
+Triples from Splitting
+
+(association between infant television viewing at 12 months of age and cognitive skills at 4.5
+
+years of age, reference, infant television viewing at 12 months of age),
+(association between infant television viewing at 12 months of age and cognitive skills at 4.5
+
+[] Entity De-Duplication
+
+Splitting
+
+years of age, reference, cognitive skills at 4.5 years of age),
+
+(perinatal, child, and family variables, reference, family variables),
+(perinatal, child, and family variables, reference, perinatal variables),
+(perinatal, child, and family variables, reference, child variables)
+
+(source_file: split)
+
+fy
+
+Triples from Initial Extraction
+Initial
+
+: 4.5 years of age),
+Extraction
+
+(infant television viewing at 12 months of age, is negatively associated with, cognitive skills at
+
+(association between infant television viewing at 12 months of age and cognitive skills at 4.5
+
+years of age, remains after correction for, perinatal, child, and family variables)
+
+(source_file: g0229_discussion_level_1)
+
+fy
+
+Sample Sentence
+
+Infant television viewing at 12 months of age is negatively associated with cognitive skills at 4.5
+years of age. This association remains even after correction for perinatal, child, and family
+
+variables.
+
+Figure 1: Overview of our hierarchical framework for knowledge graph construction, which integrates relational
+triple extraction, coreference resolution, entity de-duplication, and source tracing. The process involves three
+steps: (1) extracting information, (2) decomposing composite mentions, and (3) identifying underlying concepts.
+“source_file” denotes triples from the discussion section of Aishworiya et al. (2019) (paper ID “g0229”), while
+“split” and “abstract” refer to triples from stages independent of specific papers, and thus without paper IDs.
+
+¢ High-quality relational triple extraction
+(Zhang and Soh, 2024): A knowledge graph
+is fundamentally composed of triples in the
+form of (head entity, relation, tail entity),
+which should ideally correspond to meaning-
+ful, natural-language sentences. Since these
+triples form the core of the graph, their quality
+is critical for ensuring interpretability and ef-
+fectiveness in downstream applications, such
+as question answering.
+
+¢ Coreference resolution (Wang and Li, 2020):
+Documents often contain pronouns and other
+referring expressions. Resolving these corefer-
+ences is essential for accurately linking infor-
+mation about the same entity across multiple
+sentences, thereby preserving the integrity and
+completeness of entity representations.
+
+¢ Entity and relation de-duplication (Zhang
+and Soh, 2024): Entities and relations may ap-
+pear in different textual forms while referring
+to the same underlying concept. Identifying
+and merging such duplicates helps reduce re-
+dundancy and improves the connectivity and
+coherence of the knowledge graph.
+
+¢ Source tracing: Preserving the source of in-
+
+formation during extraction is crucial for sup-
+porting downstream applications. For exam-
+ple, answers with clearly traceable sources im-
+prove reliability and trustworthiness, and facil-
+itate debugging when errors occur. Moreover,
+incorporating triples extracted from the same
+section as the relevant triple during down-
+stream tasks such as question answering can
+lead to more comprehensive responses.
+
+As illustrated in Figure 1, we propose a prompt-
+based bottom-up approach (TamaSauskaité and
+Groth, 2023; Zhao et al., 2023) that incorporates the
+above components for knowledge graph construc-
+tion. This involves first extracting specific pieces
+of information and gradually abstracting them into
+higher-level concepts. By doing so, we avoid the
+need to rely on a predefined schema. We lever-
+age LLMs to build knowledge graphs using our
+approach and conduct a thorough analysis and eval-
+uation of their performance from both structure and
+semantics. Our key contributions are as follows:
+
+¢ To construct a knowledge graph that is both in-
+terpretable and effective for downstream tasks,
+we propose a prompt-based hierarchical ap-
+proach that integrates relational triple extrac-
+tion, coreference resolution, entity and rela-
+
+
+tion de-duplication, and source tracing.
+
+e We evaluate the performance of different
+LLMs on the knowledge graph construction
+task, offering a detailed analysis of their ef-
+fectiveness and identifying areas for further
+improvement.
+
+¢ We release a set of LLM-generated knowledge
+graphs constructed from research papers fo-
+cused on children’s mental well-being. We
+hope this dataset will support more trustwor-
+thy and impactful research in high-stakes do-
+mains such as healthcare.
+
+2 Related Work
+
+A knowledge graph is a structured way of organiz-
+ing and storing information, where entities are rep-
+resented as nodes and their relationships as edges in
+a graph. Knowledge graphs can enhance LLMs by
+providing external information for inference, verifi-
+cation, and interpretability. However, constructing
+a clear and useful knowledge graph is challenging,
+as it involves multiple tasks such as named entity
+recognition and relation extraction (Ye et al., 2022;
+Pan et al., 2024). With the rise of LLMs, it has
+become feasible to perform all these tasks within
+a single framework, making it easier to build an
+effective knowledge graph. In the following sec-
+tions, we review several promising approaches that
+leverage LLMs for knowledge graph construction.
+
+Some research focuses on domain-specific data.
+For example, Agrawal et al. (2022) demonstrate
+that LLMs can perform well in zero- and few-shot
+information extraction from clinical text when the
+schema is explicitly provided in the prompt. In
+contrast, Chen et al. (2024b) address open infor-
+mation extraction and propose a general frame-
+work for knowledge graph construction, SAC-KG,
+which leverages LLMs as Skilled Automatic Con-
+structors for building domain-specific knowledge
+graphs. The framework consists of three key com-
+ponents: Generator, Verifier, and Pruner. Given
+an entity, the Generator uses in-context learning to
+generate related relations and tail entities from raw
+domain corpora. The Verifier is a rule-based com-
+ponent designed to efficiently detect and correct
+errors in the generated knowledge graph. Finally,
+the Pruner is a fine-tuned T5 (Raffel et al., 2020)
+binary classifier that determines whether a gener-
+ated tail entity should be further expanded. Niu
+et al. (2025) introduced Tree-KG, a framework that
+
+leverages LLMs to construct tree-structured graphs
+aligned with textbook hierarchies. It subsequently
+performs iterative expansions using flexible, prede-
+fined operators to reveal hidden knowledge graphs
+while maintaining semantic coherence.
+
+There is also work focused on open-domain
+data. For example, Bi et al. (2024) address know!-
+edge graph construction using a code language
+model, where triples are generated from natural
+language inputs formatted as code. This trans-
+forms the task of knowledge graph construction
+into a code completion problem. To support this
+approach, schema-aware prompts are designed to
+effectively leverage the semantic structure of the
+knowledge graph. Similarly, Zhang and Soh (2024)
+focus on the task of relational triplet extraction and
+propose a three-phase framework called Extract-
+Define-Canonicalize (EDC). This approach enables
+the construction of high-quality knowledge graphs
+using a concise, self-generated schema, making it
+particularly effective in scenarios where a fixed,
+pre-defined schema is unavailable. However, this
+approach has primarily been evaluated on sentence-
+level datasets.
+
+3 Hierarchical Knowledge Graph
+Construction
+
+In this section, we present our approach for prompt-
+ing LLMs to construct knowledge graphs. In ad-
+dition to recording the sources of extracted triples,
+our method comprises the following components:
+
+¢ Hierarchical Information Extraction,
+which enables the generation of both compre-
+hensive triples that capture the meaning of a
+sentence and atomic entities that can serve as
+linking points across different sources.
+
+Coreference-Aware Prompting, which
+guides LLMs to resolve references—such as
+pronouns—into meaningful entities, avoiding
+ambiguous or incomplete triples.
+
+Entity Consistency Prompting, which is a
+strategy designed to encourage LLMs to pro-
+duce consistent entity representations across
+different stages of information extraction
+when the underlying meanings are the same.
+This component helps mitigate issues related
+to inconsistent entity naming and enhances
+graph connectivity. Although we do not delve
+into the details of relation consistency prompt-
+
+
+ing in this paper, we believe it can be imple-
+mented in a similar manner.
+
+3.1 Hierarchical Information Extraction
+
+In a knowledge graph, a node may represent more
+than just a single concept/instance—it can also cor-
+respond to a sentence or phrase (Wu et al., 2024).
+In our approach, we first convert each sentence
+into a triple that captures its meaning (initial ex-
+traction). An example extracted from Aishworiya
+et al. (2019) is illustrated in Figure 1. We also
+enable LLMs to generate the properties of each
+node, making the nodes more structured and easier
+to understand. This coarse-level extraction offers
+several advantages. First, the inclusion of source
+information makes it easier for humans to under-
+stand the main message and verify the correctness
+of the extracted content. Second, these triples can
+be directly incorporated into prompts to reduce hal-
+lucination in LLMs and support citation-backed
+responses (Gao et al., 2023). However, integrating
+information from multiple sources at this coarse
+level is often challenging, resulting in many iso-
+lated subgraphs (“islands’’). To address this, we in-
+troduce two fine-grained extraction steps. The first
+is splitting, where compound node content such as
+“A and B” is divided into separate nodes “A” and
+“B.” The second is abstraction, which identifies
+generalized parent concepts—for example, extract-
+ing the ancestor “B” from a node like “A specific
+B.” These fine-grained operations can serve as a
+bottom-up approach to constructing the ontology
+of a knowledge graph, making it easier to inte-
+grate information from diverse sources at a more
+granular level. Additionally, by attaching source
+information to each triple, we enable flexible filter-
+ing for different applications. For instance, when
+answering specific questions, only the information
+extracted in the initial stage may be required. Fur-
+thermore, when a triple is retrieved, related triples
+extracted from the same section can also be pre-
+sented to offer more comprehensive context.
+
+3.2 Coreference-Aware Prompting
+
+During the initial extraction, our goal is not only
+to preserve the full meaning of each sentence but
+also to resolve coreferences that may obscure the
+underlying semantics. To achieve this, we incor-
+porate explicit instructions in the prompt for the
+LLMs to perform coreference resolution using the
+surrounding context. This step is especially crucial
+when dealing with pronouns or ambiguous phrases,
+
+Figure 2: Connected Graph Resulting from Hierarchi-
+cal Knowledge Graph Construction. The orange edges
+represent relationships extracted during the initial stage,
+while the grey edges are generated in the splitting stage.
+
+which often refer to complex concepts introduced
+earlier in the text. By resolving such references, we
+ensure that the extracted information is both com-
+plete and self-contained. Consider the sentence
+containing the phrase “this association” shown in
+Figure 1, without coreference resolution, the mean-
+ing of this phrase would be unclear in isolation.
+However, through our process, “this association”
+is resolved and extracted as “association between
+infant television viewing at 12 months of age and
+cognitive skills at 4.5 years of age.’ This allows
+the resulting knowledge graph to more accurately
+reflect the intended meaning of the source text and
+enhances both human interpretability and machine
+usability in downstream tasks.
+
+3.3 Entity Consistency Prompting
+
+As observed from the triples extracted during the
+initial stage, certain semantic relationships are cap-
+tured, but not fully reflected in the graph struc-
+ture. For example, the node labeled “association
+between infant television viewing at 12 months of
+age and cognitive skills at 4.5 years of age” in Fig-
+ure | clearly refers to the relationship between two
+entities: “infant television viewing at 12 months
+of age” and “cognitive skills at 4.5 years of age.”
+However, despite this implicit connection, these
+entities are not linked in the knowledge graph at
+this stage. This disconnect can limit the graph’s
+usefulness for both human interpretation and auto-
+mated reasoning (Malaviya et al., 2020; Nguyen
+et al., 2020; Peng et al., 2023; Zamini et al., 2022).
+
+To address this issue during the splitting stage,
+we input the entities extracted in the initial stage
+into the prompt and instruct the LLMs to normal-
+ize entity representations—encouraging that identi-
+cal concepts are expressed in the same way across
+different triples. This helps establish explicit con-
+
+
+Models Initial Extraction Splitting Abstraction
+A C R A C R A C R
+
+GPT-3.5-Turbo 3.79/5 | 4.13/5 | 4.58/5 | 4.80/5 | 4.80/5 | 4.81/5 | 4.79/5 | 4.71/5 | 4.89/5
+GPT-40 4.48/5 | 4.83/5 | 4.96/5 | 4.73/5 | 4.73/5 | 4.81/5 | 4.99/5 | 4.99/5 | 4.99/5
+04-mini 4.74/5 | 4.92/5 | 4.98/5 | 4.79/5 | 4.79/5 | 4.86/5 | 4.99/5 | 4.98/5 | 4.99/5
+Gemini-2.0-Flash | 4.23/5 | 4.57/5 | 4.85/5 | 4.72/5 | 4.72/5 | 4.85/5 | 4.92/5 | 4.88/5 | 4.97/5
+Gemini-2.5-Flash | 4.69/5 | 4.93/5 | 4.95/5 | 4.60/5 | 4.61/5 | 4.79/5 | 4.95/5 | 4.93/5 | 4.98/5
+LLaMA-3.1-405B | 4.40/5 | 4.75/5 | 4.92/5 | 4.60/5 | 4.61/5 | 4.74/5 | 4.94/5 | 4.92/5 | 4.98/5
+
+Table 1: Performance of the hierarchical information extraction process, including initial extraction, splitting, and
+abstraction. Evaluation is based on three criteria: accuracy (A), comprehensiveness (C), and relevance (R). For
+splitting and abstraction, the performance is calculated over all entities, regardless of whether they actually required
+
+splitting or abstraction.
+
+nections between semantically related nodes and
+improves the overall coherence and connectivity of
+the graph. Corresponding to the initial and splitting
+stages shown in Figure 1, Figure 2, generated in
+Neo4j!, depicts the connected graph produced by
+the hierarchical extraction process.
+
+4 Experiments
+
+In this section, we provide detailed information
+about the datasets used, the evaluated LLMs, im-
+plementation specifics, and an in-depth analysis.
+
+4.1 Datasets and LLMs
+
+In this study, we assess the ability of LLMs to build
+a knowledge graph using our proposed method.
+To this end, we assembled a test set of 3,216 sen-
+tences drawn from 17 peer-reviewed articles on
+factors influencing children’s mental health. We
+consider this a more challenging document-level
+dataset, as it includes complex domain-specific vo-
+cabulary and long, intricate sentences. We eval-
+uated six LLMs across three families—OpenAI’s
+GPT-3.5-turbo, GPT-40, and 04-mini?; Google’s
+Gemini 2.0 Flash and Gemini 2.5 Flash?; and
+Meta’s Llama-3.1-405B*—without providing any
+examples in the prompt. This zero-shot setting
+allows us to rigorously compare each model’s in-
+herent accuracy, comprehensiveness, and relevance
+in extracting triples directly from text.
+
+'https://neo4j.com/
+*https://platform.openai.com/docs/models
+$https://ai.google.dev/gemini-api/docs/models
+“https://www.llama.com/models/Ilama-3/
+
+4.2 Implementation Details
+
+During the initial information extraction, we pro-
+cess the text in batches of three sentences from each
+paper. This helps prevent information loss caused
+by long input texts (Liu et al., 2024; Raffel et al.,
+2020; Edge et al., 2024) and reduces the likelihood
+of LLMs getting stuck in extended reasoning. For
+each extraction, we include the previous three sen-
+tences as context to improve coherence.
+
+During the splitting stage, we provide the LLMs
+with the triples extracted in the initial stage. To
+reduce the cost associated with long prompts, we
+introduce a lightweight filtering step: the LLM first
+decides whether further splitting is necessary and
+only proceeds with splitting when needed. We per-
+form abstraction for all entities, including those
+extracted initially and those generated during the
+splitting stage. Similar to the splitting process, we
+apply a filtering step to determine whether abstrac-
+tion is required before executing it.
+
+4.3 Evaluation
+
+We propose evaluating the knowledge graph from
+both structural and semantic perspectives. Struc-
+turally, an effective knowledge graph should have
+well-connected nodes, minimizing isolated sub-
+graphs ("islands"). Such connectivity facilitates
+complete graph traversal and supports effective
+multi-hop reasoning. To measure structural con-
+nectivity quantitatively, we primarily focus on the
+fraction in giant component, defined as follows:
+
+Cmax
+Fraction in Giant Component = | Vv | (1)
+where Cyyax denotes the largest weakly connected
+component, and V represents the set of all nodes
+
+
+
+Models Splitting Abstraction
+
+A C R Split/All A C R Abstract/All
+GPT-3.5-Turbo 4.09/5 | 4.08/5 | 4.40/5 | 437/8858 | 4.75/5 | 4.65/5 | 4.87/5 | 7409/9133
+GPT-40 4.13/5 | 4.16/5 | 4.48/5 | 2405/9872 | 4.96/5 | 4.93/5 | 4.99/5 | 276/12956
+04-mini 4.18/5 | 4.20/5 | 4.60/5 | 2016/12684 | 4.94/5 | 4.88/5 | 4.98/5 | 2153/14417
+Gemini-2.0-Flash | 3.55/5 | 3.53/5 | 4.35/5 | 962/6045 | 4.87/5 | 4.81/5 | 4.95/5 | 4269/6980
+Gemini-2.5-Flash | 3.65/5 | 3.66/5 | 4.42/5 | 3433/14166 | 4.88/5 | 4.81/5 | 4.95/5 | 6327/15763
+LLaMA-3.1-405B | 3.69/5 | 3.72/5 | 4.24/5 | 2518/9683 | 4.77/5 | 4.71/5 | 4.91/5 | 3152/11664
+
+Table 2: Performance of the splitting and abstraction stages evaluated on positive samples, i.e., entities identified by
+the LLMs as requiring splitting or abstraction. Entities deemed unnecessary are excluded. Along with accuracy (A),
+comprehensiveness (C), and relevance (R), we also report split/all and abstract/all, representing the proportion of all
+entities the LLMs marked for splitting or abstraction, respectively.
+
+in the graph. Typically, a higher value for this met-
+ric is desirable, indicating that a larger proportion
+of nodes reside within the primary connected sub-
+graph, thereby reducing fragmentation into smaller
+isolated components.
+
+Since our knowledge graph construction is not
+constrained by predefined schemas or ontologies,
+and there is no single “correct” graph, we do not
+provide golden triples for semantic evaluation. In-
+stead, we employ LLMs as evaluators (Chen et al.,
+2024b; Li et al., 2024) to assess multiple quality
+aspects of the generated knowledge graph. Specifi-
+cally, we use GPT-4.1° , a state-of-the-art general-
+purpose model with extensive world knowledge
+and strong capabilities in interpreting user intent.
+We evaluate outputs across three stages—initial ex-
+traction, splitting, and abstraction—using the met-
+rics of accuracy, comprehensiveness, and relevance.
+For example, in the initial extraction stage, these
+metrics are defined as follows:
+
+¢ Accuracy: Do the triples’ head/tail texts and
+their properties exactly reflect the sentence
+(correct meaning, correct boundaries, factual
+alignment), and are relations precisely la-
+beled?
+
+Comprehensiveness: Do the triples collec-
+tively cover all distinct factual/relational infor-
+mation present in the sentence (no important
+fact missing)?
+
+Relevance: Are the triples free of information
+not grounded in the sentence (no hallucinated
+entities, properties, or relations)?
+
+*https://openai.com/index/gpt-4-1/
+
+Each metric is scored on an integer scale from 0
+to 5, where 0 indicates completely incorrect output
+and 5 indicates a perfect match with the defined
+criteria.
+
+4.4 Main Result
+
+Table | presents the accuracy, comprehensiveness,
+and relevance scores across the initial extraction,
+splitting, and abstraction stages. The results for the
+splitting and abstraction stages in this table are cal-
+culated based on all entities, regardless of whether
+further splitting or abstraction was performed. In
+contrast, Table 2 reports performance on positive
+samples only—that is, entities the LLM identified
+as requiring additional splitting or abstraction. Ta-
+ble 3 provides structural statistics of the generated
+knowledge graphs, including the number of nodes
+and edges, as well as the proportion of the graph
+contained within the giant component. Key insights
+from these tables are as follows:
+
+¢ Model performance improves with ad-
+vancement. For instance, within the GPT
+family, the reasoning model outperforms GPT-
+40, which in turn surpasses GPT-3.5-Turbo
+in the initial extraction stage. However, it’s
+important to note that the reasoning model
+operates significantly slower than the others.
+
+Initial extraction shows strength in rele-
+vance but needs improvement in accuracy.
+LLMs generally perform well in generating
+relevant triples that avoid unrelated informa-
+tion. However, they are less effective at pro-
+ducing comprehensive triples, and accuracy
+remains the key limitation.
+
+
+Models Initial Extraction With Splitting With Splitting and Abstraction
+Fec | Nodes/Edges | Feo | Nodes/Edges | Fec Nodes/Edges
+GPT-3.5-Turbo 0.309 | 9547/8084 | 0.396 | 10439 /9473 | 0.927 15192 / 19759
+GPT-40 0.249 | 12908 / 11162 | 0.415 | 18261 / 17980 | 0.441 18604 / 18437
+04-mini 0.794 | 15612 / 17648 | 0.861 | 19322 / 23264 | 0.909 20692 / 26245
+Gemini-2.0-Flash | 0.463 | 9433/8564 | 0.618 | 10520/ 10988 | 0.837 12947 / 15938
+Gemini-2.5-Flash | 0.642 | 15694 / 16932 | 0.782 | 19211 / 23256 | 0.858 21462 / 29171
+LLaMA-3.1-405B | 0.422 | 12213 / 10979 | 0.626 | 17375 / 17989 | 0.709 21656 / 22933
+
+Table 3: Structural statistics of all LLM-generated knowledge graphs, including the number of nodes and edges, as
+
+well as the fraction in the giant component (Fac).
+
+¢ Different LLMs produce knowledge graphs
+with notably different structures. For ex-
+ample, after initial extraction, GPT-3.5-Turbo
+generates a graph with 9,547 nodes and 8,084
+edges, whereas 04-mini produces 15,612
+nodes and 17,648 edges.
+
+LLMs vary widely in their approach to
+splitting and abstraction. As shown in Ta-
+ble 2, GPT-40 determines that only 276 out
+of 12,956 node texts need abstraction, while
+GPT-3.5-Turbo identifies 7,409 out of 9,133
+node texts as needing abstraction.
+
+Improved connectivity through _fine-
+grained extraction. As shown by the
+changes in the ’fraction in giant component’
+reported in Table 3, the nodes become increas-
+ingly connected as the extraction process
+advances to finer-grained levels—specifically,
+the split and abstraction stages—consistent
+with our goal of hierarchical information
+extraction described in Section 3.1.
+
+4.5 Analytical Insights Post Manual
+Validation
+
+LLM-based evaluation offers scalability and the
+ability to provide reasons behind assigned scores.
+However, concerns may arise regarding potential
+limitations or biases of the LLM acting as the eval-
+uator (Chen et al., 2024a, 2025). To mitigate this,
+we manually reviewed the scoring outputs and ob-
+served the following findings.
+
+¢ In most cases, the LLM assigns scores appro-
+priately and offers well-reasoned justifications.
+Notably, it considers redundancy within the
+triples as a factor in accuracy evaluation, de-
+
+Methods A C R
+iText2KG 3.34/5 3.85/5 3.77/5
+Ours 4.34/5 4.72/5 4.91/5
+
+Table 4: Comparison of our method with iText2KG on
+a subset of our paper dataset, evaluated on accuracy
+(A), comprehensiveness (C), and relevance (R). The
+extraction was conducted using the GPT-40.
+
+spite this criterion not being explicitly defined
+in the evaluation metrics.
+
+Sometimes, the LLM evaluator, GPT-4.1,
+tends to overestimate extraction results, par-
+ticularly during the splitting and abstraction
+stages. For instance, GPT-3.5-Turbo occasion-
+ally fails to separate list items properly, yet
+GPT-4.1 still assigns it the highest scores for
+accuracy, comprehensiveness, and relevance.
+
+4.6 Comparative Analysis with Prior Work
+
+As noted in related work, recent methods for knowl-
+edge graph construction yield promising results,
+but our approach cannot be directly compared to
+them due to differences in design, scope, and ac-
+cessibility. For example, Niu et al. (2025) rely
+on predefined schemas, Zhang and Soh (2024) ad-
+dress only sentence-level extraction, and Chen et al.
+(2024b) did not release code or datasets, limiting
+reproducibility.
+
+To demonstrate the effectiveness of our hierarchi-
+cal approach, we selected iText2KG (Lairgi et al.,
+2025), a state-of-the-art method that also extracts
+triples from documents and provides publicly avail-
+able code. We applied iText2KG to a paper from
+our dataset and evaluated the results using GPT-
+4.1. Since iText2KG does not support hierarchical
+
+
+extraction, we restrict our comparison to the ini-
+tial extraction stage. Table 4 compares the two
+methods using GPT-40, showing that our approach
+outperforms iText2KG in accuracy, comprehensive-
+ness, and relevance. A more detailed qualitative
+analysis is provided in Appendix F. Notably, we ob-
+serve that many existing approaches produce overly
+fine-grained triples, where each triple conveys only
+partial information. This makes it difficult to in-
+tegrate knowledge for downstream tasks such as
+question answering—a limitation also evident in
+prior work (Chen et al., 2024b; Niu et al., 2025).
+
+5 Discussion and Outlook
+
+In this paper, we propose a hierarchical knowl-
+edge graph construction approach and evaluate six
+LLMs from three different families, including mod-
+els with and without reasoning capabilities. Our
+findings reveal that the structure of the knowledge
+graphs generated by different LLMs varies signif-
+icantly. However, most models produce semanti-
+cally satisfactory results. Among them, the reason-
+ing model performs the best, as shown in Table
+1, though it requires significantly more processing
+time compared to the others.
+
+As previously noted, knowledge graph construc-
+tion is a complex task involving several subtasks,
+such as relational triple extraction and coreference
+resolution. LLMs simplify this process and im-
+prove overall performance. Manual analysis indi-
+cates that the extracted triples are generally human-
+interpretable. Nevertheless, further work is needed
+to enhance support for downstream tasks in the
+following aspects.
+
+¢ Further analysis should focus on enabling
+LLMs to identify and extract only the most
+important information, rather than processing
+every sentence indiscriminately. For example,
+when applied to research papers, the meth-
+ods should aim to extract key insights such
+as the core contributions, main experimental
+settings, and other essential details.
+
+e Although the extracted semantics are often
+correct and clear, information from the same
+paragraph is sometimes not properly linked
+within the knowledge graph. More effort is
+needed to develop methods that not only ex-
+tract information accurately but also ensure it
+is well-connected and consistent throughout
+the graph.
+
+¢ Compared to the initial information extrac-
+tion stage, greater effort is required during
+the splitting and abstraction phases. Accurate
+schema generation helps group related entities
+into coherent clusters. Moreover, effective ab-
+straction provides a clearer overview of the
+knowledge graph’s scope, and make it easier
+to integrate with other data sources.
+
+¢ How to input long texts into LLMs in their
+entirety while obtaining accurate, comprehen-
+sive, and relevant results remains an open re-
+search question. Focusing on only a few sen-
+tences at a time may lead to missed corefer-
+ence links, especially when pronouns refer to
+entities mentioned outside the local context.
+Additionally, prompting LLMs with all enti-
+ties from a knowledge graph could help unify
+entity representations more effectively. How-
+ever, this approach may not be feasible when
+dealing with large-scale knowledge graphs.
+Therefore, filtering strategies are necessary.
+Furthermore, LLMs must be able to distin-
+guish between entities that appear similar but
+should not be merged.
+
+6 Conclusion
+
+In this paper, we examine key components involved
+in knowledge graph construction—including re-
+lational triple extraction, coreference resolution,
+entity and relation deduplication, and source trac-
+ing—and propose a hierarchical approach that ex-
+plicitly incorporates these elements. Our aim is to
+preserve the original meaning of sentences while
+abstracting and unifying concepts to connect in-
+formation across diverse sources. Using this ap-
+proach, we employed several LLMs from different
+model families in a zero-shot setting to construct
+knowledge graphs from academic papers on men-
+tal health. We evaluated the resulting knowledge
+graphs from both structural and semantic perspec-
+tives, incorporating detailed analysis and human-in-
+the-loop validation. Our findings show that LLMs
+can extract meaningful triples in most cases, and
+the resulting knowledge graphs provide a strong
+foundation for further research. However, we em-
+phasize that human verification remains essential
+for achieving "gold standard" knowledge graphs
+that more accurately represent complex informa-
+tion. Finally, we outline several directions for fu-
+ture work to improve the effectiveness and scalabil-
+ity of knowledge graph construction using LLMs.
+
+
+Limitations
+
+Due to budget constraints, we selected a limited
+number of high-capability, cost-effective models
+for testing. In addition, since the primary focus of
+this paper is on knowledge graph construction, we
+primarily employ LLMs as evaluators, with human
+judgment used for validation. A more comprehen-
+sive assessment of knowledge graph quality—such
+as evaluating performance on downstream tasks
+(Heist et al., 2023)—is left for future work.
+
+References
+
+Garima Agrawal, Tharindu Kumarage, Zeyad Alghamdi,
+and Huan Liu. 2024. Can knowledge graphs reduce
+hallucinations in LLMs? : A survey. In Proceed-
+ings of the 2024 Conference of the North American
+Chapter of the Association for Computational Lin-
+guistics: Human Language Technologies (Volume
+1: Long Papers), pages 3947-3960, Mexico City,
+Mexico. Association for Computational Linguistics.
+
+Monica Agrawal, Stefan Hegselmann, Hunter Lang,
+Yoon Kim, and David Sontag. 2022. Large language
+models are few-shot clinical information extractors.
+In Proceedings of the 2022 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+1998-2022, Abu Dhabi, United Arab Emirates. Asso-
+ciation for Computational Linguistics.
+
+Ramkumar Aishworiya, Shirong Cai, Helen Y Chen,
+Desiree Y Phua, Birit FP Broekman, Lourdes Mary
+Daniel, Yap Seng Chong, Lynette P Shek, Fabian
+Yap, Shiao-Yng Chan, and | others. 2019. Television
+viewing and child cognition in a longitudinal birth co-
+hort in singapore: the role of maternal factors. BMC
+pediatrics, 19(1):286.
+
+Zhen Bi, Jing Chen, Yinuo Jiang, Feiyu Xiong, Wei Guo,
+Huajun Chen, and Ningyu Zhang. 2024. Codekgc:
+Code language model for generative knowledge
+graph construction. ACM Trans. Asian Low-Resour.
+Lang. Inf. Process., 23(3).
+
+Thiago Castro Ferreira, Claire Gardent, Nikolai Ilinykh,
+Chris van der Lee, Simon Mille, Diego Moussallem,
+and Anastasia Shimorina. 2020. The 2020 bilingual,
+bi-directional WebNLG+ shared task: Overview and
+evaluation results (WebNLG+ 2020). In Proceed-
+ings of the 3rd International Workshop on Natu-
+ral Language Generation from the Semantic Web
+(WebNLG+), pages 55-76, Dublin, Ireland (Virtual).
+Association for Computational Linguistics.
+
+Raja Chatila, Virginia Dignum, Michael Fisher, Fosca
+Giannotti, Katharina Morik, Stuart Russell, and
+Karen Yeung. 2021. Trustworthy ai. Reflections
+on artificial intelligence for humanity, pages 13-39.
+
+Bohan Chen and Andrea L Bertozzi. 2023. Autokg:
+Efficient automated knowledge graph generation for
+
+language models. In 2023 IEEE International Con-
+ference on Big Data (BigData), pages 3117-3126.
+IEEE.
+
+Guiming Hardy Chen, Shunian Chen, Ziche Liu, Feng
+Jiang, and Benyou Wang. 2024a. Humans or LLMs
+as the judge? a study on judgement bias. In Proceed-
+ings of the 2024 Conference on Empirical Methods
+in Natural Language Processing, pages 8301-8327,
+Miami, Florida, USA. Association for Computational
+Linguistics.
+
+Hanzhu Chen, Xu Shen, Qitan Lv, Jie Wang, Xiaoqi
+Ni, and Jieping Ye. 2024b. SAC-KG: Exploiting
+large language models as skilled automatic construc-
+tors for domain knowledge graph. In Proceedings
+of the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 4345-4360, Bangkok, Thailand. Association
+for Computational Linguistics.
+
+Ruirui Chen, Weifeng Jiang, Chengwei Qin,
+Ishaan Singh Rawal, Cheston Tan, Dongkyu
+Choi, Bo Xiong, and Bo Ai. 2024c. LLM-based
+multi-hop question answering with knowledge graph
+integration in evolving environments. In Findings
+of the Association for Computational Linguistics:
+EMNLP 2024, pages 14438-14451, Miami, Florida,
+USA. Association for Computational Linguistics.
+
+Ruirui Chen, Weifeng Jiang, Chengwei Qin, and Che-
+ston Tan. 2025. Theory of mind in large language
+models: Assessment and enhancement. In Proceed-
+ings of the 63rd Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long Pa-
+pers), pages 31539-31558, Vienna, Austria. Associa-
+tion for Computational Linguistics.
+
+Darren Edge, Ha Trinh, Newman Cheng, Joshua
+Bradley, Alex Chao, Apurva Mody, Steven Truitt,
+Dasha Metropolitansky, Robert Osazuwa Ness, and
+Jonathan Larson. 2024. From local to global: A
+graph rag approach to query-focused summarization.
+arXiv preprint arXiv:2404. 16130.
+
+Doris Fok, Izzuddin M Aris, Jiahui Ho, Sok Bee Lim,
+Mei Chien Chua, Wei Wei Pang, Seang-Mei Saw,
+Kenneth Kwek, Keith M Godfrey, Michael S Kramer,
+and | others. 2016. A comparison of practices during
+the confinement period among chinese, malay, and
+indian mothers in singapore. Birth, 43(3):247-254.
+
+Tianyu Gao, Howard Yen, Jiatong Yu, and Danqi Chen.
+2023. Enabling large language models to generate
+text with citations. In Proceedings of the 2023 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 6465-6488, Singapore. Associa-
+tion for Computational Linguistics.
+
+Nicolas Heist, Sven Hertling, and Heiko Paulheim.
+2023. Kgreat: A framework to evaluate knowledge
+graphs via downstream tasks. In Proceedings of
+the 32nd ACM International Conference on Informa-
+tion and Knowledge Management, CIKM ’23, page
+3938-3942, New York, NY, USA. Association for
+Computing Machinery.
+
+
+Yue Huang, Lichao Sun, Haoran Wang, Siyuan Wu,
+Qihui Zhang, Yuan Li, Chujie Gao, Yixin Huang,
+Wenhan Lyu, Yixuan Zhang, Xiner Li, Hanchi Sun,
+Zhengliang Liu, Yixin Liu, Yijue Wang, Zhikun
+Zhang, Bertie Vidgen, Bhavya Kailkhura, Caiming
+Xiong, and 52 others. 2024. Position: TrustLLM:
+Trustworthiness in large language models. In Pro-
+ceedings of the 41st International Conference on
+Machine Learning, volume 235 of Proceedings of
+Machine Learning Research, pages 20166-20270.
+PMLR.
+
+Yassir Lairgi, Ludovic Moncla, Rémy Cazabet, Khalid
+Benabdeslem, and Pierre Cléau. 2025. itext2kg: In-
+cremental knowledge graphs construction using large
+language models. In Web Information Systems En-
+gineering — WISE 2024, pages 214—229, Singapore.
+Springer Nature Singapore.
+
+Bo Li, Peng Qi, Bo Liu, Shuai Di, Jingen Liu, Jiquan
+Pei, Jinfeng Yi, and Bowen Zhou. 2023. Trustworthy
+ai: From principles to practices. ACM Computing
+Surveys, 55(9):1-46.
+
+Haitao Li, Qian Dong, Junjie Chen, Huixue Su, Yu-
+jia Zhou, Qingyao Ai, Ziyi Ye, and Yiqun Liu.
+2024. Lims-as-judges: A comprehensive sur-
+vey on Ilm-based evaluation methods. Preprint,
+arXiv:2412.05579.
+
+Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paran-
+jape, Michele Bevilacqua, Fabio Petroni, and Percy
+Liang. 2024. Lost in the middle: How language mod-
+els use long contexts. Transactions of the Association
+for Computational Linguistics, 12:157-173.
+
+Chaitanya Malaviya, Chandra Bhagavatula, Antoine
+Bosselut, and Yejin Choi. 2020. Commonsense
+knowledge base completion with structural and se-
+mantic context. In The Thirty-Fourth AAAI Con-
+ference on Artificial Intelligence, AAAI 2020, The
+Thirty-Second Innovative Applications of Artificial
+Intelligence Conference, IAAI 2020, The Tenth AAAI
+Symposium on Educational Advances in Artificial In-
+telligence, EAAI 2020, New York, NY, USA, February
+7-12, 2020, pages 2925-2933. AAAI Press.
+
+Hoang Long Nguyen, Dang Thinh Vu, and Jason J. Jung.
+2020. Knowledge graph fusion for smart systems: A
+survey. Information Fusion, 61:56—70.
+
+Songjie Niu, Kaisen Yang, Rui Zhao, Yichao Liu,
+Zonglin Li, Hongning Wang, and Wenguang Chen.
+2025. Tree-KG: An expandable knowledge graph
+construction framework for knowledge-intensive do-
+mains. In Proceedings of the 63rd Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume I: Long Papers), pages 18516-18529, Vienna,
+Austria. Association for Computational Linguistics.
+
+Shirui Pan, Linhao Luo, Yufei Wang, Chen Chen, Ji-
+apu Wang, and Xindong Wu. 2024. Unifying large
+language models and knowledge graphs: A roadmap.
+IEEE Transactions on Knowledge and Data Engi-
+neering, 36(7):3580-3599.
+
+Ciyuan Peng, Feng Xia, Mehdi Naseriparsa, and
+Francesco Osborne. 2023. Knowledge graphs:
+Opportunities and challenges. Artif. Intell. Rev.,
+56(11):13071-13102.
+
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+Wei Li, and Peter J. Liu. 2020. Exploring the limits
+of transfer learning with a unified text-to-text trans-
+former. J. Mach. Learn. Res., 21(1).
+
+Charles D Spielberger, Fernando Gonzalez-Reigosa, An-
+gel Martinez-Urrutia, Luiz FS Natalicio, and Diana S
+Natalicio. 1971. The state-trait anxiety inventory.
+Revista Interamericana de Psicologia/Interamerican
+journal of psychology, 5(3 & 4).
+
+Yuan Sui, Yufei He, Zifeng Ding, and Bryan Hooi. 2025.
+Can knowledge graphs make large language models
+more trustworthy? an empirical study over open-
+ended question answering. In ICLR 2025 Workshop
+on Building Trust in Language Models and Applica-
+tions.
+
+Gyté TamaSauskaité and Paul Groth. 2023. Defining
+a knowledge graph development process through a
+systematic review. ACM Transactions on Software
+Engineering and Methodology, 32(1):1—40.
+
+Bayu Distiawan Trisedya, Gerhard Weikum, Jianzhong
+Qi, and Rui Zhang. 2019. Neural relation extrac-
+tion for knowledge base enrichment. In Proceedings
+of the 57th Annual Meeting of the Association for
+Computational Linguistics, pages 229-240, Florence,
+Italy. Association for Computational Linguistics.
+
+Denny Vrandecié and Markus Krotzsch. 2014. Wiki-
+data: a free collaborative knowledgebase. Communi-
+cations of the ACM, 57(10):78-85.
+
+Tai Wang and Huan Li. 2020. Coreference resolution
+improves educational knowledge graph construction.
+In 2020 IEEE International Conference on Knowl-
+edge Graph (ICKG), pages 629-634.
+
+Jincenzi Wu, Zhuang Chen, Jiawen Deng, Sahand
+Sabour, Helen Meng, and Minlie Huang. 2024.
+COKE: A cognitive knowledge graph for machine
+theory of mind. In Proceedings of the 62nd An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 15984—
+16007, Bangkok, Thailand. Association for Compu-
+tational Linguistics.
+
+Hongbin Ye, Ningyu Zhang, Hui Chen, and Huajun
+Chen. 2022. Generative knowledge graph construc-
+tion: A review. In Proceedings of the 2022 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 1-17, Abu Dhabi, United Arab
+Emirates. Association for Computational Linguistics.
+
+Mohamad Zamini, Hassan Reza, and Minou Rabiei.
+2022. A review of knowledge graph completion.
+Information, 13(8).
+
+
+Bowen Zhang and Harold Soh. 2024. Extract, define,
+canonicalize: An LLM-based framework for know]-
+edge graph construction. In Proceedings of the 2024
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 9820-9836, Miami, Florida,
+USA. Association for Computational Linguistics.
+
+Ningyu Zhang, Xin Xu, Liankuan Tao, Haiyang Yu,
+Hongbin Ye, Shuofei Qiao, Xin Xie, Xiang Chen,
+Zhoubo Li, and Lei Li. 2022. DeepKE: A deep learn-
+ing based knowledge extraction toolkit for knowledge
+base population. In Proceedings of the 2022 Con-
+ference on Empirical Methods in Natural Language
+Processing: System Demonstrations, pages 98-108,
+Abu Dhabi, UAE. Association for Computational
+Linguistics.
+
+Zhigang Zhao, Xiong Luo, Maojian Chen, and Ling Ma.
+2023. A survey of knowledge graph construction
+using machine learning. CMES - Computer Modeling
+in Engineering and Sciences, 139(1):225—257.
+
+Yuqi Zhu, Xiaohan Wang, Jing Chen, Shuofei Qiao,
+Yixin Ou, Yunzhi Yao, Shumin Deng, Huajun Chen,
+and Ningyu Zhang. 2024. Llms for knowledge graph
+construction and reasoning: recent capabilities and
+future opportunities. World Wide Web, 27(5).
+
+
+A Top-Down and Bottom-Up Knowledge
+Graph Construction Approaches
+
+Knowledge graphs are effective tools for integrat-
+ing information from diverse sources, and their
+construction should facilitate the clear and struc-
+tured representation of that information. Typi-
+cally, there are two main approaches to building
+a knowledge graph: the top-down and bottom-up
+methods (TamaSauskaité and Groth, 2023). The
+top-down approach is commonly used in domain-
+specific knowledge graph construction, where a
+well-defined ontology exists, and the graph is pop-
+ulated based on that ontology. In contrast, the
+bottom-up approach is often applied to general-
+purpose knowledge graphs, where the information
+is broader in scope and a clear, predefined ontol-
+ogy is lacking. However, with the rise of large
+language models (LLMs), even domain-specific
+chatbots now demand a higher level of comprehen-
+siveness. This makes it increasingly difficult to rely
+on a fixed and limited ontology when construct-
+ing knowledge graphs for such applications. As
+a result, in this paper, we adopt the bottom-up ap-
+proach to build our knowledge graph, allowing for
+greater flexibility and adaptability in representing
+knowledge.
+
+B_ Model Settings
+
+We access the OpenAI and LLaMA models via
+Microsoft Azure services®. The specific versions
+used in our experiments are: 04-mini (2025-04-
+16), GPT-40 (2024-11-20), GPT-3.5-Turbo (0125),
+and Meta-Llama-3.1-405B-Instruct. We set the
+temperature to 0 and use a fixed random seed = 42
+whenever the model supports these settings.
+
+C_ Ablation Study
+
+In this section, we evaluate the effectiveness of our
+hierarchical approach by individually removing the
+coreference-aware prompting component and the
+entity-consistency prompting strategy. As shown
+in Table 5, this leads to noticeable declines in accu-
+racy, comprehensiveness, and relevance. Further-
+more, Table 6 demonstrates that incorporating the
+entity-consistency strategy during splitting reduces
+the number of nodes while increasing the fraction
+contained in the giant component.
+
+https ://azure.microsoft.com/en-us/pricing/
+details/cognitive-services/openai-service/
+
+Methods A Cc R
+W/o C_R 4.26/5 4.62/5 4.79/5
+Ours 4.34/5 4.72/5 4.91/5
+
+Table 5: Comparison of our method with and without
+coreference-aware prompting (C_R) on a subset of the
+paper dataset, evaluated on accuracy (A), comprehen-
+siveness (C), and relevance (R). The extraction was
+conducted using the GPT-4o0.
+
+Methods Foc Nodes/Edges
+W/o E_C 0.074 892/785
+Ours 0.105 683/598
+
+Table 6: Comparison of our method with and without
+entity consistency (E_C) on a subset of the paper dataset,
+evaluated in terms of the fraction in the giant component
+(Fac) as well as the number of nodes and edges. The
+extraction was performed using GPT-4o0.
+
+D_ Additional Insights
+
+In addition to the above analysis, we also found that
+reasoning-oriented models, such as 04-mini, are
+capable of integrating information across multiple
+sentences. For example, it can extract and combine
+information from two unconnected sentences, as
+shown below:
+
+¢ Sample Sentences from Fok et al. (2016):
+Participants were part of a prospective
+birth cohort study that recruited 1,247
+pregnant women (57.2% Chinese, 25.5%
+Malay, and 17.3% Indian) during their first
+trimester....Most participants reported that
+they followed confinement practices during
+the first 3 weeks postpartum (Chinese: 96.4%,
+Malay: 92.4%, Indian: 85.6%).
+
+Head Entity: Chinese pregnant women (57.2%
+of the cohort)
+
+— percentage_of_cohort: 57.2
+— adherence_rate_first_3_ weeks: 96.4
+
+Relation: followed
+
+Tail Entity: confinement practices during the
+first 3 weeks postpartum
+
+However, we also observed several shortcomings
+across the evaluated models. For instance, GPT-3.5-
+Turbo occasionally fails to adhere to the specified
+output template, generates repetitive triples, and
+
+
+sometimes struggles to distinguish the target text
+from its preceding context. LLaMA-3.1-8B’ often
+has difficulty following the output format and occa-
+sionally produces vague or uninformative relations,
+such as "in." Similarly, LLaMA-3.3-70B-Instruct®
+exhibits issues with template compliance and tends
+to overthink whether the text requires further split-
+ting or abstraction.
+
+E_ All-in-One Prompt vs. Hierarchical
+Approach
+
+In this paper, we propose a hierarchical approach to
+constructing the knowledge graph, rather than per-
+forming initial extraction, splitting, and abstraction
+in a single prompt—despite the potentially higher
+computational cost. Our motivation is as follows:
+
+¢ We aim to have the LLMs first focus on ex-
+tracting the most essential information from
+the original sentences. Subsequent splitting
+and abstraction are then applied only to this
+core information. Performing all steps at once
+may lead to unnecessary or irrelevant splitting
+and abstraction.
+
+A single-step approach can introduce noise
+and misinterpretation. For instance, GPT-
+40 may incorrectly infer that "a well-studied
+40-item measure of state and trait anxiety
+with a 4-point Likert scale in each question"
+is an abstraction of "Spielberger State-Trait
+Anxiety Inventory (STAD)" (Spielberger et al.,
+1971) from the sentence: "The STAT is a well-
+studied 40-item measure of state and trait anx-
+iety with a 4-point Likert scale in each ques-
+tion.” (Spielberger et al., 1971; Aishworiya
+et al., 2019) In contrast, a hierarchical ap-
+proach makes it more feasible to recognize
+that this phrase is actually an instance of
+a broader concept like "anxiety assessment
+tool."
+
+F Qualitative Analysis
+
+This section illustrates an extraction example
+employing both our hierarchical method and
+iText2KG (Lairgi et al., 2025), with GPT-40 serv-
+ing as the tested LLM. The sentence used for ex-
+traction is taken from Aishworiya et al. (2019) and
+reads: “We first explored the relationship of infant
+
+Thttps://ai.meta.com/blog/meta-1llama-3-1/
+Shttps://www. llama. com/docs/
+model-cards-and-prompt-formats/1llama3_3/
+
+TV exposure at 12 months and the composite IQ
+score at 4.5 years, as measured by the Kaufman
+Brief Intelligence Test, Second Edition (KBIT-2).
+Multivariable linear regressions were adjusted for
+maternal education, maternal mental health, child
+variables, birth parameters, and other relevant con-
+founders. We then examined the associations of
+maternal risk factors with the amount of daily TV
+viewing of 12-month-old infants.” The resulting
+triples generated by our methods are as follows:
+
+1 C{
+
+2 "head": {
+
+3 "text": "infant tv exposure
+
+at 12 months”,
+
+4 “properties”: {
+
+5 "age": "12 months”,
+
+6 "type": "media exposure”
+
+7 }
+
+8 },
+
+9 "relation”: {
+
+0 "text": "is related to”
+
+1 },
+
+2 "tail": {
+
+3 "text": "composite iq score
+
+at 4.5 years”,
+
+4 "properties": £{
+
+5 mage: “dA. 5 years;
+
+6 "measurement_method”: "
+kaufman brief
+intelligence test,
+second edition (kbit-
+2)
+
+17 }
+
+18 }
+
+19 },
+
+20 {
+
+BI "head": {
+
+22 "text": "multivariable
+linear regressions”,
+
+23 "properties”: {
+
+24 "adjustments": [
+
+25 "maternal
+
+education”,
+
+26 "maternal mental
+
+health",
+
+27 "child variables”
+
+28 "birth parameters
+
+29 "other relevant
+
+confounders”
+
+30 1,
+
+31 "type": "statistical
+
+method”
+
+32 }
+
+33 },
+
+34 "relation”: {
+
+35 "text": "were used to
+analyze”
+
+36 5
+
+37 "tail": {
+
+38 "text": "relationship
+between infant tv
+exposure and
+composite iq score”,
+
+39 "properties”: {
+
+
+
+40
+41
+
+42
+
+43
+44
+45
+46
+47
+48
+49
+
+50
+51
+
+52
+53
+54
+55
+
+56
+57
+58
+
+59
+60
+61
+
+62
+63
+64
+
+"variables": [
+"infant tv
+exposure at 1
+2 months”,
+"composite iq
+score at 4.5
+years”
+
+"head": {
+"text": "maternal risk
+factors”,
+"properties": {
+"type”: "parental
+characteristics”
+}
+a
+"relation": {
+"text": "are associated
+with”
+its
+Mead {i
+"text": "amount of daily
+tv viewing of 12-
+month-old infants”,
+"properties”: {
+"age": "12 months”,
+"type": "media
+exposure”
+
++]
+
+The extraction results from iText2KG (Lairgi et al.,
+
+2025) are presented as follows:
+
+1
+2
+3
+
+Cmrtans
+
+Et
+
+"head": {
+"text": "multivariable linear
+regressions”,
+"label”: "Methodology”
+},
+"relation”:
+"text": "adjusted_for”
+3;
+"tail": {
+"text": "maternal mental
+health”,
+label": “Factor”
+}
+"head": {
+"text": "multivariable linear
+regressions”,
+"label”: "Methodology”
+on
+"relation": {
+"text": "adjusted_for”
+"tail": {
+"text": "child variables”,
+"label": "Factor”
+)
+
+"head": {
+
+29
+30
+31
+32
+33
+34
+35
+36
+
+KR RR DB BR OBR
+Cae XI DAARHDNHE SS
+
+BR
+
+Ann nnn es
+A RwWNH FS
+
+56
+57
+58
+59
+60
+61
+
+63
+64
+65
+66
+67
+68
+69
+70
+71
+2
+B
+74
+15
+16
+71
+
+79
+80
+81
+
+82
+83
+84
+85
+86
+87
+88
+
+"text":
+"label":
+i
+“relation”:
+"text”:
+3
+tail”: {
+"text:
+
+intelligence test,
+
+"composite iq score”,
+"Measurement”
+
+{
+
+"measured_by”
+
+"kaufman brief
+second
+
+edition (kbit 2)”,
+
+"label”:
+
+"head": {
+*text =
+"label”:
+
+3,
+
+"relation”:
+text":
+
+a5
+
+"tail": {
+"text":
+"label”:
+
+"head": {
+"text”:
+
+"Test”
+
+"infant tv exposure”,
+"Event”
+
+{
+
+"related_to”
+
+"composite iq score”,
+"Measurement”
+
+"multivariable linear
+
+regressions”,
+
+"label”:
+35
+"relation”:
+"text":
+ie
+"tail": {
+Mtext™:
+"label”:
+
+"head": {
+"text”:
+“label”:
+
+yy
+
+"relation”:
+"text”:
+
+a3
+
+"tail": {
+"text":
+"label":
+
+"head": {
+text's
+
+"Methodology”
+
+"adjusted_for”
+
+"maternal education”,
+"Factor”
+
+"infant tv exposure”,
+"Event”
+
+{
+
+"occurs_at”
+"12 months”,
+
+“Age”
+
+"multivariable linear
+
+regressions”,
+
+"label":
+3
+"relation”:
+"text”:
+ae
+"tail™: £
+"text":
+
+”
+
+"label”:
+
+"head": {
+
+"Methodology”
+{
+"adjusted_for”
+
+"relevant confounders
+
+"Factor”
+
+
+
+94 "text": "4.5 years",
+
+95 "label”: "Age”
+
+96 te
+
+97 "relation”: {
+
+98 "text": "is_same_as”
+
+99 Ma
+
+00 "tail": {
+
+01 "text": "4.5 years”,
+
+02 "label”: "Age”
+
+03 }
+
+04 },
+
+05 {
+
+06 "head": {
+
+07 "text": "multivariable linear
+regressions”,
+
+08 "label”: "Methodology”
+
+09 Ne
+
+10 "relation”: {
+
+WW "text": "adjusted_for”
+
+12 3;
+
+13 tari: £
+
+14 "text": "birth parameters”,
+
+15 "label”: “Factor”
+
+16 }
+
+i) d;
+
+1s {
+
+19 "head": {
+
+20 "text": "associations of
+
+maternal risk factors
+with daily tv viewing of
+
+infants”,
+
+21 "label”: "Relationship”
+
+22 Ue
+
+23 "relation": {
+
+24 "text": "related_to”
+
+25 3;
+
+26 "tail": {
+
+27 "text": "infant tv exposure”,
+
+28 "label": "Event”
+
+29 }
+
+30 d;
+
+31 {
+
+32 "head": {
+
+33 "text": "associations of
+maternal risk factors
+with daily tv viewing of
+infants”,
+
+34 "label”: "Relationship”
+
+35 Ne
+
+36 "relation”: {
+
+37 "text": "examined_at”
+
+38 3
+
+39 “tail: £
+
+40 "text": "12 months”,
+
+41 "label”: "Age”
+
+42 }
+
+43 }]
+
+As shown in the given example, our method
+more faithfully preserves the meaning of the orig-
+inal sentence. We preserve the full meaning of
+all sentences while iText2KG fails to accurately
+capture complex phrases like the relationship of
+infant TV exposure at 12 months and the composite
+IQ score at 4.5 years. In addition, by supporting
+rich properties rather than just labels, our approach
+yields more meaningful and comprehensive entity
+
+representations. For instance, we extract multiple
+variables—such as maternal education and mater-
+nal mental health—as values of an adjustments
+property associated with the entity whose text is
+multivariable linear regressions. As a result, our
+framework can distinguish between different in-
+stances of multivariable linear regressions used
+across various experiments. In contrast, iText2KG
+represents each variable as a separate entity linked
+to the same regression entity, making it difficult to
+tell which variable belongs to which experiment
+when multiple studies use same regression terms.
+We will release both the prompts and extracted
+triples upon publication.
+
+G_ The Necessity of Semantic Evaluation
+
+We believe that traditional evaluation scripts—such
+as the WEBNLG evaluation scripts (Castro Fer-
+reira et al., 2020), which compute Precision, Re-
+call, and F1 scores based on token-level matching
+between predicted and ground truth triples—may
+not be suitable for accurately assessing the quality
+of a knowledge graph. Consider the following sen-
+tence example from Wiki-NRE dataset (Trisedya
+et al., 2019). When evaluated using the WEBNLG
+scripts, the F1 score under the "Partial" criterion is
+approximately 72.2%, while the scores under the
+"Strict" and "Exact" criteria drop to around 61.1%.
+However, the output generated by GPT-4 (version
+GPT-4-1106-preview from Microsoft Azure?) is
+semantically correct, and the corresponding triples
+can be directly and accurately derived from the sen-
+tence. In fact, the model’s output may even surpass
+the ground truth labels in correctness. For instance,
+a person holding citizenship in a country is not
+necessarily born there.
+
+¢ Sentence: Muhammed Ikram is a Pakistani
+footballer, who is a member of Pakistan na-
+tional football team.
+
+¢ Ground Truth Labels: [( Muhammed
+Ikram’, ’country of citizenship’, ’Pakistan’],
+[Muhammed Ikram’, ‘place of birth’,
+Pakistan’ J]
+
+¢ Structured Triple Generation via GPT-4:
+[Muhammed Ikram’, ’country of citizen-
+ship’, ’Pakistan’], [’Muhammed Ikram’,
+
+https: //learn.microsoft.com/en-us/azure/
+ai-foundry/openai/concepts/models?tabs=
+global-standard%2Cstandard-chat-completions
+
+
+*member of sports team’, ’ Pakistan national
+football team’ ]]

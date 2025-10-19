@@ -1,0 +1,1663 @@
+2510.11423v1 [cs.SI] 13 Oct 2025
+
+arXiv
+
+Beyond the Crowd: LLM-Augmented Community Notes for
+Governing Health Misinformation
+
+Jiaying Wu" Zihang Fu’ Haonan Wang
+National University of Singapore National University of Singapore National University of Singapore
+jiayingwu@u.nus.edu zihang.fu@nus.edu.sg haonan.wang@u.nus.edu
+
+Fanxiao Li
+Yunnan University
+lifanxiao@stu.ynu.edu.cn
+
+Abstract
+
+Community Notes, the crowd-sourced misinformation governance
+system on X (formerly Twitter), enables users to flag misleading
+posts, attach contextual notes, and vote on their helpfulness. How-
+ever, our analysis of 30.8K health-related notes reveals significant
+latency, with a median delay of 17.6 hours before the first note
+receives a helpfulness status. To improve responsiveness during
+real-world misinformation surges, we propose CROWDNOTES+, a
+unified framework that leverages large language models (LLMs)
+to augment Community Notes for faster and more reliable health
+misinformation governance. CROWDNOTES-+ integrates two comple-
+mentary modes: (1) evidence-grounded note augmentation and (2)
+utility-guided note automation, along with a hierarchical three-step
+evaluation that progressively assesses relevance, correctness, and
+helpfulness. We instantiate the framework through HEALTHNOTEs,
+a benchmark of 1.2K helpfulness-annotated health notes paired with
+a fine-tuned helpfulness judge. Experiments on fifteen LLMs reveal
+an overlooked loophole in current helpfulness evaluation, where
+stylistic fluency is mistaken for factual accuracy, and demonstrate
+that our hierarchical evaluation and LLM-augmented generation
+jointly enhance factual precision and evidence utility. These results
+point toward a hybrid human-AI governance model that improves
+both the rigor and timeliness of crowd-sourced fact-checking.
+
+CCS Concepts
+
+- Human-centered computing — Social media; - Information
+systems — Information retrieval; -Computing methodolo-
+gies — Natural language processing.
+
+Keywords
+
+Community Notes, Misinformation Governance, Social Media
+
+1 Introduction
+
+Health misinformation on social media has fueled widespread info-
+demics that endanger both public trust and individual well-being
+[13, 25]. Often triggered by major real-world events [1, 26], its
+scale and speed of dissemination consistently exceed the capacity
+of expert fact-checkers and professional moderation [10, 27]. In
+response, crowd-sourced fact-checking, which leverages the col-
+lective wisdom of online contributors [2, 15, 19, 25], has emerged
+as a scalable and timely approach to mitigating misinformation.
+
+*Equal contribution.
+
+Min-Yen Kan
+National University of Singapore
+kanmy@comp.nus.edu.sg
+
+@) Post Flagged as Potentially Misleading:
+@
+]& X User
+
+Homeopathy has been demonized for no one's benefit
+except Big Pharma. Thankfully, @SecKennedy promises to
+speak to @MartyMakary to reintroduce homeopathy as an
+appropriate solution for a variety of health concerns. We
+look forward to this change!
+
+© Community Note Creation:
+
+fen
+
+q There is little to no proof on the effectiveness of
+Homeopathy medicines. It is not recognized as a valid
+system, or outright banned in many countries.
+
+https://www.nhs.uk/conditions/homeopathy/#:~:text=Does
+%20homeopathy%20work%3F,treatment%20for%20any%2
+Ohealth%20condition
+https://www.nccih.nih.gov/health/homeopathy
+https://pmce.ncbi.nlm.nih.gov/articles/PMC6399603/
+https://en.wikipedia.org/wiki/Regulation_and_prevalence_o
+f_homeopathy
+
+{ Helpfulness Rating:
+
+aoa Helpful. It provides important context.
+v
+oS Helpful. It cites high-quality sources.
+
+DP
+5 Om Status: Currently Rated Helpful
+——)
+
+Figure 1: Overview of Community Notes on X for crowd-
+sourced misinformation governance. Platform users engage
+in three stages: (1) flagging potentially misleading posts, (2)
+contributing clarifications or contextual notes, and (3) rating
+the helpfulness of these notes. As votes accumulate, each
+note attains one of three statuses (“Not Enough Ratings”,
+“Currently Rated Helpful”, or “Currently Rated Not Helpful”),
+and only Helpful notes are publicly surfaced alongside the
+original misleading post to inform readers.
+
+Community Notes [33], the system deployed on X (formerly
+Twitter), represents the most prominent implementation of this
+paradigm (Figure 1). The mechanism allows users to flag poten-
+tially misleading posts, attach contextual notes, and vote on their
+helpfulness, with only notes rated as “Helpful” ultimately shown as
+an attachment to the post to inform the public. While prior research
+has confirmed the system’s value in promoting balanced discourse
+[5, 21, 29], our large-scale analysis of 30.8K health-related notes
+
+
+over four years (Section 3) reveals two systemic bottlenecks. At the
+median, the first note is created 10.4 hours after a post appears, and
+the first helpfulness verdict (“Helpful”/“Not Helpful”) arrives 7.2
+hours later. Furthermore, 87.9% of notes never obtain enough rat-
+ings to reach any status. Since only Helpful notes are surfaced, these
+delays substantially reduce the timeliness of corrective information
+when public attention is most intense.
+
+To mitigate these bottlenecks, we propose CROWDNOTES+, a
+unified framework for leveraging large language models (LLMs)
+to augment Community Notes for more timely and reliable mis-
+information governance. Given a flagged post containing a poten-
+tially misleading claim, CRowDNoTEs+ extends the current crowd-
+sourced process across both note creation and evaluation. As shown
+in Figure 3, it introduces two complementary generation modes:
+(1) Evidence-Grounded Note Augmentation, where humans
+supply evidence (e.g., URLs) and LLMs synthesize it into structured
+notes, and (2) Utility-Guided Note Automation, where LLMs au-
+tonomously plan, retrieve, and select high-quality evidence before
+generating notes. To ensure robust and interpretable assessment,
+CrowDNotes+ further incorporates a hierarchical three-step
+evaluation pipeline that progressively verifies (1) the relevance
+of retrieved evidence, (2) the correctness of evidence presentation,
+and (3) the overall helpfulness of the generated note.
+
+We instantiate CROwDNOTES+ in the health domain through the
+HEALTHNOTES benchmark, comprising 1.2K health-related Com-
+munity Notes annotated with crowd-confirmed Helpful and Not
+Helpful statuses, along with HEALTHJuDGE, a fine-tuned note help-
+fulness evaluator. Experiments on fifteen representative LLMs vali-
+date the framework’s reliability and practical utility. Our evaluation
+(Section 6.3) uncovers a major weakness in current human help-
+fulness assessment, where stylistic fluency is often mistaken for
+factual accuracy, and demonstrates that hierarchical evaluation
+substantially reduces false positives. Across both generation modes,
+LLMs produce notes that are overall more accurate and contextually
+balanced than human-written counterparts, while utility-guided au-
+tomation consistently selects higher-quality evidence than human
+contributors. These results establish CRowDNOTES-+ as a principled
+framework for enhancing the factual consistency, interpretability,
+and timeliness of crowd-sourced misinformation governance.
+Contributions. We make three key contributions:
+
+e Framework. We present CRowDNOoTES+, a unified framework
+for LLM-augmented Community Notes, integrating two gener-
+ation modes and a hierarchical evaluation pipeline for scalable
+and interpretable misinformation governance.
+
+e Benchmark. We introduce HEALTHNOTES, a domain-specific
+benchmark of 1.2K health-related Community Notes, paired with
+a fine-tuned HEALTHJUDGE model for reliable evaluation on note
+helpfulness.
+
+e Empirical Insights. Through systematic evaluation of fifteen
+LLMs, we uncover a loophole in human helpfulness voting,
+demonstrate clear gains from LLM-augmented note generation,
+and distill design principles for hybrid human-AI governance.
+
+2 Related Work
+
+Crowd-Sourced Fact-Checking. The scale and speed of mis-
+information on social media make it infeasible to rely solely on
+
+Jiaying Wu et al.
+
+professional fact-checkers [10, 27]. Crowd-sourced fact-checking
+[2, 15, 19, 25], exemplified by Community Notes on X, allows users
+to collaboratively provide clarifications on potentially misleading
+content. Empirical studies [4, 14] have shown that such community
+moderation can reduce misinformation engagement [6, 29] and pro-
+mote balanced public discourse [5, 21]. However, most prior work
+assumes that notes already exist and focuses on voting dynamics,
+consensus formation, or downstream effects. The earlier step of note
+creation, especially under time-sensitive contexts, remains largely
+unexplored. Preliminary attempts at automation [7, 28] have shown
+limited practicality: [7] assumes that multiple human-written notes
+already exist for the same misleading post, while [28] relies only on
+LLMs’ internal knowledge without web access, making it unsuitable
+for detecting new, unseen posts. Our work addresses this gap by
+focusing on the health domain, where timeliness is essential, and
+introducing CRowDNOoTES+, a unified framework for systematic
+LLM-augmented note generation and evaluation.
+
+Automated Governance of Textual Misinformation. Beyond
+crowd-based moderation, automated approaches aim to identify
+and counter misinformation at scale. Earlier research developed
+classifiers and detection systems for misleading posts or articles,
+often exploiting linguistic [20, 44] and network features [36, 37].
+Although effective in flagging suspicious content, these systems
+rarely produce explanations that clarify why content may be mis-
+leading. More recent work leverages LLMs to generate explanatory
+text [12, 35] and retrieve snippets from credible domains to jus-
+tify model predictions [18, 45, 46], promoting more interpretable,
+evidence-based moderation. However, these methods still center
+decisions on the model, treating explanations as secondary to classi-
+fication rather than aids to public understanding. To our knowledge,
+this work is among the first to systematically evaluate how LLMs
+can produce explanatory, note-style interventions for health misin-
+formation, advancing from detection to actionable governance.
+
+3 Health Misinformation and Note Dynamics
+
+Understanding how health misinformation arises and how com-
+munity governance mechanisms respond is essential for designing
+timely interventions. Before developing automated support, we
+analyze the temporal dynamics of health-related Community Notes
+on X to examine when misinformation surges occur and how effec-
+tively the system reacts.
+
+3.1 Data Scope
+
+We collect all publicly available, user-contributed Community Notes!
+on X up to 4 August 2025, retaining only English entries for consis-
+tency. To focus on health-related misinformation, we define seven
+topical categories: (1) diseases or medical conditions, (2) drugs,
+vaccines, treatments, and tests, (3) public health guidance or policy,
+(4) wellness products, diets, and supplements, (5) healthcare pro-
+fessionals or systems, (6) biological or epidemiological concepts,
+and (7) health-related conspiracies or hoaxes.
+
+We filter relevant notes via zero-shot prompting with Lingshu-
+32B [14], a multimodal LLM that achieves state-of-the-art perfor-
+mance on textual medical QA. To verify filtering reliability, we com-
+pare its predictions with closed-source LLMs on a random sample of
+
+‘https://x.com/i/communitynotes/download-data
+
+
+Beyond the Crowd: LLM-Augmented Community Notes for Governing Health Misinformation
+
+Temporal Distribution of Flagged Health Posts with Spike Detection
+
+100 ~
+
+> Daily count Trending: “vaccine”, “mRNA”
+
+e is MOVIAG average Nobel Prize in Katalin Kariké and Drew Weissman
+Q 804) ~~~ 30-day moving average for their discoveries concerning
+
+5 Oct-Dec 2023 Surge Medicir 3 nucleoside base modifications that
+rom © Temporal spikes (z>2.5) 2 Oct 2023] enabled the development of effective
+a [GARNA vaccinesjagainst COVID-19
+2 60-
+
+wn
+
+fe) »
+
+a ) orgeaton
+rar 8 Organization 1.3 Dec 2023
+
+© 20- , ;
+
+. 40 . Statement on the antigen 9
+
+o @ composition of COVID-19
+
+2
+
+5 20-
+
+2
+
+on
+y
+se a $ GS s
+« = ° & = s “ Y s «
+
+Trending: “Trump”, “Medicaid”
+GabStian Tuej28 Jan 2025)21.20 GMT
+
+[Medicaid|payment portals down
+after{Trump’s}federal funding freeze
+
+Lawmakers and state officials say portals inaccessible for one
+of largest health insurance programs in US
+
+Trending: “Trump”, “vaccine”, “Kennedy”
+The Washington Post
+aps Robert F. Jr,
+
+ccine| skeptic, to lead HHS
+
+The nearly $2 trillion agency administers health-
+insurance programs for millions of Americans,
+approves medications and oversees vaccine safety.
+
+Updated[November 14, 2024
+
+9,
+%, |
+3
+“2,
+
+%y
+
+Figure 2: Spikes in flagged health misinformation posts correspond to major real-world health events (details in Section 3.2),
+including outbreak alerts, vaccine updates, and policy debates, highlighting the event-driven nature of misinformation on X.
+
+1,000 notes classified as health-related, and observe high agreement
+(GPT-4.1 [16]: 99.2%, Gemini-2.5-Flash [11]: 100%, Claude-4-Sonnet
+[3]: 96.8%). For each retained note, we retrieve the associated post.
+Since some posts embed claims in images or videos, we filter with
+GPT-4.1 to keep only those containing text-based health claims.
+Notes tied to unavailable posts or URL-only content are excluded.
+
+This process yields 30,791 health-related notes covering 25,484
+potentially misleading posts, forming the basis for our analyses of
+temporal trends and systemic bottlenecks.
+
+3.2 Event-Driven Misinformation Dynamics
+
+We first analyze the temporal distribution of 25,484 health-related
+posts flagged for potential misinformation (Section 3.1) collected
+over four years (2021-2025) to examine how misinformation activity
+evolves in relation to real-world health events. Understanding when
+these surges occur provides key insight into the moments when
+timely corrections are most needed.
+
+For each day, we compute the total number of flagged posts
+and identify statistically significant surges using a 28-day rolling
+baseline. A day is considered a spike if its post count exceeds
+the rolling mean by more than 2.5 standard deviations (z > 2.5),
+retaining only substantial deviations from baseline activity.
+
+To contextualize these spikes, we extract trending topics within
+a three-day window centered on each spike. We compute word
+frequencies from post text (excluding stopwords), identify trending
+terms, and associate them with major health events reported by
+mainstream news outlets or public health authorities during the
+same period. Each event is verified to be uniquely prominent within
+its window to avoid cross-period overlap.
+
+As illustrated by the spikes on 14 Nov 2024 and 29 Jan 2025, as
+wellas the sharp rise in misinformation from Oct to Dec 2023 (Figure
+2), misinformation spikes align closely with major real-world health
+events, including outbreak announcements, vaccine policy changes,
+and high-profile public health debates. These patterns indicate that
+health misinformation is strongly event-driven, emerging rapidly in
+response to external developments. This motivates the next analysis
+on how promptly Community Notes respond once misinformation
+appears and begins to spread.
+
+Table 1: Delays (hours) in health Community Notes, with a
+median of 17.6 hours before the first note attains a helpful-
+ness status (i.e., “Helpful”/“Not Helpful”).
+
+Pct. Post Published — First Note First Note — First Status
+
+25% 3.4 3.6
+50% 10.4 7.2
+79% 23.0 18.4
+90% 49.1 76.4
+
+3.3. Delays in Note Visibility Call for Change
+
+Building on the preceding analysis of 25,484 flagged posts, we
+next examine the 30,791 health-related Community Notes attached
+to these posts to evaluate how quickly corrective information be-
+comes visible. Although Community Notes are designed for scalable,
+crowd-sourced fact-checking, our temporal analysis reveals that
+corrections are often delayed. As shown in Table 1, the median
+delay between a misleading post and the creation of the first note
+is 10.4 hours. The subsequent voting phase adds another 7.2 hours
+before a note attains a helpfulness status (“Currently Rated Helpful”
+or “Not Helpful”). Furthermore, 87.9% of notes never accumulate
+enough votes to reach any status, remaining indefinitely at “Not
+Enough Ratings”.
+
+As only notes rated as helpful are surfaced publicly, this pro-
+longed and uneven process severely limits the visibility of corrective
+information when timely intervention is most needed. To improve
+responsiveness, the system must accelerate both the creation and
+validation of high-quality notes without compromising factual rigor.
+This motivates our proposed framework, CRowDNOTES+, which
+leverages LLMs to systematically enhance the timeliness and relia-
+bility of Community Notes.
+
+4 CROWDNOTEsS+?+: Framework for
+LLM-Augmented Community Notes
+
+Our analysis in Section 3 shows that while health misinformation
+closely follows real-world events, Community Notes often lag due to
+slow note creation and delayed voting. To address these bottlenecks,
+
+
+Misleading Post
+
+xX
+
+There's aborted fetal cells
+
+in your food and drinks... flag post gather evidence
+x
+Misleading Post
+v
+
+Experts and
+FDA say no
+fetal tissue is
+
+https://www.usatoday.
+com/story/news/factc
+heck/...
+https://apnews.com/a
+rticle/...
+https://www.reuters.c
+om/article/...
+
+permitted in
+food...
+[URLs]
+
+generated note
+
+human-provided URLs
+
+Evidence-Grounded Note Augmentation
+
+x
+Misleading
+Post
+
+Jiaying Wu et al.
+
+Timeline of
+Crowd-Sourced
+Community Notes
+
+write note rate helpfulness reach verdict
+
+diverse queries
+
+“aborted fetal cells food
+drinks Snopes OR FactCheck”
+“FDA statement fetal cells
+food safety”
+
+ttps://www.usatoday.com/...
+Experts and
+
+FDA say food
+and drinks do
+not contain
+fetal tissue ...
+[URLs]
+
+generated note
+
+https://www.npr.org/sections/ | 4
+thetwo-way/...
+
+eo
+
+https://www.reuters.com/...
+utility-guided evidence selection
+
+Utility-Guided Note Automation
+
+Figure 3: Overview of the proposed CRowDNOoTEs+ framework for LLM-augmented Community Notes. The upper timeline
+depicts the crowd-sourced Community Notes workflow on X. The lower panels illustrate two LLM-augmented modes in
+CRowDNOTES+: (1) evidence-grounded note augmentation, where LLMs write notes using human-provided evidence, and (2)
+utility-guided note automation, where LLMs autonomously retrieve evidence from the Web to generate notes more efficiently.
+
+Together, these modes enable scalable, timely, and reliable s
+
+we propose CROWDNOTES+, a unified framework that leverages
+LLMs to enhance the timeliness and reliability of misinformation
+governance. As shown in Figure 3, CROwDNOTES+ extends the
+crowd-sourced paradigm through two complementary modes: (1)
+evidence-grounded note augmentation and (2) utility-guided note
+automation, and a hierarchical evaluation pipeline assessing note
+quality across relevance, correctness, and helpfulness.
+
+4.1 Evidence-Grounded Note Augmentation
+
+We first examine whether LLMs can meaningfully augment human
+efforts in note creation when reliable evidence is already available. In
+this setting, a human contributor flags a potentially misleading post
+p and provides a set of supporting sources &;, where each e € &,
+is a URL linking to external web content relevant to the claim.
+
+Each evidence item e is expanded into its retrieved resource
+R through a RETRIEVE step, where the textual content r of e is
+segmented into passages. Using p as the query, a MATCH step
+identifies the most relevant passage c from each r, forming a set of
+candidate chunks C;,. The model then performs a GENERATE step,
+conditioning on both the flagged post p and the evidence chunks
+C;, to produce an LLM-augmented note np.
+
+The generated note n, contains only the textual explanation,
+while the corresponding evidence URLs &) are attached afterward
+for reference. This design preserves the factual grounding of human-
+curated sources while automating the synthesis of concise, contex-
+tualized notes, effectively reducing the manual effort and latency
+inherent in human-written explanations.
+
+4.2 Utility-Guided Note Automation
+
+We next explore whether note creation can be fully automated once
+a post p is flagged as potentially misleading, simulating a practical
+
+upport for community-driven misinformation governance.
+
+deployment scenario. Unlike the augmentation setting, where hu-
+mans provide evidence, this mode requires the LLM to both retrieve
+and synthesize information with minimal human intervention.
+Motivated by prior work showing that diverse query formu-
+lations can surface complementary evidence beyond any single
+phrasing [23, 34], the model first generates a set of semantically
+diverse search queries Q based on p. Each query q € Q retrieves
+its top-k results through a SEARCH step, and all retrieved items
+are merged and de-duplicated to form a candidate evidence pool
+
+f =dedup (Urea TopK(q)).
+
+To select the most informative subset, we introduce an LLM-
+based utility judgment module inspired by recent advances in
+evidence ranking [43]. Given a fixed quota 1, the model performs
+T iterative selections, each time identifying and removing the evi-
+dence snippet (title and one-sentence summary) with the highest
+estimated utility. The resulting items form the machine-selected
+evidence set &m, whose corresponding URLs are appended to the
+generated note to ensure transparency and traceability.
+
+We then apply the same RETRIEVE and MATCH procedures as
+in the augmentation setup (Section 4.1) to extract candidate chunks
+Cin, followed by a GENERATE step that conditions on both p and C,,
+to produce an LLM-automated note nm. This end-to-end pipeline
+operationalizes fully automated note generation guided by evidence
+utility, reducing reliance on human intervention while preserving
+factual grounding.
+
+4.3 Hierarchical Helpfulness Evaluation
+
+To ensure systematic and interpretable assessment of generated
+notes, CROWDNOTES+ adopts a progressive three-step evaluation
+pipeline. Each note is sequentially evaluated across three dimen-
+sions: (1) relevance, (2) correctness, and (3) helpfulness. A note
+must satisfy each preceding criterion to proceed to the next. This
+
+
+Beyond the Crowd: LLM-Augmented Community Notes for Governing Health Misinformation
+
+design enforces factual grounding before communicative quality,
+producing more reliable and transparent assessments.
+
+Relevance. This step evaluates whether the retrieved evidence
+offers meaningful factual context, clarification, or supporting in-
+formation that helps readers better assess the claim made in the
+post. Relevance forms the foundation of retrieval-augmented gen-
+eration [22, 42], ensuring that notes are grounded in contextually
+appropriate information.
+
+Correctness. Relevance alone does not guarantee factual ac-
+curacy. Even when evidence is relevant, its interpretation can be
+distorted or selectively presented, particularly in scientific and med-
+ical communication [9, 38]. This step assesses whether the note
+accurately represents the content of the provided sources without
+factual errors, exaggerations, or misleading framing.
+
+Helpfulness. The final step measures whether the note provides
+context that assists readers in understanding or critically evaluating
+the flagged post, following the official criteria? established by X
+Community Notes.
+
+Formally, we define R(n), C(n), and H(n) as binary indicators
+denoting whether a generated note n satisfies the relevance, correct-
+ness, and helpfulness criteria, respectively, where R(n), C(n), H(n) €
+0, 1. The progressive evaluation can be represented as a conditional
+probability chain:
+
+P(H(n) = 1) = P(H(n) = 1| C(n) = 1, R(n) = 1)
+x P(C(n) =1| R(n) = 1) x P(R(n) = 1). (1)
+
+This formulation enforces logical dependency among evaluation
+stages: a note can only be considered helpful if it is both relevant
+and correct. Recent research [31] has shown that models trained
+directly on misinformation-related classification tasks often rely
+on surface-level stylistic cues rather than deeply inspecting the
+referenced content. Our hierarchical design explicitly addresses
+this limitation by decomposing helpfulness into conditional compo-
+nents grounded in factual reasoning. This structure enables inter-
+pretable, fine-grained evaluation and supports fairer comparison
+across models and generation modes.
+
+5 HEaALTHNOTES Benchmark
+
+We introduce HEALTHNOTES, the first benchmark for studying LLM-
+augmented Community Notes in the health domain. HEALTHNOTES
+consists of a curated dataset and a customized evaluation judge,
+providing a reproducible foundation for analyzing augmentation
+and automation in this high-stakes setting.
+
+Data. From the healthcare Community Notes data curated in
+Section 3.1, we identify 3,713 notes with crowd-confirmed helpful-
+ness statuses (Helpful: 2,971; Not Helpful: 742). Among these, 634
+Not Helpful notes retain all valid evidence URLs. To ensure class
+balance, we randomly sample an equal number of Helpful notes,
+yielding a curated set of 1,268 samples for systematic evaluation
+of LLM-augmented note generation. Each sample corresponds to a
+flagged post paired with one or more Community Notes and veri-
+fied URLs. To reflect varying levels of difficulty, we include both
+Helpful and Not Helpful subsets, representing cases where notes
+successfully or unsuccessfully aid reader understanding. Dataset
+
+“https://communitynotes.x.com/guide/en/under-the-hood/download-data
+
+Table 2: Comparison of helpfulness judging performance
+across models on 1,000 unseen post-note pairs.
+
+Model Macro-F1(%) Macro-Accuracy (%)
+GPT-4.1 74.28 74.19
+Gemini-2.5-flash 68.36 65.13
+Claude-Sonnet-4 78.14 76.44
+Lingshu-32B 64.71 62.25
+Lingshu-7B 51.66 51.63
+HEALTHJUDGE 81.03 81.44
+
+statistics are provided in Table 6, and topic distributions are shown
+in Figure 9.
+
+Evaluation Pipeline. Evaluation follows the hierarchical schema
+introduced in Section 4.3. For the relevance and correctness stages,
+we adopt the LLM-as-a-Judge paradigm using GPT-4.1 [16], which
+provides reliable factuality assessments. For helpfulness, we intro-
+duce HEALTHJUDGE, a fine-tuned version of Lingshu-7B [14], trained
+on 3,713 post-note pairs with human-labeled helpfulness statuses
+(2,713 for training, 1,000 for testing). To ensure consistent evalua-
+tion focus, each note in these pairs contains only its textual content
+without appended URLs, as evidence relevance and correctness are
+already examined in earlier stages. Training details are provided in
+Appendix B.
+
+When applied to HEALTHNOTES, some posts may reappear from
+the training set; however, all associated notes are distinct, prevent-
+ing any leakage of helpfulness labels or textual overlap. As shown
+in Table 2, HEALTHJUDGE surpasses GPT-4.1 [16], Claude-4-Sonnet
+[3], and Gemini 2.5 Flash [11] on unseen samples, confirming its
+robustness for domain-specific helpfulness evaluation.
+
+6 Experiments
+We structure our experiments around four research questions (RQs):
+
+e RQ1: Overall Effectiveness (§6.2): How do representative
+LLMs perform across augmentation and automation settings?
+
+e RQ2: Evaluation Effectiveness (§6.3): In what ways does our
+framework improve evaluation, generation, and automation?
+
+e RQ3: Note Generation Effectiveness (§6.4): How effectively
+can LLMs assist in generating helpful notes?
+
+e RQ4: Evidence Utility (§6.5): How does LLM-selected evi-
+dence in CROwDNOTES+ compare to human-provided sources in
+contextual utility?
+
+6.1 Experimental Setup
+
+Models. We first establish a Human Baseline by evaluating orig-
+inal human-written notes under our hierarchical framework as a
+competitive reference point. On this basis, we benchmark 15 repre-
+sentative LLMs across four groups: [G1] closed-source Large Rea-
+soning Models (LRMs; e.g., 03 [17], Gemini-2.5 [11], Grok-4 [39]);
+[G2] closed-source LLMs (e.g., GPT-4.1 [16], Claude-4 [3]); [G3]
+open-source LLMs and LRMs (e.g., Qwen3 [41], Llama-3.1 [8],
+Ministral [30]); and [G4] domain-specific medical LLMs (e.g.,
+Lingshu [40], MedGemma [24]). When applicable, temperature is
+fixed at 0 for reproducibility, and non-reasoning variants of LLMs
+(e.g., Qwen3) are used unless otherwise noted.
+
+
+Jiaying Wu et al.
+
+Table 3: Effectiveness (%) of 15 representative LLMs across note augmentation and automation settings on HEALTHNOTES (see
+Section 4.1 and Section 4.2). “Human Baseline” refers to original Community Notes written by users. Evaluation metrics: R =
+relevance, C = correctness, H = helpfulness (Section 4.3). Model groups: G1 = closed-source LRMs, G2 = closed-source LLMs, G3
+= open-source LLMs, G4 = domain-specific medical LLMs. + denotes reasoning-enabled models; + marks shared relevance scores
+under automation, as six LLMs perform evidence retrieval for fifteen generators (Section 6.1). Best and second-best results are
+shown in bold and underline, respectively.
+
+Helpful (634) Not Helpful (634) Overall
+Setting > Note Aug. (R=89.27) Note Auto. Note Aug. (R=71.45) Note Auto. Aug. Auto.
+Model | Cc H R C H Cc H R C H H H
+Human Baseline 75.24 73.19 89.27 75.24 7319 44.32 5-02, 71.45 44.32 5.52 39.36
+Gemini-2.5-prot 88.64 85.65 T 95.74 93.85 OHI |) 70.50 37.54 T 91.96 90.22 69.24 T 61.60 T 80.21 T
+G1 03+ 87.70 86.91 f 95.74% 94.16 92.117 68.30 40.69 | 91.96 $ 89.91 70.197 | 63.807 81.15 7
+Grok-4+ 86.44 82.65 T 95.74 92.74 88.177 67.98 32.81 T 91.96 89.27 67.19 T 57.73 T 77.68
+G2 GPT-4.1 87.85 85.80 T 94.64 $ 92.90 88.49 T 69.56 40.22 T 93.06 90.85 69.87 T 63.01 T 79.18 T
+Claude-4-Opus 85.17 83.60 T 94.64 89.43 85.96 T 63.88 37.85 7 93.06 84.70 64.51 T 60.73 T 75.24 T
+Qwen3-32B 81.39 76.66 | 90.69 $ 80.28 70.35 | 60.57 28.86 T 87.22 £ 77.13 55.84 T 52.76 7 63.10 T
+Qwen3-14B 76.03 70.82 | 90.69 76.03 66.09 | 56.15 23.03 T 87.22 71.29 50.63 T 46.93 T 58.36 T
+G3 Llama-3.1-8B 67.98 61.36 | 86.59 60.41 49.05 | 51.10 17.98 7 83.75 61.83 36.28 T 39.67 T 42.67 7
+Ministral-8B 56.94 51.58 { 86.59 53.31 44.32 | 43.22 14.67 7 83.75 51.74 27.60 7 33.13 | 35.96 |
+Qwen3-8Bt 70.35 64.67 | 86.59 65.30 53.63 | 47.00 18.14 7 83.75 58.83 34.86 T 41.41 T 44.25 7
+Qwen3-8B 69.56 64.83 | 86.59 £ 65.62 55.36 | 47.63 19.09 83.75 £ 61.20 38.80 T 41.96 T 47.08
+Lingshu-32B 79.34 73.19 91.96 78.70 67.35 | 58.99 22.08 T 93.85 81.70 52.37 47.64 T 59.86 T
+G4 MedGemma-27B = 84.38 79.02 T 91.96 $ 85.96 79.81 T 65.46 30.91 T 93.85 $ 86.91 58.68 T 54.97 T 69.25 T
+Lingshu-7B 58.04 50.47 | 85.65 53.63 41.80 | 43.38 13.56 7 85.33 60.41 33.91 T 32.02 | 37.86 |
+MedGemma-4B 60.41 52.68 | 85.65 £ 53.63 40.06 | 43.53 16.56 7 85.33 £ 56.31 31.23 T 34.62 | 35.65 |
+Misleading Post: The American Heart Association (AMA) has warned tha
+
+Evidence Acquisition in CROWDNOTES+. Following Section 4.2,
+we obtain evidence through LLM-based retrieval for note creation
+using six representative models, selected based on model group and
+size: 03, GPT-4.1, Qwen3 (32B and 8B), and MedGemma (27B and
+4B). For fair comparison, the evidence quota t for each sample matches
+the number of human-provided URLs (|E,|), and web searches are
+restricted to sources available up to the human note creation time.
+From each retrieved webpage, we extract the top-ranked 512-token
+passage as evidence input. Additional implementation details are
+provided in Appendix A.1.
+
+Note Length Constraint. To reflect platform constraints, we
+enforce the 280-character limit of Community Notes during the help-
+fulness evaluation step. If the combined length of an LLM-generated
+note and its appended URLs exceeds this limit (URLs count as a
+single character according to X Community Notes policy’), the note
+text is truncated so that the total remains within 280 characters.
+This constraint does not apply to the relevance or correctness eval-
+uations, as note length affects readability and helpfulness but not
+factual accuracy or grounding.
+
+6.2 Overall Effectivenss of CROWDNOTES+
+
+Table 3 summarizes model performance under both augmentation
+and automation settings. We draw six key observations. (1) Per-
+formance on the Not Helpful subset is substantially lower, under-
+scoring its greater difficulty. (2) Human-written notes rated 100%
+
+3https://docs.x.com/x-api/community-notes/quickstart
+
+90 percent of the vaccinated population now suffers from an irreversible
+heart condition caused by the COVID-19 vaccines.
+
+Human-Provided Evidence: |\tips://newsroom.heart.org/news/heart
+disease-risk-prevention-and-management-redefined
+
+Content: Interactions among obesity, Type 2 diabetes, chronic kidney
+disease and cardiovascular disease drive the new approach, says new
+American Heart Association presidential advisory...
+
+x) The URL only provided general information about heart disease risks and
+prevention methods, but did not mention COVID-19 vaccines or related effects.
+
+Figure 4: Example of a human-written note mislabeled as
+Helpful by human voters but correctly flagged as Not Helpful
+by CrowDNortEs+ for citing irrelevant evidence.
+
+Helpful by the crowd reach only 73.19% under our framework, re-
+vealing weaknesses in current helpfulness voting (see Section 6.3).
+(3) Models with over 14B parameters outperform humans in help-
+fulness, demonstrating the effectiveness of both augmentation and
+automation (see Section 6.4). (4) For G1 and G2 models, full au-
+tomation surpasses augmentation across subsets, suggesting that
+when retrieval is well-guided, LLMs can independently compose
+accurate, well-grounded notes. (5) The reasoning-enabled 03 model
+achieves the highest overall scores, indicating that explicit rea-
+soning traces enhance note generation. (6) Domain-specific mod-
+els such as MedGemma-27B yield consistent gains over general-
+purpose LLMs (e.g., Qwen3-32B), particularly in retrieval for Not
+Helpful cases, reflecting stronger grounding in medical knowledge.
+
+
+Beyond the Crowd: LLM-Augmented Community Notes for Governing Health Misinformation
+
+M@lll Generalization and Overstatement
+Misinterpretation of Source Content
+& 7 a
+
+fy Fy Ea @ sb
+Problematic Samples
+
+Figure 5: Error distribution of 89 human-written notes that
+misrepresented evidence, grouped by three main causes.
+
+6.3 Evaluation Effectiveness
+
+Our hierarchical evaluation framework (Section 4.3) reveals a key
+weakness in Community Notes’ currently adopted human voting
+system: frequent false positives where notes rated as Helpful fail basic
+relevance or correctness. As shown in Table 3, our framework aligns
+closely with human judgments on the Not Helpful subset (only 5.5%
+divergence) but exposes sharp declines on the Helpful subset: 11.7%
+in relevance and 14.0% in correctness.
+
+To investigate these inconsistencies, we further analyze two
+types of failure. First, we identify “Helpful” notes with no meaning-
+ful connection between their claims and cited evidence (exempli-
+fied in Figure 4) where the referenced sources provide no factual
+grounding for the note’s argument. Second, we perform a focused
+qualitative study on 89 notes that our framework rates as relevant
+but incorrect, yet were judged as helpful by humans. Two human
+experts collaboratively reviewed and discussed these cases to reach
+consensus on error attribution. As shown in Figure 5, three recur-
+ring causes emerge: (1) Lack of Evidence Support, where the note’s
+claims are not substantiated by its cited sources; (2) Misinterpre-
+tation of Source Content, where the note distorts or misrepresents
+factual details; and (3) Overgeneralization, where the note makes
+broad or exaggerated conclusions not supported by the evidence.
+
+These results suggest that human voters often reward stylis-
+tic fluency over factual rigor. By enforcing sequential checks for
+relevance and correctness, the hierarchical evaluation in CRowD-
+NoteEs+ substantially reduces false positives and provides a more
+reliable basis for measuring note helpfulness.
+
+6.4 Note Generation Effectiveness
+
+We next examine how LLMs perform in the two note generation
+settings of CROowDNOoTES+: (1) evidence-grounded augmentation
+(Section 4.1) and (2) utility-guided automation (Section 4.2).
+
+Augmentation. As shown in Table 3, when generating notes
+from human-provided evidence, LLMs consistently achieve higher
+correctness than human-written notes using the same sources. This
+indicates stronger factual alignment and reduced distortion, with
+LLMs synthesizing more balanced and contextually grounded ex-
+planations. Figure 6 illustrates a representative example where
+CROwWDNOTES+ restores omitted contextual details, improving both
+completeness and interpretability of the note.
+
+Automation. To understand key drivers of performance in the
+automation mode, we conduct ablation studies (Table 4). Removing
+either diverse query generation or utility judgment substantially
+degrades overall helpfulness, validating their complementary con-
+tributions. Query diversity broadens the evidence pool, while utility
+judgment filters for high-quality sources, together enabling notes
+that are both coherent and well-grounded.
+
+[Misleading Post: Dr. Ryan Cole claims COVID vaccines caused a spike in cancer.]
+
+Human-Provided Evidence: |ttps://pubmed.ncbi.nim.nih.gov/34919267/
+Content: The coronavirus disease 2019 (COVID-19) pandemic has impacted health
+care delivery worldwide. Cancer is a leading cause of death, and the impact of the
+pandemic on cancer diagnoses is an important public health concern... Beginning
+March 4, 2020 ... weekly cancer cases declined precipitously ... followed by a
+moderate recovery ... Thereafter, weekly cancer cases trended slowly back toward
+pre-COVID-19 baseline levels. ... Following the pandemic onset, there was a
+cumulative year-over-year decline in cancer cases overall of 7.3%... The data in this
+study demonstrate a substantial reduction in cancer diagnoses following the onset
+of COVID-19...
+
+Human-Written Note: Dr. Ryan Cole claims that vaccination has caused an
+increase in the cancer rate... There has actually been a decline in cancer rates
+since covid-19 began. [PubMed]
+
+© Misinterprets PubMed study — implies actual drop in cancer incidence
+
+CrowdNotes+ (GPT-4.1): There is no evidence that COVID-19 vaccines have
+caused an increase in cancer rates; studies show a temporary decline in cancer
+diagnoses during the pandemic, likely due to reduced healthcare access, not
+vaccination. [PubMed]
+
+g Provides full PubMed context; explains what might have caused the decline
+
+CrowdNotes+ (MedGemma-27B): A study analyzing electronic medical records
+found a substantial reduction in cancer diagnoses following the onset of COVID-
+
+19, which returned to pre-pandemic levels about 12 months later. [PubMed]
+[V) Provides full PubMed context; describes decline then subsequent increase
+
+Figure 6: Given the same evidence, the note generated by
+CrRowDNOoTEs+ provides complete contextual information
+omitted in the human-written note.
+
+Table 4: Ablation performance in note helpfulness (%) of
+utility-guided note automation in CROWDNOTES+.
+
+Model Helpful Not Helpful | Overall
+CROWDNOTES+ (03) 92.11 70.19 81.15
+- Query Diversity 79.50 69.09 74.30
+- Utility Judgment 79.02 64.83 71.93
+CrowpDNotes+ (MedGemma-27B) 79.81 58.68 69.25
+- Query Diversity 74.76 54.73 64.75
+- Utility Judgment 66.25 50.47 58.36
+
+6.5 Evidence Utility Comparison
+
+To better characterize how LLMs and humans differ in evidence se-
+lection, we compare the evidence preferences and quality of human
+contributors versus LLMs. As shown in Figure 8, humans rely more
+on news media, social media, and general health portals, while
+LLMs favor authoritative domains such as health agencies. This
+pattern suggests that LLMs favor institutional and evidence-based
+sources, leading to more factually grounded notes.
+
+To quantify evidence utility, we conduct pairwise evaluations
+between human-provided evidence and CRowDNOTES+-retrieved
+evidence across all 1,268 samples in HEALTHNOTES. For each post,
+a web-search-enabled GPT-4.1 judge compares &, and &,,, with
+CROWDNOTES+ instantiated using two representative LLMs: 03
+(closed-source) and MedGemma-27B (open-source). As shown in
+Table 5, CROwDNOTES+ achieves win rates above 50% over human
+evidence for both models, indicating that utility-guided retrieval
+can match or surpass human selection.
+
+To inform deployment, we analyze cases where evidence selected
+by CrowDNotes+ is less preferred than human evidence. Two hu-
+man experts first collaboratively reviewed 100 cases to identify four
+
+
+Table 5: Comparison (%) of evidence utility between human-
+provided sources (used in human baseline and augmentation
+mode) and LLM-selected sources (used in automation mode).
+
+Model (vs. Human) Win Lose _ Tie
+
+CROWDNOTES+ (03) 65.85 22.48 11.67
+CROwWDNotTEs+ (MedGemma-27B) 57.57 33.20 9.23
+
+Misleading Post: ... Just visited my brother and friend, ..., after he underwent
+surgery on his right hand, paid for by his SHIF card.
+
+It is insanity to bemoan facing out of a social health program (NHIF, of 1966) when
+we are upgrading it to the novel SHIF.
+
+The teething SHIF software problems will soon come to an end.
+
+Yes, the working class is paying more, but what a relief if ... (7 Nov'24)
+
+Human Evidence (Directly Addresses Claim) || LLM Evidence (Tangential Focus on SHIF)
+www.theafricareport.com/... (8 Oct’24) www.cliffedekkerhofmeyr.com/... (4 Jan’24)
+“Implemented throughout Kenya on 1 October] | “The SHIA abolishes the National Health
+
+the new Social Health Insurance Fund (SHIF) Insurance Fund (NHIF) and establishes three
+scheme is faced with delays in registering new funds: (i) the Primary Healthcare Fund
+patients and processing claims, which has (PHF), (ii) the Social Health Insurance Fund
+caused disruptions and stressed patients in (SHIF), and (iii) the Emergency, Chronic and
+both public and private hospitals ...” Critical IIIness Fund (ECCIF) ..."
+
+Misleading Post: The British Medical Journal finally state the bloody obvious in
+linking the experimental mRNA Vaccines to excess deaths. (4 Jun’24)
+
+Human Evidence (Peer-Reviewed Research) || LLM Evidence (Blog, Non-Peer-Reviewed)
+https://bmjpublichealth.bmj.com/... (6 May'24) || https://bmjgroup.com/high-excess... (4 Jun‘24)
+[Directly locates the peer-reviewed research [Retrieves a press release instead of the peer-
+article misrepresented by the post] reviewed article]
+
+03
+(N=285)
+0% 20% 40% 60% 80% 10 0%
+MedGemma-27B
+(N=421)
+0% 20% 40% 60% 80% 100%
+
+| Weak Claim Grounding La Poor Source Quality Judgment
+
+| Limited Audience Adaptation CL] Insufficient Evidence Comprehensiveness
+
+Figure 7: Distribution of reasoning limitations observed in
+LLM-selected evidence where human sources are preferred.
+
+recurring causes: (1) Weak Claim Grounding, where the LLM fails to
+capture the core claim or retrieve directly relevant evidence; (2) Poor
+Source Quality Judgment, where the LLM treats all sources equally
+without discerning credibility or authority; (3) Limited Audience
+Adaptation, where LLM-retrieved sources are overly technical or
+inaccessible to general readers; and (4) Incomplete Cross-Source
+Reasoning, where the LLM fails to integrate multiple sources into
+coherent conclusions. We then attributed all remaining failures to
+a primary cause accordingly via GPT-4.1. As illustrated in Figure 7,
+these limitations often reflect shallow keyword matching or insuf-
+ficient contextual reasoning. This suggest that query formulation,
+multi-hop reasoning, and domain-specific retrieval tuning could
+further improve evidence utility in real-world applications.
+
+6.6 Discussion: Implications for Deployment
+
+Our findings suggest that integrating LLMs into Community Notes
+can substantially improve both evaluation and generation. While
+the X Community Notes Team envisions a hybrid model where
+humans and LLMs co-author notes and humans vote on helpful-
+ness [14], our analysis (Section 6.3) shows that human voting often
+rewards fluency over factual accuracy. The proposed hierarchical
+
+Jiaying Wu et al.
+
+evaluation pipeline (Section 4.3) mitigates this bias by enforc-
+ing stepwise verification of relevance, correctness, and helpfulness,
+yielding more reliable and interpretable assessments. Complemen-
+tarily, the strong results of utility-guided retrieval demonstrate
+that partial automation can accelerate note creation. Future refine-
+ments such as intent-aware search [32] and query diversification
+[34] may further improve contextual grounding. Overall, our results
+point to a hybrid governance model where LLMs ensure factual
+rigor and timeliness, and human contributors provide oversight
+and pluralistic judgment.
+
+7 Conclusion
+
+We present CRowDNOTES-+, a framework for LLM-augmented gov-
+ernance of health misinformation through Community Notes. Com-
+bining hierarchical evaluation, utility-guided retrieval, and evidence-
+grounded generation, CROowDNoTEs+ enables systematic assess-
+ment and scalable automation of note creation. Extensive experi-
+ments on fifteen representative LLMs show that large reasoning
+and domain-specialized models can achieve strong factual accuracy,
+surpassing human-written notes under fair evaluation. These re-
+sults demonstrate the feasibility of using LLMs to support timely,
+evidence-based, and transparent misinformation correction in real-
+world social media platforms.
+
+8 Future Work and Ethical Considerations
+
+Limitations and Future Work. This work establishes a foun-
+dation for LLM-augmented Community Notes and opens several
+promising directions. A natural next step is to extend CRowp-
+Nortes+ beyond English health misinformation to low-resource
+languages and more subjective domains such as politics and socio-
+cultural discourse, where factual boundaries are fluid and consensus
+is harder to achieve. Another direction is end-to-end automation,
+integrating CRowDNOoTES+ with early misinformation detection
+and claim-prioritization pipelines to enable real-time note genera-
+tion and intervention. Improving retrieval reasoning also remains
+crucial: as shown in Section 6.5, LLMs still rely on surface-level cues
+when selecting evidence. Future advances in multi-hop retrieval,
+intent-aware search, and adaptive query reformulation could fur-
+ther enhance factual grounding and contextual completeness. Col-
+lectively, these directions point toward scalable, interpretable, and
+human-centered systems for misinformation governance.
+
+Ethics Statement. All data collection and usage strictly comply
+with platform and public data policies. X posts and web evidence
+were gathered through authorized APIs, excluding any private or
+personally identifiable information. To safeguard user privacy while
+supporting reproducibility, the HEALTHNOTES will be released un-
+der controlled access for non-commercial, research-only purposes.
+
+We emphasize that CRowDNotEs-+ is designed to assist, not re-
+place, human contributors in crowd-sourced fact-checking. Human
+oversight remains central to ensuring factual accuracy, contextual
+awareness, and fairness in social media content moderation. We ad-
+vocate for transparent and participatory deployment that preserves
+free expression and welcomes diverse perspectives. Our ultimate
+goal is to support timely, evidence-grounded, and responsible gov-
+ernance of online misinformation while maintaining an open and
+trustworthy information ecosystem.
+
+
+Beyond the Crowd: LLM-Augmented Community Notes for Governing Health Misinformation
+
+Acknowledgments
+
+This research is supported by the Ministry of Education, Singapore,
+under its Academic Research Fund Tier 1 (T1 251RES2508) and MOE
+AcRF TIER 3 Grant (MOE-MOET32022-0001). The authors would
+like to thank Jiafeng Guo (Institute of Computing Technology, CAS)
+for insightful suggestions on note automation and Sahajpreet Singh
+(National University of Singapore) for early high-level discussions.
+
+References
+
+1
+
+[10
+
+11
+
+[12
+
+[13
+
+[14
+
+[15
+
+[16
+[17
+
+[18
+
+[19
+
+Funmi Adebesin, Hanlie Smuts, Tendani Mawela, George Maramba, Marie Hat-
+tingh, et al. 2023. The role of social media in health misinformation and disinfor-
+mation during the COVID-19 pandemic: bibliometric analysis. JMIR infodemiol-
+ogy 3, 1 (2023), e48620.
+
+Jennifer Allen, Antonio A Arechar, Gordon Pennycook, and David G Rand. 2021.
+Scaling up fact-checking using the wisdom of crowds. Science advances 7, 36
+(2021), eabf4393
+
+Anthropic. 2025. Introducing Claude 4. https://www.anthropic.com/news/claude-4
+(2025).
+
+Isabelle Augenstein, Michiel Bakker, Tanmoy Chakraborty, David Corney, Emilio
+Ferrara, Iryna Gurevych, Scott Hale, Eduard Hovy, Heng Ji, Irene Larraz, et al.
+2025. Community Moderation and the New Epistemology of Fact Checking on
+Social Media. arXiv preprint arXiv:2505.20067 (2025).
+
+Yuwei Chuai, Moritz Pilarski, Thomas Renault, David Restrepo-Amariles, Aurore
+Troussel-Clément, Gabriele Lenzini, and Nicolas Préllochs. 2024. Community-
+based fact-checking reduces the spread of misleading posts on social media.
+arXiv preprint arXiv:2409.08781 (2024).
+
+Yuwei Chuai, Haoye Tian, Nicolas Préllochs, and Gabriele Lenzini. 2024. Did
+the Roll-Out of Community Notes Reduce Engagement With Misinformation
+on X/Twitter? Proc. ACM Hum.-Comput. Interact. 8, CSCW2, Article 428 (2024),
+52 pages.
+
+Soham De, Michiel A. Bakker, Jay Baxter, and Martin Saveski. 2025. Supernotes:
+Driving Consensus in Crowd-Sourced Fact-Checking. In Proceedings of the ACM
+on Web Conference 2025. 3751-3761.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad
+Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan,
+et al. 2024. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 (2024).
+Max Glockner, Yufang Hou, Preslav Nakov, and Iryna Gurevych. 2024. Missci:
+Reconstructing Fallacies in Misrepresented Science. In Proceedings of the 62nd
+Annual Meeting of the Association for Computational Linguistics (Volume 1: Long
+Papers), Lun-Wei Ku, Andre Martins, and Vivek Srikumar (Eds.). Association for
+Computational Linguistics, Bangkok, Thailand, 4372-4405. doi:10.18653/v1/2024.
+acl-long.240
+
+William Godel, Zeve Sanderson, Kevin Aslett, Jonathan Nagler, Richard Bonneau,
+Nathaniel Persily, and Joshua A Tucker. 2021. Moderating with the mob: Eval-
+uating the efficacy of real-time crowdsourced fact-checking. Journal of Online
+Trust and Safety 1, 1 (2021).
+
+Google. 2025. Gemini 2.5 Pro. https://deepmind.google/technologies/gemini/pro/
+(2025).
+
+Beizhe Hu, Qiang Sheng, Juan Cao, Yuhui Shi, Yang Li, Danding Wang, and
+Peng Qi. 2024. Bad actor, good advisor: Exploring the role of large language
+models in fake news detection. In Proceedings of the AAAI conference on artificial
+intelligence, Vol. 38. 22105-22113.
+
+Md Saiful Islam, Tonmoy Sarkar, Sazzad Hossain Khan, Abu-Hena Mostofa
+Kamal, SM Murshid Hasan, Alamgir Kabir, Dalia Yeasmin, Mohammad Ariful
+Islam, Kamal Ibne Amin Chowdhury, Kazi Selim Anwar, et al. 2020. COVID-19-
+related infodemic and its impact on public health: A global social media analysis.
+The American journal of tropical medicine and hygiene 103, 4 (2020), 1621.
+Haiwen Li, Soham De, Manon Revel, Andreas Haupt, Brad Miller, Keith Coleman,
+Jay Baxter, Martin Saveski, and Michiel A Bakker. 2025. Scaling Human Judgment
+in Community Notes with LLMs. arXiv preprint arXiv:2506.24118 (2025).
+Cameron Martel, Jennifer Allen, Gordon Pennycook, and David G Rand. 2024.
+Crowds can effectively identify misinformation at scale. Perspectives on Psycho-
+logical Science 19, 2 (2024), 477-488.
+
+OpenAI. 2025. Introducing GPT-4.1 in the API. https://openai.com/index/ gpt-4- 1/
+(2025).
+
+OpenAI. 2025. Introducing OpenAI 03 and 04-mini. https://openai.com/index/
+introducing-03-and-04-mini/ (2025).
+
+Liangming Pan, Xiaobao Wu, Xinyuan Lu, Anh Tuan Luu, William Yang Wang,
+Min-Yen Kan, and Preslav Nakov. 2023. Fact-Checking Complex Claims with
+Program-Guided Reasoning. In Proceedings of the 61st Annual Meeting of the
+Association for Computational Linguistics (Volume 1: Long Papers). 6981-7004.
+Jan Pfander and Sacha Altay. 2025. Spotting false news and doubting true news:
+a systematic review and meta-analysis of news judgements. Nature human
+behaviour (2025), 1-12.
+
+[20]
+
+[21]
+
+23
+
+24
+
+25
+
+26
+
+27
+
+28
+
+29
+
+30
+
+31
+
+32
+
+33
+
+34
+
+35
+
+36
+
+37
+
+38
+
+39
+
+Martin Potthast, Johannes Kiesel, Kevin Reinartz, Janek Bevendorff, and Benno
+Stein. 2017. A stylometric inquiry into hyperpartisan and fake news. arXiv
+preprint arXiv:1702.05638 (2017).
+
+Thomas Renault, David Restrepo Amariles, and Aurore Troussel. 2024. Collabo-
+ratively adding context to social media posts reduces the sharing of false news.
+arXiv preprint arXiv:2404.02803 (2024).
+
+Jon Saad-Falcon, Omar Khattab, Christopher Potts, and Matei Zaharia. 2024.
+ARES: An Automated Evaluation Framework for Retrieval-Augmented Genera-
+tion Systems. In Proceedings of the 2024 Conference of the North American Chapter
+of the Association for Computational Linguistics: Human Language Technologies
+(Volume 1: Long Papers). 338-354.
+
+Rodrygo L. T. Santos, Craig Macdonald, and Iadh Ounis. 2015. Search Result
+Diversification. Found. Trends Inf: Retr. 9, 1 (2015), 1-90.
+
+Andrew Sellergren, Sahar Kazemzadeh, Tiam Jaroensri, Atilla Kiraly, Madeleine
+Traverse, Timo Kohlberger, Shawn Xu, Fayaz Jamil, Cian Hughes, Charles Lau,
+et al. 2025. Medgemma technical report. arXiv preprint arXiv:2507.05201 (2025).
+Maryam Shahbazi and Deborah Bunker. 2024. Social media trust: Fighting misin-
+formation in the time of crisis. International Journal of Information Management
+77 (2024), 102780
+
+Gautam Kishore Shahi, Anne Dirkson, and Tim A Majchrzak. 2021. An ex-
+ploratory study of COVID-19 misinformation on Twitter. Online social networks
+and media 22 (2021), 100104.
+
+Jane B Singer. 2023. Closing the barn door? Fact-checkers as retroactive gatekeep-
+ers of the COVID-19 “infodemic”. Journalism & Mass Communication Quarterly
+100, 2 (2023), 332-353.
+
+Sahajpreet Singh, Jiaying Wu, Svetlana Churina, and Kokil Jaidka. 2025. On the
+Limitations of LLM-Synthesized Social Media Misinformation Moderation. In
+ICLR 2025 Workshop ICBINB.
+
+Isaac Slaughter, Axel Peytavin, Johan Ugander, and Martin Saveski. 2025. Com-
+munity notes reduce engagement with and diffusion of false information online.
+Proceedings of the National Academy of Sciences 122, 38 (2025), e2503413122.
+Mistral AI Team. 2024. Un Ministral, des Ministraux. https://mistral.ai/news/
+ministraux (2024).
+
+Herun Wan, Jiaying Wu, Minnan Luo, Zhi Zeng, and Zhixiong Su. 2025. Truth
+over Tricks: Measuring and Mitigating Shortcut Learning in Misinformation
+Detection. arXiv preprint arXiv:2506.02350 (2025).
+
+Yuyan Wang, Cheenar Banerjee, Samer Chucri, Fabio Soldo, Sriraj Badam, Ed H.
+Chi, and Minmin Chen. 2025. Beyond Item Dissimilarities: Diversifying by Intent
+in Recommender Systems. In Proceedings of the 31st ACM SIGKDD Conference on
+Knowledge Discovery and Data Mining V.1. 2672-2681.
+
+Stefan Wojcik, Sophie Hilgard, Nick Judd, Delia Mocanu, Stephen Ragain, MB
+Hunzaker, Keith Coleman, and Jay Baxter. 2022. Birdwatch: Crowd wisdom
+and bridging algorithms can inform understanding and reduce the spread of
+misinformation. arXiv preprint arXiv:2210.15723 (2022).
+
+Haolun Wu, Yansen Zhang, Chen Ma, Fuyuan Lyu, Bowei He, Bhaskar Mitra, and
+Xue Liu. 2024. Result Diversification in Search and Recommendation: A Survey
+. IEEE Transactions on Knowledge & Data Engineering 36, 10 (2024), 5354-5373.
+Jiaying Wu, Jiafeng Guo, and Bryan Hooi. 2024. Fake News in Sheep’s Cloth-
+ing: Robust Fake News Detection Against LLM-Empowered Style Attacks. In
+Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and
+Data Mining. 3367-3378.
+
+Jiaying Wu and Bryan Hooi. 2023. DECOR: Degree-Corrected Social Graph
+Refinement for Fake News Detection. In Proceedings of the 29th ACM SIGKDD
+Conference on Knowledge Discovery and Data Mining. 2582-2593.
+
+Jiaying Wu, Shen Li, Ailin Deng, Miao Xiong, and Bryan Hooi. 2023. Prompt-
+and-Align: Prompt-Based Social Alignment for Few-Shot Fake News Detection.
+In Proceedings of the 32nd ACM International Conference on Information and
+Knowledge Management. 2726-2736.
+
+Amelie Wuehrl, Dustin Wright, Roman Klinger, and Isabelle Augenstein. 2024.
+Understanding Fine-grained Distortions in Reports of Scientific Findings. In
+Findings of the Association for Computational Linguistics: ACL 2024. 6175-6191.
+xAI. 2025. Grok 4. https://x.ai/news/grok-4 (2025).
+
+Weiwen Xu, Hou Pong Chan, Long Li, Mahani Aljunied, Ruifeng Yuan, Jianyu
+Wang, Chenghao Xiao, Guizhen Chen, Chaoqun Liu, Zhaodonghui Li, et al.
+2025. Lingshu: A Generalist Foundation Model for Unified Multimodal Medical
+Understanding and Reasoning. arXiv preprint arXiv:2506.07044 (2025).
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng,
+Bowen Yu, Chang Gao, Chengen Huang, Chenxu Ly, et al. 2025. Qwen3 technical
+report. arXiv preprint arXiv:2505.09388 (2025).
+
+Hao Yu, Aoran Gan, Kai Zhang, Shiwei Tong, Qi Liu, and Zhaofeng Liu. 2025.
+Evaluation of Retrieval-Augmented Generation: A Survey. In Big Data. 102-120.
+Hengran Zhang, Ruqing Zhang, Jiafeng Guo, Maarten de Rijke, Yixing Fan, and
+Xueqi Cheng. 2024. Are Large Language Models Good at Utility Judgments?.
+In Proceedings of the 47th International ACM SIGIR Conference on Research and
+Development in Information Retrieval. 1941-1951.
+
+Xueyao Zhang, Juan Cao, Xirong Li, Qiang Sheng, Lei Zhong, and Kai Shu.
+2021. Mining Dual Emotion for Fake News Detection. In Proceedings of the Web
+Conference 2021. 3465-3476.
+
+
+[45]
+
+[46]
+
+Xuan Zhang and Wei Gao. 2023. Towards LLM-based Fact Verification on News
+Claims with a Hierarchical Step-by-Step Prompting Method. In Proceedings of
+the 13th International Joint Conference on Natural Language Processing and the
+3rd Conference of the Asia-Pacific Chapter of the Association for Computational
+Linguistics (Volume 1: Long Papers). 996-1011.
+
+Xinyi Zhou, Ashish Sharma, Amy X Zhang, and Tim Althoff. 2024. Correcting
+misinformation on social media with a large language model. arXiv preprint
+arXiv:2403.11169 (2024).
+
+Jiaying Wu et al.
+
+
+Beyond the Crowd: LLM-Augmented Community Notes for Governing Health Misinformation
+
+A Details of CRowDNOTEsS+ Framework
+A.1_ Utility-Guided Evidence Curation
+
+In the automation mode (Section 4.2), evidence is sourced from the
+Web through a utility-guided selection process rather than human-
+provided URLs as in the augmentation mode (Section 4.1). Given a
+candidate pool P of evidence snippets (each containing a webpage
+title and summary from Google Custom Search API *), an LLM
+estimates the utility of each snippet in supporting the flagged post.
+The following prompt is used for judgment:
+
+Utility Judgment in Note Automation (Section 4.2)
+
+SYSTEM_PROMPT = “You are a careful selector. Output exactly
+ONE integer as instructed.”
+
+You are selecting one source (healthcare-related Community Note
+utility).
+
+This is selection round #{round_no}. Choose exactly ONE result
+that has the highest utility.
+
+## Utility should reflect whether the search result is:
+
+- Relevant to the tweet’s topic.
+
+- Likely to add meaningful background or clarification.
+- Reliable enough to be worth retrieving.
+
+## OUTPUT FORMAT (critical):
+
+- Output EXACTLY one integer, the index of your chosen item
+(1..{len(items_remaining)}).
+
+- No extra words. No numbering other than the single integer. No
+explanations.
+
+## Tweet: tweet
+
+## Search Results (candidates):
+[idx] Title: title Snippet: snippet URL: url
+
+Through r iterative rounds, the model selects and removes the
+highest-utility item in each step, resulting in a final quota of r high-
+utility evidence items. Their corresponding URLs constitute the
+machine-selected evidence set €,,, which is later used for retrieval
+and note generation. The distributions of human- and LLM-selected
+evidence is shown in Figure 8.
+
+A.2. Evidence Retrieval and Processing
+
+For each evidence set, either human-provided (&;,) or LLM-selected
+(Em), we retrieve the corresponding webpage content using the
+Jina API’. Retrieved pages are cleaned to remove non-essential
+elements such as headers, footers, sidebars, and reference sections.
+The remaining text is then segmented into overlapping passages of
+512 tokens with an overlap of 128 tokens.
+
+Each passage is embedded using sentence-transformers/all-
+mpnet-base-v2, and the passage with the highest similarity to the
+flagged post p is selected. The resulting top-ranked passages form
+the set of evidence chunks, denoted as C; for human-provided
+evidence or C,,, for LLM-selected evidence, which are subsequently
+used for note generation.
+
+‘https://developers.google.com/custom-search/
+Shttps://jina.ai/
+
+A.3 Note Generation
+
+Given the evidence chunks, either human-provided (C,) or LLM-
+retrieved (C,,,), CROWDNOTES+ generates contextual notes for flagged
+posts identified as potentially misleading. Both the augmentation
+and automation settings (Section 4.1 and Section 4.2) employ the
+same prompt structure for note generation:
+
+Generating Notes in CROwDNOTEs+ (both settings)
+
+SYSTEM_PROMPT = “Community notes is a collaborative way
+to add helpful context to posts and keep people better informed.
+Now you are a highly experienced community note writer.’
+
+Task: Write a community note based ONLY on the source snippets
+below.
+
+Hard constraints:
+
+- The note MUST be in English.
+
+- DO NOT include any URLs in the note.
+
+- The note MUST be a single line (no line breaks, no bullets).
+
+- Note length MUST be < {budget_chars} characters. Do not exceed
+this budget.
+
+- Be specific, objective, and verifiable.
+
+Tweet: {query}
+
+Source snippets:
+
+[S{index}] url (chunk {chunk_id}) {text}
+
+Output only the note content. Remember: length < {budget_chars},
+no URLs.
+
+The model conditions on the post text p and the selected evidence
+chunks to compose an informative, fact-grounded note. In the final
+output, the generated note text is paired with the corresponding
+evidence URLs, ensuring transparency and traceability.
+
+A.4 Note Evaluation
+
+As detailed in Section 4.3, we use a three-step progressive evaluation
+scheme. A note advances only if it passes the current step.
+Relevance. We first assess whether the evidence chunks provide
+factual background or clarification that helps readers understand
+or evaluate the claim in the post:
+
+Step 1: Evidence Relevance Evaluation (Section 4.3)
+
+SYSTEM_PROMPT = "You are a very meticulous inspector"
+You are given a Tweet and one or more Source snippets: Tweet:
+
+{query}
+
+Source snippets:
+[S{index}] {url} (chunk chunk _id)
+{text}
+
+Task: Determine whether any of the Source snippets adds mean-
+ingful factual background, clarification, or supporting information
+that helps better understand or evaluate the claim made in the
+Tweet.
+
+1. Check each snippet independently.
+
+2. If at least one snippet meets the requirements, output "Final
+decision: yes"; otherwise output "Final decision: no".
+
+
+
+Correctness. Conditioned on passing relevance, we evaluate whether
+the note faithfully represents the provided sources without factual
+errors, exaggerations, or misleading framing.
+
+Step 2: Note Correctness Evaluation (Section 4.3)
+
+SYSTEM_PROMPT = "You are a very meticulous inspector"
+
+You are given a Community note and one or more Source snippets:
+Community Note:
+
+{note}
+
+Source snippets:
+
+[S{index}] furl } (chunk {chunk_id}) text
+
+Task: Decide whether the Community note distorts the informa-
+tion in any of the provided Source snippets.
+
+1. Check each snippet independently.
+
+2. If at least one distortion is found, output "Final decision: yes";
+otherwise output "Final decision: no".
+
+Helpfulness. Conditioned on passing correctness, we evaluate
+whether the note offers useful context that helps readers understand
+or assess the post, following X Community Notes guidelines. We use
+HEALTHJUDGE (temperature 0) for domain-adapted, deterministic
+scoring. To reflect platform constraints, only at this step we apply
+the 280-character cap used by Community Notes: if the combined
+length of the note and URLs exceeds 280 characters (each URL
+counts as one), the note text is truncated accordingly.
+
+Step 3: Note Helpfulness Evaluation (Section 4.3)
+SYSTEM_PROMPT = "You are a precise text classifier.’
+
+You are given a Tweet and its corresponding Note:
+Tweet: {tweet_text}
+Note: {note_text}
+
+The purpose of note is to add helpful context to tweet and keep
+people better informed. Your task is to evaluate whether the Note
+is Helpful or Not Helpful based on the following criteria:
+“Helpful Criteria:** - Clear and/or well-written - Cites high-
+quality sources - Directly addresses the Tweet’s claim - Provides
+important context - Neutral or unbiased language - Other (any
+additional positive reason)
+
+““Not Helpful Criteria:** - Incorrect information - Sources
+missing or unreliable - Misses key points or irrelevant - Hard
+to understand - Argumentative or biased language - Spam,
+
+harassment, or abuse - Sources do not support note - Opinion
+or speculation - Note not needed on this Tweet - Other (any
+additional negative reason)
+
+Instructions:
+
+1. Carefully read the Tweet and the Note.
+
+2. Analyze the Note using the Helpful and Not Helpful criteria
+above.
+
+3. Respond with "Final decision: yes" (if Helpful) or "Final decision:
+no" (if Not Helpful).
+
+Jiaying Wu et al.
+
+Gm Human
+3 GPT-4.1
+25 (=) MedGemma-27B
+—~ 20
+x
+ov
+Dn
+Bis
+e
+o
+o
+* 10
+5
+A B Cc D E F G
+
+Figure 8: Human and LLM evidence source preferences. A:
+Health Authorities; B: Research Literature; C: News Media;
+D: Social Media; E: Health Portals; F: Commercial / Advocacy
+/ NGO Sites; G: Others.
+
+B HEALTHNOTES Details
+B.1 Data
+
+Using the 1,268 human-written notes described in Section 5, we
+retrieve their corresponding flagged posts via the X API, leveraging
+post IDs from the public Community Notes dataset. Table 6 and
+Figure 9 summarize the dataset’s statistics and topical distribution.
+
+Table 6: Dataset statistics of HEALTHNOTES. Posts span Jun
+2020-Jul 2025; notes span May 2022-Aug 2025.
+
+#.of Notes #.of Posts #.of URLs
+Helpful 634 608 1,330
+Not Helpful 634 622 907
+
+Subcategories
+Diseases or medical conditions
+Drugs, vaccines, treatments, procedures, tests
+Public health guidance or policy
+Weliness products, diets, supplements
+Healthcare professionals or systems
+Biological, virology, or epidemiology concepts
+Health-related conspiracies or hoaxes
+
+18.1%
+24.9%
+ey 2.2
+7.3%
+9.1%
+6.3%
+
+Figure 9: Topic distribution of notes in HEALTHNOTES.
+
+B.2) HEALTHJUDGE Training Setup
+
+We fine-tuned HEALTHJUDGE, a domain-adapted variant of Lingshu-
+7B [40], as an automatic evaluator of note helpfulness. The dataset
+includes 2,971 Helpful and 742 Not Helpful post—-note pairs, with
+1,000 samples (800 Helpful / 200 Not Helpful) reserved for evalua-
+tion. Each instance was formatted as a chat prompt, and loss was
+applied only to the final decision tokens (“Final decision: yes/no”)
+
+
+Beyond the Crowd: LLM-Augmented Community Notes for Governing Health Misinformation
+
+with left padding for causal alignment. HEALTHJUDGE was trained
+for 2 epochs with full-parameter fine-tuning using AdamW (learn-
+ing rate 1 x 10~%), gradient accumulation of 16 steps, and bfloat16
+precision. The model produces deterministic, parseable outputs for
+reliable automatic evaluation.
+
+B.3. Models Evaluated
+
+The specifications of all fifteen LLMs evaluated in Section 6.1 are
+summarized in Table 7. For consistency and reproducibility, all
+experiments use a fixed temperature of 0 whenever applicable.
+
+Table 7: Model cards for LLMs used in CROwDNOTES+.
+
+Model
+
+Model Card
+
+Gemini-2.5-Pro [11]
+03 [17]
+Grok-4 [39]
+
+gemini-2.5-pro-preview-03-25
+03-2025-04-16
+x-ai/grok-4
+
+GPT-4.1 [16]
+Claude-Opus-4 [3]
+
+gpt-4.1-2025-04-14
+claude-opus-4-20250514
+
+Qwen3-32B [41]
+Qwen3-14B [41]
+Llama-3.1-8B [8]
+Ministral-8B [30]
+Qwen3-8B [41]
+
+Qwen/Qwen3-32B
+Qwen/Qwen3-14B
+meta-llama/Llama-3.1-8B-Instruct
+mistralai/Ministral-8B-Instruct-2410
+Qwen/Qwen3-8B
+
+Lingshu-32B [40]
+MedGemma-27B [24]
+Lingshu-7B [40]
+MedGemma-4B [24]
+
+lingshu-medical-mllm/Lingshu-32B
+google/medgemma-27b-text-it
+lingshu-medical-mllm/Lingshu-7B
+google/medgemma-4b-it

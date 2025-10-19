@@ -1,0 +1,840 @@
+arX1v:2510.09887v1 [cs.CL] 10 Oct 2025
+
+Preprint
+
+ABDUCTIVE PREFERENCE LEARNING
+
+Yijin Ni
+
+H. Milton Stewart School of Industrial and Systems Engineering
+Georgia Institute of Technology
+
+Atlanta, GA 30332, USA
+
+ynié64@gatech.edu
+
+Peng Qi
+
+Uniphore
+
+Palo Alto, CA 94034, USA
+peng.gqi@uniphore.com
+
+ABSTRACT
+
+Frontier large language models such as GPT-5 and Claude Sonnet remain prone
+to overconfidence even after alignment through Reinforcement Learning with Hu-
+man Feedback (RLHF) and Direct Preference Optimization (DPO). For instance,
+they tend to offer the same conservative answer “No” to both questions “Can I
+eat the [food / potato chips] that has been left out overnight?” despite the latter
+requiring no refridgeration for safe consumption. We find that this failure is po-
+tentially attributed to a limitation of existing preference learning: it emphasizes
+selecting the correct response for a given prompt, while neglecting counterfactual
+prompts that should alter the response.
+
+To address this limitation, we propose abductive preference learning, a fine-
+tuning paradigm that reverses the conventional conditioning by learning prefer-
+ences over prompts given a response. To validate this idea, we construct an ab-
+ductive dataset derived from the HALUEVAL QA benchmark with 1,001 entries,
+implementing abductive DPO and its variant DPOP. Experiments reveal comple-
+mentary strengths: standard methods improve response selection, abductive meth-
+ods improve prompt discrimination, while a multitask objective unifies both. On
+the abductive dataset, multitask DPOP boosts accuracy from 90.0% to 99.5% in
+response selection and 54.7% to 85.0% in prompt discrimination, with qualitative
+evidence highlighting improved sensitivity to prompt differences. Finally, eval-
+uation on AlpacaEval shows multitask DPOP improves win rate (from 5.26% to
+6.17%), confirming that abductive preference learning preserves the benefits of
+conventional preference optimization while addressing the overlooked challenge
+of counterfactual prompts.
+
+1 INTRODUCTION
+
+Large language models (LLMs) have achieved impressive alignment with human preferences
+through preference learning algorithms such as Reinforcement Learning from Human Feedback
+
+(RLHF, |Ouyang et al.) 2022} |Chaudhari et al.||2024) and Direct Preference Optimization (DPO,
+
+Rafailov et al.||2023). Beyond the original formulations, many variants have been proposed to ad-
+
+dress issues such as stability and objective design (Pal et al.| [2024 2024
+2024), reflecting the rapid development on this line of research.
+
+Despite these advances, state-of-the-art models including GPT-5 and Claude Sonnet 4 exhibit a
+persistent weakness: overconfidence. That is, models often produce highly confident outputs that
+remain unchanged even under minimal modifications to the input prompt. As illustrated in Table
+two representative forms of modification—constructing an uncommon hypothetical scenario or
+replacing a general category with a specific outlier—are often ignored. In such cases, models fall
+back on general knowledge patterns that dominate training data, rather than adapting to the nuance
+of the modified prompt. This phenomenon highlights a gap: existing training objectives do not
+
+
+Preprint
+
+General prompt Specified prompt Response
+
+Where was the last Olympics Paris
+
+held?
+
+Can I eat the food that has been
+left out overnight?
+
+I am writing a novel describing life on Mars .
+Where was the last Olympics held in my text?
+
+Can I eat the potato chips that have been left out No
+overnight?
+
+Table 1: Illustrative examples of the overconfidence phenomenon. Although the prompts are clearly
+modified, the model produces the same confident responses, defaulting to general knowledge pat-
+terns rather than adapting to the input.
+
+sufficiently encourage sensitivity to counterfactual prompts, consistent with recent observations on
+alignment-induced calibration issues (Leng et al.](2025); (2025)).
+
+Existing preference learning methods focus on the response dimension: given a prompt x and re-
+sponses {y;}/<,, the model is trained to assign higher probability to the preferred response. This
+ensures that, for a fixed prompt, good responses are ranked above bad ones. However, this formu-
+lation treats the prompt as static, leaving no mechanism that encourages the model to adapt when
+the prompt itself varies. Consequently, even as models achieve strong performance on standard
+alignment benchmarks, they may ignore subtle prompt differences—a behavior that manifests as
+overconfidence in practice.
+
+To address this limitation, we propose abductive preference learning, a fine-tuning paradigm that
+explicitly accounts for the modification of prompts. We show theoretically that under mild assump-
+tions, increasing the conditional probability Pr(a | y), which corresponds to selecting the appro-
+priate prompt given a response, can be achieved by swapping the roles of prompts and responses in
+the standard DPO objective. In other words, whereas conventional preference learning asks which
+response is better for a given prompt, the abductive view asks which prompt is better supported by a
+given response. This reversal directly addresses the asymmetry in existing formulations by provid-
+ing a mechanism for models to account for how variations in prompts affect their outputs in addition
+to how responses differ for a fixed prompt. The principle is general and extends naturally to widely
+used preference optimization algorithms, yielding abductive variants of DPO and general preference
+learning methods.
+
+Prompts Base Model DPO Multi-DPO
+
+Background Knowledge: The Centurion ARV Mk
+II, was a British armored recovery vehicle based on
+
+the Centurion main battle tank. Introduced in [1945 /
+1950s], it is widely considered to be one of the most
+successful post-war tank designs, remaining in produc-
+tion into the 1960s, and seeing combat in the front lines
+into the 1980s.
+
+Question: The main battle tank that Centurion ARV
+Mk II was based on was used introduced in what year?
+
+The main battle tank
+that Centurion ARV
+Mk II was based on,
+the Centurion, was
+used from [1945 /
+1940s].
+
+1945 / 1945
+
+1945 / 1950s
+
+Background Knowledge: “U Want Me 2" is a song
+by Sarah McLachlan and the lead original single from
+her 2008 greatest hits album, It is also included on her
+2010 album “Laws of Illusion". Known for her emo-
+tional ballads and [mezzo-soprano / powerful] vocal
+range, as of 2009, she had sold over 30 million albums
+worldwide.
+
+Question: What is the vocal range of the performer on
+the 2010 album “Laws of Illusion"?
+
+The vocal range of the
+performer on the 2010
+album “Laws of II-
+lusion" is [a mezzo-
+soprano vocal range
+/ not specified in
+the background in-
+formation provided].
+
+mezzo-soprano /
+mezzo-soprano
+
+mezzo-soprano /
+powerful
+
+Table 2: Illustrative examples of the overconfidence phenomenon. Although the prompts are clearly
+modified as shown by different colors (blue / red), the base model produce similar responses on
+both prompts, so does the model trained via DPO, while the MultiDPO training, which combines
+the original and abductive DPO leads to more task specific answers.
+
+Empirically, abductive preference learning improves sensitivity to prompt variations without de-
+grading the performance on regular preference learning tasks. On the QA portion of HALUEVAL
+(2023)), multitask DPOP achieves 99.5% response accuracy (compared to 90.0% for the
+
+
+Preprint
+
+base model) and 85% prompt accuracy (compared to 54.7%). Qualitative examples in Table [2|illus-
+trate that abductive methods excel at prompt discrimination, while standard methods remain strong
+at ranking responses, and the multitask objective unifies both, On ALPACAEVAL, a benchmark
+that was not used in dataset construction, multitask DPOP raises win rate from 5.26% to 6.17%,
+which shows that abductive learning preserves generalization. Finally, in multimodal experiments
+on sarcasm detection abductive learning increases accuracy from 50.0% to 87.0%,
+underscoring its ability to capture subtle cross-modal distinctions.
+
+In summary, our contributions are threefold:
+
+Formulation. We introduce abductive preference learning, a general paradigm that reverses the
+conditioning direction in preference optimization. We prove that, under mild assumptions, in-
+creasing Pr(a | y) can be achieved by simply swapping the roles of prompts and responses in the
+standard DPO objective.
+
+Complementarity. We show that abductive and standard preference learning address different
+aspects of alignment: the former enhances prompt sensitivity, while the latter ensures reliable
+response selection. When combined in a multitask setting, they reinforce each other rather than
+interfere.
+
+Empirical validation. We validate the approach on three fronts: (1) abductive QA generated from
+HALUEVAL, where multitask training improves both response selection and prompt discrimina-
+tion; (ii) generalization on ALPACAEVAL, where gains persist despite the benchmark not being
+targeted in data construction; and (iii) a multimodal sarcasm detection task based on HUMORDB,
+where the method is employed on multimodal models and captures subtle differences within input
+images.
+
+2 METHOD: ABDUCTIVE PREFERENCE LEARNING
+
+2.1 PRELIMINARY: PREFERENCE LEARNING
+
+Preference optimization is often formulated as a pairwise comparison task. Given an input prompt
+x, and a pair of responses (y,y,), human feedback specifies that “response y,, is preferred over
+response y; for prompt x." A classical probabilistic model for such comparisons is the Bradley—
+Terry (BT) formulation:
+
+Pr(yw > yi | ©) = 0 (rx (2, Yw) — Pe(@s1)) 5
+where r, is a latent reward function and a(t) = 1/(1 + e~‘) is the logistic sigmoid.
+
+Direct Preference Optimization (DPO) (Rafailov et al.||2023) bypasses explicit reward modeling
+and instead optimizes the policy likelihoods directly. Let 7»(y | x) denote the trainable model and
+
+Tret(y | x) a fixed reference policy. Given a prompt « and the corresponding response y, denote the
+log likelihood ratio, ¢)(x, y), between the policy model and the reference model as follows:
+
+Y(a, y) = log 76 (y|2) — log Tret (yl).
+The DPO loss is then given by
+
+Lopo(8) = —Eveanean) tox (9((e. Hm) - ven) | (2.1)
+
+This objective increases the likelihood ratio of preferred over dispreferred responses, thereby align-
+ing 79 with human judgments.
+
+The above loss function can be generalized to a broader range, including all preference learning
+methods. Given a prompt and a preference pair, i.e., (2, Yw,y), the loss function in a general
+preference learning paradigm is given as follows:
+
+£(9) = —Eveyo.n) |[F (@, Yo), V(x, 9)) |; (2.2)
+
+where ¢(x, y) represents a generalized comparison score, i.e., w(x, y) := &(76(y | ©), Tret(y | x),
+which is not restricted by the log likelihood ratio employed in the DPO framework.
+
+For example:
+
+
+Preprint
+
+¢ DPO: F(t) = log o(St) with w as the log-likelihood ratio (Rafailov et al.|/2023).
+* DPO-Positive (DPOP): modifies F' to penalize decreases in preferred likelihood (Pal et al.|
+2024).
+
+* Generalized Preference Optimization (GPO): defines a family of losses by varying the
+convex function that determines F’, unifying many variants under one view
+
+2024).
+Readers can refer to more preference learning methods in|Liu et al.|(2025).
+
+2.2 ABDUCTIVE PREFRENCE LEARNING
+
+While preference learning approaches like DPO enforce the preference y,, > y; conditioned on a
+given prompt 2, it does not address the reverse relation: how well a response y supports one prompt
+Lw Over another x;. In practice, this asymmetry neglects the modification of prompts that should
+alter the response.
+
+Notably, given the marginal distribution of the prompts which remains unchanged during training,
+the conditional modeling is equivalent to the modification of the joint distribution involving both
+prompts and responses. Based on this observation, we introduce abductive preference learning,
+which reverses the conditioning direction, building the joint distribution from the other perspective.
+
+Formally, recall the preference learning paradigm given in Equation [2.2 the abductive preference
+learning paradigm is implemented via role switching. More specifically, given inputs (vw, 1, y),
+where 2, represents a preferred prompt and 2; represents a rejected one given the response y, the
+abductive learning framework is given as follows:
+
+£0) = Een [F (lew. y), Vary) | 2.3)
+
+The above formulation is derived based on Bayes’ theorem. To illustrate, we start by switching the
+roles of prompts and responses in the original BT model.
+
+Abductive Bradley-Terry Model. Similar to the BT model, the abductive preference learning
+framework is constructed under the following probability assumption, that is,
+
+Pr(tw > 21 | y) =o (Te(Y, tw) — T(Y, 21)) 5
+
+where y is a response, and (2, Z,) are prompts such that “prompt x, is preferred over prompt
+given response y."
+
+Given a policy 7, we denote its abductive variant 7 as follows:
+_ x(y|2)p(e)
+q(y)
+
+where p(-) and q(-) denote the marginal distributions of prompts and responses, respectively.
+
+w(x | y) , Va,y, (2.4)
+
+Following similar patterns on the derivation of the general preference learning loss, the loss function
+for abductive preference learning can be defined as follows:
+
+L£(0) =— U(x ,Yyw Yt) [F (Blew, ¥)s war, u)) | ,
+
+where w(a,y) = U(ro(x | y), Tret(a | y)).
+
+The above formulation raises a natural concern regarding the feasibility of training:
+How can the abductive policy 7 be accessed or estimated during optimization?
+
+From the formulation, it can be concluded that the above problem can be bypassed under the con-
+dition for the function pairs ~ and F’. Considering the special case of DPO as mentioned before,
+we show that this condition is satisfied, leading to the result that the abductive preference learning
+
+involving wo (x, y) is equivalent with the formulation given in Equation
+We refer the proof of the following result to Appendix |A.2]
+
+
+Preprint
+
+Proposition 2.1 Suppose the marginal distribution of prompts, i.e., p(x), is independent from model
+policies (Ter and 1). Let 7 denote the abductive policy induced by x. Then the A-DPO loss can be
+expressed as
+
+La_—ppo (76; Met) = —E(e,,,2),y)~D [log (BW (a@w, y) — V(a1,y))] - (2.5)
+
+To validate the feasibility of Equation when stepping out the DPO method, we propose the
+formulation Abductive DPOP (A-DPOP) in Fig. [I] as an illustrative example, and validating its
+empirical performance in Section We validate that the framework proposed in Equation
+increases the prompt sensitivity of trained models for both A-DPO and A-DPOP, leading to its
+possibility to be employed for all preference learning methods.
+
+Lppo (to; Tet) =
+
+ref (Yu |) Tret(Yi|x) Tref(Yw|2) Tret(yi|a T6(Yw|x)
+
+La-DPO(T6} Tret) = La-DPOP(T0; Tref) =
+
+if [oes (08 To(ylew) _ ise mo(y\1) )] E [oxo (6 (ioe To(ylew) log o(y|x1) Semace (0. ing matin)
+
+Tret(Y|Lw) Tret(Yy| a1) Tret(Yy|@w) Tret(ylx1) To (yliw
+
+Figure 1: Abductive preference learning is a general fine-tuning paradigm obtained by switching the
+roles of prompts and responses. The shaded box illustrates how this principle applies broadly across
+existing preference learning methods. Abductive DPO and A-DPOP are shown as examples.
+
+3. EXPERIMENTAL SETUP
+
+To validate the feasibility of abductive preference learning paradigm, we perform both text only and
+multimodal experiments.
+
+For the text-only fine-tuning, we generate a text dataset based on the QA portion of the HALUE-
+VAL benchmark (Li et al.|(2023)). For the multimodal fine-tuning, our results are based on the
+HUMORDB dataset (Jain et al.|(2024)).
+
+3.1 TEXT ONLY DATASET
+
+The QA portion of the original HALUEVAL dataset is equipped with four keys, i.e, knowledge,
+question, answer, hallucinated answer, right answer. To build a dataset containing a pair of prompts,
+Le., (ty, 21, y) as shown in (Equation 5p we consider the modification of background knowledge.
+More specifically, we combine the original background knowledge and question as prompt 2, and
+the modified background knowledge and question as x, keeping the hallucinated answer as y. We
+present an illustrative example in Table B]
+
+Prompts Answer
+
+Background Knowledge: Yannis Philippakis (born 23 April 1986) is the lead singer
+
+and guitarist of the British indie rock band Foals. Dorothee Pesch (born 3 June 1964),
+
+popularly known as Doro Pesch or Doro, is a [German / Canadian] heavy metal singer- Yannis Philippakis is closer to
+songwriter, formerly front-woman of the heavy metal band Warlock. Austria.
+
+Question: Of the two artists, Yannis Philippakis and Dorothee Pesch, whose country of
+
+origin is geographically closer to Austria?
+
+Table 3: The Abductive HALUEVAL is built by the modification of background knowledge given in
+the prompts, following the hypothetical scenaraio method as illustrated in Table|1| Blue represents
+the keyword in the prompt given in the original HALUEVAL dataset, while red represents the modi-
+fied keywords in A-HALUEVAL dataset.
+
+Given a prompt-response pair (x, y), denote the average log-likelihood of model 7 correspoding to
+this pair as ALL,(a,y). To ensure our data generation pipeline is reasonable, we employ a three-
+stage validation framework summarized as follows:
+
+
+Preprint
+
+1. Hallucination Verification: Confirm that the base model (i.e., TULU-2-7B) produces halluci-
+nated responses under the original background via enforcing an average log likelihood threshold,
+i.e., ensuring we start from authentic model failures.
+
+2. Probability-Based Quality Assurance: Verify that the hallucinated response is more likely
+under the modified background than the original:
+
+ALL, (hallucination | original) — ALL, (hallucination | modified) > 4, (3.1)
+where 6 is a self-defined likelihood margin.
+
+3. Contextual Reasonableness: Ensure that the modified background logically supports the hal-
+lucinated answer through the validation of LLM agents, yielding meaningful prompt—response
+distinctions.
+
+Notably, the parameter 6 is set as 0.1 without specification. Based on the fact that the A-HALUEVAL
+dataset is only equipped with 1,001 entries compared with the 10,000 entries in the original
+HALUEVAL dataset, we filtered out the original entries that lead to the generation of A-HALUEVAL
+for the DPO or DPOP training and the following Multi-DPO or Multi-DPOP training.
+
+To validate the fact that DPO and A-DPO are performing complementary tasks, we consider a mul-
+titask loss function that combines both. More specifically, recall the DPO-loss as given in (Equa-
+tion}2.1) and the A-DPO-loss as given in (Equation 2.5), we define the goal of multitask learning as
+follows:
+
+Lulti-peo(7o, Tet} A) = ALppo(To, Tet) + (1 — A)La-ppo(To, Tet), (3.2)
+where A represents a weight hyperparameter that ranges within (0,1). Similar definition for
+Ltuiti-DPOP-
+
+3.2 MULTIMODAL DATASET: HUMOR PREFERENCE CONSTRUCTION
+
+Understanding humor in visual scenes is a paradigmatic challenge for multimodal reasoning. Small
+contextual differences in an image can completely change whether it is perceived as humorous,
+which makes humor detection a natural testbed for preference learning methods that aim to increase
+sensitivity to counterfactual inputs.
+
+(2024) introduced HUMORDB, a large and carefully curated benchmark for visual humor.
+It consists of photos, cartoons, sketches, and Al-generated images, with minimally contrastive pairs
+where subtle edits determine whether an image is humorous or non-humorous. Their results showed
+that state-of-the-art vision-language models still fall short of human-level humor understanding.
+Even when models produce the correct classification, they often fail to identify the precise visual
+elements that make the image funny. This highlights the need for training paradigms that explicitly
+encourage attention to the counterfactual nature of visual humor.
+
+We aim to explore whether abductive prefer-
+ence learning, originally developed for text-
+based alignment, can improve multimodal
+reasoning by enhancing model sensitivity to
+the distinctions between humorous and non-
+humorous images. Our hypothesis is that » 1 :
+abductive preference learning encourages the ) >>. Cp
+model to recognize how small contextual i fd San
+changes affect the interpretation of visual ~
+scenes, which directly addresses the limitations
+
+observed in prior evaluations on HUMORDB. ‘Figure 2: Example image pair in HUMORDB.
+Left: image rated as funny (83.3% of partici-
+
+We construct our multimodal dataset as fol- pants). Right: modified image rated as not funny
+
+lows. For each pair of humorous and non-  (g5.7%) of participants. Focus on the phone in the
+humorous images in HUMORDB, we attach the surgeon’s hand in the left image.
+
+identical text prompt “Is this image funny?” ,
+
+following the one used in|Jain et al.|(2024) and
+
+set the shared response as “Yes”. The humorous image with the prompt is treated as the chosen
+prompt, while the non-humorous image with the same prompt is treated as the rejected prompt. To
+build our training set, we merge the training and validation splits of HUMORDB, containing 991
+pairs, and we reserve its test split, containing 300 pairs, for evaluation.
+
+
+
+Preprint
+
+3.3. MODEL AND TRAINING SETTINGS
+
+We perform the text-only preference learning on the base model TULU-2-7B, a fine-tuned version
+of LLAMA 2. We employ DPO (Equation 2.1), A-DPO (Equation [2.5), Multi-DPO (Equation 3.2},
+DPOP, A-DPOP (Fig. (Ip. and Multi-DPOP on the text-only setting, setting 6 as 0.1 and selecting
+as mentioned in Equation[3.2}within the set {0,0.5, 1}.
+
+We perform the multimodal preference learning on the base model QWEN2.5-VL-3B-INSTRUCT,
+employing A-DPO on it for learning, settinig ( as 0.1.
+
+4 EXPERIMENTAL RESULTS
+
+In this section, we first present main results of our experiments in Section highlighting the
+superior performance of A-DPO and A-DPOP in distinguishing the differences between prompts,
+for both text only and multimodal training. Within text only fine-tuning elaborated in Section|4.2] we
+analyze the training patterns of A-DPO and A-DPOP, showing that the abductive preference learning
+follows similar training patterns of the original preference learning method, e.g., the squeezing effect
+of DPO (Ren & Sutherland] (2024)) and its reliance on reward margin (Wu et al.|(2024)) is similarly
+illustrated in the training pattern of A-DPO. Moreover, we perform ablation studies on the parameter
+X in the Multi-DPO and Multi-DPOP loss as given in Equation analyzing the influence of
+parameter . on the performance of distinguishing responses and prompts.
+
+4.1 MAIN RESULTS
+
+To begin with, we present the experimental results for text-only training.
+
+To reveal the ability of our trained model in distinguishing responses and prompts, we employ the
+ACCURACY metric to evaluate. More specifically, based on the data generation logic specified in
+Fig. [2] we have
+
+¢ Accuracy: The model’s capability of choosing the right answer given the original prompt, 1.e.,
+
+Pr(Right Answer | Prompt) > Pr(Hallucinated Answer | Prompt).
+
+¢ Abductive Accuracy: The model’s capability of preferring the suitable prompt given a shared
+response, 1.e.,
+
+Pr(Hallucinated Answer | Modified Prompt) > Pr(Hallucinated Answer | Prompt).
+
+Based on this metric, we report our main results on the original HALUEVAL and the A-HALUEVAL
+datasets in Table [3] and check our model’s performance on the ALPACAEVAL benchmark in Table
+reflecting two statements we made before:
+
+1. Preference learning and its abductive variant are orthogonal tasks. As reflected from the
+comparison among DPO, A-DPO, and the base model, it can be observed that the A-DPO do
+little improvements on the goal of DPO (i.e., Accuracy), making improvements from 90% to
+94%, while DPO makes little influence on the goal of A-DPO (i.e., Abductive Accuracy), making
+improvements from 54.7% to 59.5%. Similar results can be when comparing DPOP, A-DPOP
+and the base model. Moreover, checking the results on ALPACAEVAL, it can be observed that
+the A-DPO or A-DPOP training is not dropping the points of base model. This also reflects the
+fact that the sensitivity with respect to prompts is a task that is not evaluated in ALPACAEVAL.
+
+2. Multitask learning make improvements on both directions. Summarizing the performance
+gained by multitask learning as illustrated in Equation[3.2| it can be observed that the Multi-DPO
+and Multi-DPOP are making improvements on both directions, gaining competitive Accuracy
+and Abductive Accuracy, achieving the goals of both preference learning and its abductive vari-
+ants. This conclusion can also be made when observing the performance of Multi-DPO and
+Multi-DPOP on ALPACALEVAL. This observation is also a natural derivation from our previous
+statement, i.e., preference learning and its abductive variants are orthogonal tasks.
+
+In the following, we present our training results on the multimodal dataset constructed based on
+HUMORDB. To evaluate the performance of the trained model in sarcasm detection, we employ the
+
+
+Preprint
+
+Table 4: Pairwise accuracy comparing base
+model, preference learning, abductive prefer-
+ence learning, and the multitask preference
+learning methods that combine both.
+
+Table 5: Evaluation Results on ALPACAEVAL
+2. Abbr: LC (Length Controlled win rate), WR
+(Win Rate), SE (Standard Error), N (Number of
+evaluations made); Avg Len (Average response
+
+Length).
+Model Accuracy A-Accuracy
+(HALUEVAL, %) (AsHALUEVAL, %) Model LC(%) WR(%) SE(%) N  AvgLen
+
+Base Model 90.0 54.7 Base Model 6.82 5.26 0.72 803 1308
+DPO (A = 1.0) 100.0 59.5 tulu-2-dpo-7b 9.20 8.20 0.87 805 =: 1663
+A-DPO (A = 0.0) 94.0 85.0 DPO (\ = 1.0) 8.84 6.41 0.79 803 1230
+Multi-DPO (\ = 0.5) 99.5 83.5 A-DPO (A = 0.0) 6.75 5.30 0.73 802-1287
+DPOP(A= 10) 100.0 B30 Multi-DPO (A = 0.5) 7.69 5.73 0.74 801 ~—-:1208
+A-DPOP (A = 0.0) 95.0 83.5 DPOP (A = 1.0) 8.51 6.23 0.79 802 1242
+Multi-DPOP (A = 0.5) 99.5 85.0 A-DPOP (\ = 0.0) 6.48 5.14 0.71 802 1318
+
+Multi-DPOP (A = 0.5) 8.26 6.17 0.77 802 1244
+
+log probability accuracy as a metric, similar to the accuracy metric employed for text only model on
+the abductive HALUEVAL, showing the sensitivity of responding ‘Yes’ given funny and non-funny
+images.
+
+Notably, our metric is different from the original classification accuracy in (2024) mea-
+sured asking the trained model to generate the response based on the original prompt. Nevertheless,
+based on the fact that all LLMs considered in {Jain et al.] (2024) before pretraining present perfor-
+mance similar to random guessing, our result still corresponds to the pairwise accuracy performance
+of the not pretrained LLMs as illustrated in Fig. 6 of (2024) to some extent, as illustrated
+by the performance of the LLAVA model given in Table[7] which is also tested in {Jain et al.|(2024).
+Our experiments have shown that the abductive preference learning method has made great improve-
+ments in recognizing the differences between the slight modification of image patterns. Notably, our
+accuracy is comparable with the accuracy gained by human evaluators as illustrated in
+
+(2024)
+
+Table 6: Pairwise accuracy comparing base model, preference learning, abductive preference learn-
+ing, and the multitask preference learning methods that combine both.
+
+Model Accuracy
+Qwen2.5-VL-3B 50.0%
+Qwen2.5-VL-7B 40.7%
+LLaVA1.5-7B-HF 42.3%
+Qwen2.5-VL-3B (A-DPO) = 87.0%
+
+Table 7: Evaluation Results on HUMORDB.
+
+4.2 ABLATION STUDY: SIMILAR LEARNING DYNAMICS FOR ABDUCTIVE PREFERENCE
+LEARNING AND ORIGINAL PREFERENCE LEARNING
+
+Effect of \ in multitask learning. Recall the parameter balancing the roles of preference learning
+and its abductive variants as illustrated in Equation [3.2] To present the effect of different As on
+the evaluation performance of the trained model regarding the original preference learning’s goal
+(Accuracy) and the goal of abductive preference learning (Abductive Accuracy), we do ablation
+studies with \ € {0,0.1,...,0.9, 1} as reflected in Fig. |3| It can be observed that when A is ranging
+from 0.2 to 0.7, their performance on the evaluation set is similar. When \ is greater than 0.7,
+putting more focus on the goal of the original preference learning, the Abductive Accuracy drops
+quickly. Similarly when \ is smaller than 0.2. As a consequence, we consider \ = 0.5 a reasonable
+choice.
+
+Effect of log-probability gap (6, Equation[3.1). To explore the influence of the threshold 6 on the
+generated dataset, we compare models trained on datasets constructed with 6 = 1.0 versus = 0.1,
+each for 4 epochs. Fig. [5] plots abductive accuracy over epochs on two evaluation sets (6 = 0.1
+and = 1.0 ). Training on large gaps achieves near-perfect performance on the large-gap evaluation
+but fails to generalize to the small-gap evaluation ( ~ 40% to 48% abductive accuracy). In contrast,
+
+
+Preprint
+
+I I
+100 }-
+/ Base Model 0.0% —100 . |
+90 PR = Se & Yee
+& @-2—0-.¢—0-—.2,...¢—8—.¢ Ta *
+— o~0-0~2-0-O— 9. "2 —200 # 4
+PROT ” 3
+5 mem HALUEVAL \ oc == log Pr(yw [%)
+2 70 |—~ mt A-HALUEVAL \ e —300 f= = log Pr(y;|x) ‘n | 4
+60 |. — \ == log Pr(y|zw) HINA Yn
+- : 7 5 2 —400 }+ = log Pr(y|z,) +
+| |
+50 LI | | | | |
+0 02 04 O68 08 1 0 2 4
+» Epoch
+
+Figure 3: Ablation studies for the weight A Figure 4: Training log-probabilities vs. epoch.
+of the original preference learning objective. Blue line imlies DPO training, while the red line
+Dashed lines indicate base model performance. implies A-DPO.
+
+training on small gaps yields high abductive accuracy on both evaluations ( ~ 85% to 91% on
+6 = 0.1 and = 93% to 97% on 6 = 1.0).
+
+This indicates that exposure to small counterfactual margins during training is critical for robust-
+ness across margin regimes for A-DPO, whereas training solely on large margins leads to over-
+specialization, being identical to the pheonomenon of DPO as reported in{Wu et al.|(2024), which
+is also an motivation of online DPO as reported in/Qi et al.](2024). This observation reveals that
+ADPO follows similar training patterns with DPO.
+
+Squeezing Effect in A-DPO. We observed the squeezing effect of A-DPO during training, repli-
+cating the learning dynamics of DPO as reported in[Ren & Sutherland] (2024). More specifically,
+as illustrated in Fig. |4] we noticed that with more training epochs, both the log probability ratio of
+Pr(y | 2») and Pr(y | x;,) decrease, which are the probabilities of selecting the hallucinated re-
+sponse based on the modified prompt and original prompt in our text only experiments, respectively.
+This is another validation of the fact that the abductive learning is showing similar training patterns
+as the original preference learning methods. Notably, both the Pr(y | ,,) and Pr(y; | x) reflects the
+probability of choosing the hallucinated answer based on the original prompt in our dataset. These
+two curves overlap.
+
+Abductive Accuracy Standard Accuracy
+
+Accuracy (%)
+
+2 3 4
+Epoch Epoch
+(1.0, 0.1}-#(1.0, 1.0) (1.0, 0.1)-(1.0, 1.0)
+—(0.1, 0.1)—(0.1, 1.0) —0.1, 0.1)--(0.1, 1.0)
+
+Figure 5: Effect of threshold 6 on generalization. We employ (6;, 6.) to represent the evaluation
+performance on the dataset generated with 6. of the model trained on dataset generated by 6-. Left:
+abductive accuracy on A-HALUEVAL (red). Right: standard accuracy (blue) on HALUEVAL. Each
+curve reports performance across 4 epochs; for the model trained with 6 = 1.0, checkpoints are
+averaged into two per epoch.
+
+5 CONCLUSION
+
+We introduced abductive preference learning, a paradigm that reverses the conditioning direc-
+tion of standard preference optimization and is theoretically justified under mild assumptions. On
+
+
+Preprint
+
+datasets derived from HALUEVAL and ALPACAEVAL, abductive variants substantially improved
+prompt discrimination without sacrificing response alignment, and multitask training combined their
+complementary strengths. Finally, we demonstrated the applicability of this framework in multi-
+modal settings such as sarcasm detection, highlighting its potential as a general tool for fine-grained
+alignment.
+
+10
+
+
+Preprint
+
+REFERENCES
+
+Shreyas Chaudhari, Pranjal Aggarwal, Vishvak Murahari, Tanmay Rajpurohit, Ashwin Kalyan,
+Karthik Narasimhan, Ameet Deshpande, and Bruno Castro da Silva. Rlhf deciphered: A criti-
+cal analysis of reinforcement learning from human feedback for Ilms. CoRR, abs/2404.08555,
+
+2024. URL/https://arxiv.org/abs/2404.08555
+
+Veedant Jain, Felipe dos Santos Alves Feitosa, and Gabriel Kreiman. Is ai fun? humordb: a curated
+dataset and benchmark to investigate graphical humor. arXiv preprint arXiv:2406.13564, 2024.
+
+Jixuan Leng, Chengsong Huang, Banghua Zhu, and Jiaxin Huang. Taming overconfidence in IIms:
+
+Reward calibration in rlhf, 2025. URL|https://arxiv.org/abs/2410.09724
+
+Junyi Li, Xiaoxue Cheng, Wayne Xin Zhao, Jian- Yun Nie, and Ji-Rong Wen. Halueval: A large-scale
+hallucination evaluation benchmark for large language models. arXiv preprint arXiv:2305.11747,
+2023.
+
+Shunyu Liu, Wenkai Fang, Zetian Hu, Junjie Zhang, Yang Zhou, Kongcheng Zhang, Rongcheng
+Tu, Ting-En Lin, Fei Huang, Mingli Song, Yongbin Li, and Dacheng Tao. A survey of direct
+
+preference optimization, 2025. URL|https://arxiv.org/abs/2503.11701
+
+Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, Pamela Mishkin, Chong
+Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kel-
+ton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike,
+and Ryan Lowe. Training language models to follow instructions with human feedback. CoRR,
+
+abs/2203.02155, 2022. URL|https://arxiv.org/abs/2203.02155
+
+Arka Pal, Deep Karkhanis, Samuel Dooley, Manley Roberts, Siddartha Naidu, and Colin White.
+Smaug: Fixing failure modes of preference optimisation with dpo-positive. arXiv preprint
+arXiv:2402. 13228, 2024.
+
+Biqing Qi, Pengfei Li, Fangyuan Li, Junqi Gao, Kaiyan Zhang, and Bowen Zhou. Online dpo:
+Online direct preference optimization with fast-slow chasing. arXiv preprint arXiv:2406.05534,
+2024.
+
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea
+Finn. Direct preference optimization: Your language model is secretly a reward model. Advances
+in neural information processing systems, 36:53728-53741, 2023.
+
+Yi Ren and Danica J Sutherland. Learning dynamics of Ilm finetuning. arXiv preprint
+arXiv:2407.10490, 2024.
+
+Amir Saeidi, Shivanshu Verma, Md Nayem Uddin, and Chitta Baral. Insights into alignment: Eval-
+uating dpo and its variants across multiple tasks. arXiv preprint arXiv:2404. 14723, 2024.
+
+Yunhao Tang, Zhaohan Daniel Guo, Zeyu Zheng, Daniele Calandriello, Remi Munos, Mark Row-
+land, Pierre Harvey Richemond, Michal Valko, Bernardo Avila Pires, and Bilal Piot. Generalized
+preference optimization: A unified approach to offline alignment. In Proceedings of the 41st In-
+ternational Conference on Machine Learning, Proceedings of Machine Learning Research, pp.
+47725-47742, 2024.
+
+Junkang Wu, Yuexiang Xie, Zhengyi Yang, Jiancan Wu, Jinyang Gao, Bolin Ding, Xiang Wang,
+and Xiangnan He. (-dpo: Direct preference optimization with dynamic 6, 2024. URL|https:)
+arxiv.org/abs/2407.08639
+
+Tianyu Xiao et al. Restoring calibration for aligned large language models: A calibration-aware
+fine-tuning approach. arXiv preprint arXiv:2505.01997, 2025.
+
+11
+
+
+Preprint
+
+A APPENDIX
+
+We first declare that we are using LLM only for the polishing of our manuscript.
+
+In the following, we first present an ablation study for the text only abductive preference learning,
+adjusting the penalty parameter in Multi-DPOP. Afterwards, we present the proof for Proposition
+[2.1] Finally, we present the training hyperparameters we employed for our model training.
+
+A.1 ABLATION STUDY: MULTI-DPOP
+
+Recall the loss function of DPOP as illustrated in Fig. From the ablation study of the penalty
+parameter from DPOP, we observed that the modification of Appop is not altering the DPO accuracy.
+In contrast, the abductive accuracy is dropped with the increasing Appop. This is possibly led by the
+data generation framework of abductive HALUEVAL as illustrated in Table[3| that is, the pair (a), y)
+on the abductive side is the same as the pair (x, y,) from the original perspective. In addition, the
+points are not dropping to a great extent, showing that the modification of parameter Appop is not
+playing a critical role in the abductive learning framework.
+
+Table 8: Ablation studies for the penalty Appop of the original preference learning objective for
+Multi-DPOP (A = 0.5, Equation |3.2), utilizing the A-HALUEVAL dataset generated via gpt-4o.
+
+Appop Accuracy (HALUEVAL, %) Accuracy (A-HALUEVAL, %)
+
+1.0 100.0 87.0
+0.9 100.0 87.0
+0.8 100.0 87.5
+0.7 100.0 87.5
+0.6 100.0 87.5
+0.5 100.0 88.5
+0.4 100.0 90.0
+0.3 100.0 89.5
+0.2 100.0 90.0
+0.1 100.0 91.0
+0.0 100.0 91.0
+
+A.2 PROOF OF PROPOSITION
+
+Recall the formulation of abductive policy as formulated in Equation[2.4] Under the assumption that
+the marginal distributions of prompts remain the same for both 7 and 7yefr, we have
+
+Toy | &)p(a)
+doy)’
+
+Rewrite the learning objective function of A-DPO as follows:
+
+roly | x)p(e)
+
+Tret(@ | y) = Gret (Y)
+
+To(a | y) =
+
+La_—ppo (16; Tree)
+
+= “Bose yer hos (alos To (tw | y) Blog 2 (a1 | y) )|
+
+Tref (Gy | y) Tret (x1 | y)
+—— oe ( Blow ttyl ew )Pltw)/dret(Y) gig Freely |e) P(@1)/dret(y)
+= —Evay,21,y)~P [ 8 («1 8 r6(y | tw) (tw) /go(y) Plog mo(y | t1)p(21)/qo(y) )|
+
+= —E¢e,,,0),y)~D lowe (6 log Trot (y | tw) Blog Tret(Y | =) ] .
+
+To(y | tw) To(y | x1)
+A.3. TRAINING HYPERPARAMETERS FOR REPRODUCIBILITY
+
+We train on 8 H100 GPUs in data parallel. Hyperparameters for our experiments can be found in
+
+Tables[9Jand[I0]
+
+12
+
+
+Preprint
+
+Table 9: Hyperparameters and optimization details for the text model mentioned in Section]3.1|
+
+Hyperparameter Value
+Devices (H100) 8
+Max prompt length 1024
+Max sequence length 2048
+Train batch size (per device) 1
+Gradient accumulation steps 8
+Total effective train batch size 64
+Training epochs 2)
+Learning rate ax 10-7
+Max grad norm 1.0
+Optimizer Adam
+weight decay 0.01
+betas (0.9, 0.999)
+€ I x I0-*
+Learning rate scheduler constant_with_warmup
+Warmup ratio 0.1
+
+Table 10: Hyperparameters and optimization details for the multimodal model in Section[3.2|
+
+Hyperparameter Value
+Devices (H100) 8
+Max prompt length 8000
+Max sequence length 8192
+Train batch size (per device) 1
+Gradient accumulation steps 16
+Total effective train batch size 128
+Training epochs 2)
+Learning rate 2 10-6
+Learning rate scheduler constant_with_warmup
+Warmup ratio 0.2

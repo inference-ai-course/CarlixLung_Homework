@@ -1,0 +1,1904 @@
+arX1v:2210.06894v1 [cs.LG] 13 Oct 2022
+
+Dim-Krum: Backdoor-Resistant Federated Learning for NLP with
+Dimension-wise Krum-Based Aggregation
+
+Zhiyuan Zhang!, Qi Su*!, Xu Sun!
+"MOE Key Laboratory of Computational Linguistics, School of Computer Science,
+Peking University
+School of Foreign Languages, Peking University
+{zzy1210, sukia, xusun}@pku.edu.cn
+
+Abstract
+
+Despite the potential of federated learning, it
+is known to be vulnerable to backdoor attacks.
+Many robust federated aggregation methods
+are proposed to reduce the potential backdoor
+risk. However, they are mainly validated in the
+CV field. In this paper, we find that NLP back-
+doors are hard to defend against than CV, and
+we provide a theoretical analysis that the ma-
+licious update detection error probabilities are
+determined by the relative backdoor strengths.
+NLP attacks tend to have small relative back-
+door strengths, which may result in the fail-
+ure of robust federated aggregation methods
+for NLP attacks. Inspired by the theoretical
+results, we can choose some dimensions with
+higher backdoor strengths to settle this issue.
+We propose a novel federated aggregation al-
+gorithm, Dim-Krum, for NLP tasks, and exper-
+imental results validate its effectiveness.
+
+1 Introduction
+
+Despite the potential of federated learning that it al-
+lows collective learning of multiple clients without
+the private data leakage risks, federated learning is
+known to be vulnerable to backdoor attacks where
+backdoor attackers (Gu et al., 2019) or trojaning
+attackers (Liu et al., 2018b) aim to inject backdoor
+patterns into neural networks to alert the label to
+the desired target label on instances with such back-
+door patterns for malicious purposes.
+
+To reduce the potential backdoor risk of the Fe-
+dAvg (McMahan et al., 2017) aggregation method,
+many robust federated aggregation methods are pro-
+posed. Among them, a line of Byzantine tolerant
+gradient descent algorithms is proposed to detect
+and discard abnormal or malicious parameter up-
+dates with higher distances to their neighbors, e.g.,
+Krum (Blanchard et al., 2017), Multi-Krum (Blan-
+chard et al., 2017) and Bulyan (Mhamdi et al.,
+2018). Besides Krum algorithms, there is another
+line of robust aggregation methods (Chen et al.,
+2020a; Pillutla et al., 2019; Fung et al., 2020; Xie
+
+et al., 2021; Fu et al., 2019; Wan and Chen, 2021)
+that do not discard abnormal or malicious updates.
+
+Even though some existing robust federated ag-
+gregation strategies (Xie et al., 2021; Wan and
+Chen, 2021) are proposed to defend against back-
+door attacks from malicious clients, they are mainly
+validated on tasks and backdoor patterns in the
+Computer Vision (CV) field, the defense perfor-
+mance of existing robust research on the Natural
+Language Processing (NLP) field is less explored.
+In our paper, we validate these aggregation meth-
+ods on NLP attacks and find that existing aggrega-
+tion methods fail to generate robust server updates
+even when only one out of ten clients are malicious,
+which demonstrates that federated NLP backdoors
+are hard to defend against than CV backdoors and
+similar observations are also indicated by experi-
+ments in Wan and Chen (2021).
+
+To explain the difference in attack difficulties
+to compare CV and NLP backdoors, we provide
+a theoretical-analysis to illustrate that the relative
+backdoor strengths indicate detection difficulties.
+Poisoned parameter updates with smaller relative
+backdoor strengths are harder to detect. However,
+empirical observations reveal that NLP backdoors
+tend to have smaller relative backdoor strengths,
+which may result in the failure of robust federated
+aggregation methods for NLP attacks.
+
+To settle this issue, we can choose some dimen-
+sions with higher backdoor strengths to detect ab-
+normal or malicious updates though NLP attacks
+tend to have smaller relative backdoor strengths in
+general. Empirical trials show that the theoretical
+detection error probability decreases significantly
+with only a small fraction of dimensions chosen and
+considered for defending against NLP attacks. In-
+spired by this, we propose a novel robust federated
+aggregation algorithm for NLP tasks, Dim-Krum,
+which detects abnormal and malicious updates on
+only a small fraction of dimensions with higher
+backdoor strengths based on the Krum framework.
+
+
+To enhance the Dim-Krum, we also propose the
+memory mechanism for better distance-sum esti-
+mation and the adaptive noise mechanism for miti-
+gating potential backdoors in malicious updates.
+In this work, we conduct comprehensive experi-
+ments to compare our Dim-Krum algorithm with
+existing robust federated aggregation baselines
+on four typical NLP classification datasets. We
+adopt four typical NLP backdoor attacks, including
+EP (Yang et al., 2021a; Yoo and Kwak, 2022), Bad-
+Word (Chen et al., 2020b), BadSent (Chen et al.,
+2020b), and HiddenKiller (Qi et al., 2021), which
+cover typical poisoning techniques in NLP back-
+doors. Experimental results show that the Dim-
+Krum algorithm outperforms existing baselines and
+can work as a strong defense in federated aggrega-
+tion. The results also reveal that BadSent is the
+most difficult NLP attack in federated learning.
+Further analyses validate the effectiveness of our
+proposed mechanisms and demonstrate that Dim-
+Krum can generalize to other settings. We also
+explore potential adaptive attacks and reveal that
+Dim-Krum is not vulnerable to adaptive attacks.
+Our contributions are summarized as follows:
+
+¢ We take the first step to conduct comprehen-
+sive experiments of NLP federated backdoors
+equipped with existing defense and find that
+NLP federated backdoors are harder to defend
+against in aggregations than CV.
+
+¢ We provide a theoretical analysis to explain
+the difficulties of NLP federated backdoor de-
+fense that the relative backdoor strengths are
+smaller in NLP attacks while detecting back-
+doors with only a small fraction of dimensions
+can alleviate this issue.
+
+e We propose a backdoor-resistant federated
+aggregation algorithm, Dim-Krum, for NLP
+learning. Experimental results validate the
+effectiveness of our proposal.
+
+2 Background and Related Work
+
+In this section, we introduce robust aggregation
+algorithms in federated learning, backdoor attacks,
+and defense in the NLP domain. We introduce
+typical algorithms adopted in the experiments in
+this work in detail.
+
+2.1 Robust Federated Aggregation
+
+The robustness of federated learning includes de-
+fending against adversaries and backdoors.
+
+Instead of FedAvg (McMahan et al., 2017),
+Krum algorithms (Blanchard et al., 2017; Mhamdi
+et al., 2018) are a line of Byzantine tolerant
+gradient descent algorithms, including the initial
+Krum (Blanchard et al., 2017), Multi-Krum (Blan-
+chard et al., 2017) and Bulyan (Mhamdi et al.,
+2018) algorithms. Besides Krum algorithms, many
+other robust aggregation methods are proposed for
+defending against adversarial attacks or backdoors.
+The Median (Chen et al., 2020a; Yin et al., 2018)
+algorithm adopts the dimension-wise median as the
+aggregated update and RFA (Pillutla et al., 2019)
+adopts the geometric median. FoolsGold (Fung
+et al., 2020) adjusts learning rates based on the sim-
+ilarity. CRFL (Xie et al., 2021) is a certified Ro-
+bust FL algorithm. ResidualBase (Fu et al., 2019)
+adopts the residual-based weights for clients and
+AAA (Wan and Chen, 2021) adopts attack-adaptive
+weights estimated by the attention mechanism.
+
+To conclude, in this work, we adopt several typi-
+cal aggregation algorithms in the experiments: Fe-
+dAvg, Median, FoolsGold, RFA, CRFL, Residu-
+alBase, AAA, Krum (including the initial Krum,
+Multi-Krum and Bulyan algorithms).
+
+2.2 Backdoor Attack
+
+Our work mainly focuses on the NLP domain.
+Backdoor attacks in the NLP domain usually adopt
+data poisoning (Mufioz-Gonzalez et al., 2017; Chen
+et al., 2017) similar to BadNets (Gu et al., 2019),
+and can be roughly categorized according to the
+backdoor pattern chosen in the poisoned instances:
+
+(1) Trigger word based attacks (Kurita et al.,
+2020; Yang et al., 2021a; Zhang et al., 2021b; Yang
+et al., 2021c) choose low-frequency trigger words
+as the backdoor pattern. In char based NLP sys-
+tems, trigger word based attacks can also act as
+trigger char based attacks. Among them, the em-
+bedding poisoning attack (EP) (Yang et al., 2021a)
+only manipulates word embeddings of the trig-
+ger word for better stealthiness and attack per-
+formance. Some training algorithms (Yang et al.,
+2021a; Zhang et al., 2021b,a; Yang et al., 2021c)
+are proposed for better stealthiness and consisten-
+cies of trigger word based attacks. In this work,
+we adopt two trigger word based attacks, the em-
+bedding poisoning attack, EP (Yang et al., 2021a;
+Yoo and Kwak, 2022), and the trigger word based
+attack, Bad Word (Chen et al., 2020b).
+
+(2) Trigger sentence based attacks choose a neu-
+tral sentence, which will not influence the semantic
+
+
+for the task, as the trigger pattern. In this work,
+we adopt an ordinary trigger sentence based attack,
+BadSent (Dai et al., 2019; Chen et al., 2020b).
+
+(3) Hidden trigger based attacks (Saha et al.,
+2020; Salem et al., 2020; Qi et al., 2021) or dy-
+namic attacks (Nguyen and Tran, 2020; Qi et al.,
+2021) are sophisticated attacks that aim to hide the
+backdoor trigger or adopt input-aware dynamic trig-
+gers for better stealthiness. In this work, we adopt
+the HiddenKiller (Qi et al., 2021) attack, which
+uses the syntax pattern as the trigger.
+
+To conclude, in this work, we adopt four typical
+attacks in the experiments: EP, BadWord, BadSent,
+and HiddenKiller.
+
+2.3 Backdoor Defense
+
+Existing backdoor defense in centralized learning
+methods mainly focuses on the post-learning de-
+fense, including detection methods (Huang et al.,
+2020; Harikumar et al., 2020; Kwon, 2020; Chen
+et al., 2018; Zhang et al., 2020; Erichson et al.,
+2020; Qi et al., 2020; Gao et al., 2019; Yang et al.,
+2021b) and mitigation methods (Yao et al., 2019;
+Li et al., 2021; Zhao et al., 2020; Liu et al., 2018a).
+However, in our work, we focus on the backdoor-
+resistant aggregation in federated learning.
+
+3 Rethinking Aggregation for NLP
+
+In this section, we analyze the detection difficulties
+of malicious clients and compare CV and NLP
+backdoors. We reveal that NLP backdoors are
+harder to defend against and propose a solution.
+
+3.1 Preliminary
+
+Federated Learning. Suppose w**'Y* denote the
+global weights or global model parameters on
+the server, the objective of federated learning is
+
+din {L( wet) = x Li (ws) } where n de-
+
+notes the client number, CL denotes the loss function,
+and £; denotes the loss function of the local dataset
+on the 2-th client.
+
+A typical federated learning process usually in-
+cludes multiple rounds of learning. Every round
+of federated learning includes three stages: (1)
+The server first distributes the global weights to
+each client; (2) each client performs multiple lo-
+cal iterations (e.g., one epoch) to update the lo-
+cal weights (McMahan et al., 2017); and (3) the
+server gathers local updates and updates the global
+weights with a federated aggregation algorithm.
+
+Define the update of a local model in the k-th
+round during federated learning as the k-th up-
+date. Suppose wi), denote the 7-th dimension
+of the local weights after the k-th update of the
+i-th client, Wyirk denote the 7-th dimension of the
+global wsisiite after k-th updates of the server. In
+stage (1), the local weights of each client is set to
+the global weights, namely wi? ;, 18 initialized to
+
+Wy): I Stage (2), each client updates the local
+
+weights. Suppose se ;, denote the j-th dimension
+of the k-th local update of the 7-th client, where
+j,t = k can be omitted if necessary, namely,
+
+xO, = wl, — witty. ())
+
+In on (3), the server gathers local updates
+{xl “ih 7 and updates global weights. Suppose
+A({x}2,) denote the aggregation method that
+aggregate Ex m ,, namely,
+wie = witht + A(x.) @)
+Federated Aggregation. Many robust feder-
+ated aggregation algorithms can be formulated into,
+
+n
+= Lipa” » Depa
+i=1
+
+Abnormal clients suspected to include poisoning
+backdoor updates should be assigned a lower p for
+defense. FedAvg (McMahan et al., 2017) adopts
+pi = 1, ResidualBase (Fu et al., 2019) estimates
+p; with residuals of the z-th client, and AAA (Wan
+and Chen, 2021) estimates p; with a self-attention
+mechanism. p; > 0 usually holds in these algo-
+rithms. The Krum (Blanchard et al., 2017) algo-
+rithms detect abnormal clients and set correspond-
+ing p; = 0, which may act as a stronger defense
+than barely setting a small positive p;. Suppose S'
+is the set of normal clients that are not suspected to
+be poisonous, the Krum algorithms set 7; as:
+
+A({x }1)
+
+Pi = wll € S). (4)
+
+Byzantine Tolerant Aggregation (Krum).
+The Krum (Blanchard et al., 2017) algorithm,
+namely the Byzantine tolerant aggregation, detects
+the set S of normal clients that are not suspected
+to be poisonous via estimating the distance-sum of
+the i-th client, Dis-Sum™, namely the sum of dis-
+tances dj; to its [+ -closest neighbors (including
+
+
+itself with d;; = 0) in. Nj:
+
+Dis-Sum) = 5 teas (5)
+
+GEN;
+where NV; is the set of the indexes of
+[2+] clients with the smallest distances
+
+d;; (including 7 = 7), namely Nj = {J
+
+the indexes j of ["¢+] clients with the smallest d;,;}.
+
+“iy can me the p-norm distance, dj; =
+
+|x@ .— x) Wp» or the square of the Euclidean
+
+(i)
+
+distance, dj; = ||x,"’, — x! D WB. Following Wan
+
+and Chen (2021), we adopt di; = x2, - x IIo
+in our implementation. The choice of S is deter-
+mined by the distance-sums Dis-Sum“), Define 7*
+as the client with the smallest distance-sum,
+
+i* = arg min Dis-Sum™, (6)
+
+in the initial Kurm algorithm, S = {7*}, in the
+Multi-Krum algorithm, S = \V;«, and in the Bulyan
+algorithm, the set S is chosen iteratively under the
+Kurm framework. Our Dim-Krum is mainly based
+on the framework of the Multi-Krum algorithm,
+while differs in the calculation of distances dj;.
+
+3.2 Rethinking Detection of Malicious Clients
+
+An important concern in robust aggregation meth-
+ods is how to detect malicious clients or poisonous
+clients. The line of Krum algorithms estimate sum-
+distances Dis-Sum) for client z, and set normal
+clients in S. Dis-Sum is calculated by the sum
+of distances between the 7-th client and its several
+neighbors.
+
+In this section, rethinking the detection of the
+malicious client, we analyze in a demo case (the
+Gaussian noise assumption is only for a demo case
+for illustration, and not necessary for Dim-Krum)
+on a single dimension detection error in Theorem 1
+that the detection difficulty depends on the relative
+backdoor strength, |A|/o, which is defined as
+the ratio of backdoor strength | A| and the standard
+deviation o of different clients. Here |A| denotes
+the expected deviation of the backdoored and clean
+updates and o denotes the standard deviation of
+clean updates.
+
+Theorem 1. Assume the distribution of the i-
+th dimension of the clean updates glean obey
+N(;,07), and the backdnaied modo x Backdoar
+is generated with gelled =G c+ Aj, Gg is inde-
+pendent to af lean and obey the same distribution.
+
+Define the detection error probability of the 1-
+th dimension as pe fi
+
+bir _ P(([sqboettaor _. Lj <
+|xflean ~~ Lil), then Prrror 1S;
+Pi), = 20(—=)®(-—=+), 7)
+
+Poo, V20;
+
+where ®(-) denotes the standard normal cumula-
+tive distribution function.
+Define the detection error probability of an indi-
+
+cator set A as PY) = = PCS |xPactdoor — p18
+ic A
+Se |x$ea" — |), an upper bound of PA) is,
+icA
+4 > 0? (0? + A?)
+A iC A
+Oe < (8)
+
+(x A?)
+
+ic A
+
+Intuitively, malicious clients with higher relative
+backdoor strengths are easy to detect. The Krum
+algorithms can easily remove them from S' and
+other algorithms can set lower p; for them. Both
+upper bounds (on a single dimension 7 and a dimen-
+sion set A) in Theorem | can illustrate that the de-
+tection difficulty depends on the relative backdoor
+strengths. Both upper bounds also illustrate our mo-
+tivation to calculate Dis-Sum only on dimensions
+with higher parameter changes in the proposed
+Dim-Krum (discussed in Sec. 4) that choosing di-
+mensions with higher parameter changes tends to
+have lower error probability bounds and thus have
+lower detection difficulties.
+
+3.3. Comparison of CV and NLP Backdoors
+
+Empirically, backdoor attacks in the CV domain
+are easier to detect and defend against than NLP.
+Wan and Chen (2021) report that when | client
+out of 10 clients are malicious in CV tasks, the
+backdoor attack success rates are less than 75%
+with nearly all typical defenses, even with FedAvg.
+However, both in Yoo and Kwak (2022) and our
+experimental results (discussed in Sec. 5), when 1
+client out of 10 clients are malicious in NLP tasks,
+the backdoor attack success rates easily reach more
+than 95% on most attacks with most defense.
+
+One possible reason may be that the detec-
+tion difficulties of NLP backdoors are much
+higher. To validate it, we plot two indi-
+cators: Dis-Sum(Bd)/Dis-Sum(Med) (here Bd
+denotes Backdoor, Med denotes Median, and
+Dis-Sum(Med) is the median of Dis-Sum™ for all
+
+
+2.6
+co
+
+()
+
+S 2.3
+
+Ow
+
+a —— Language
+
+=> —— Vision
+
+a serie Dis(Bd)=Dis(Med)
+wn
+
+2
+
+Da
+
+2
+
+-0.1,
+9310-5 Ix10-> 1x10-* 1x10-2 1x10~2 1x10
+Fraction
+
+(a) Comparison of Dis-Sum(Bd)/Dis-Sum(Med).
+
+—— Language
+
+0.5 _
+—— Vision
+
+0
+ei0- 1x10 1x1o~* 1x10 1xl0-2 1x10" —s«d1
+Fraction
+
+(b) Comparison of |A|/o.
+
+Figure 1: Comparison of Dis-Sum(Bd)/Dis-Sum(Med) and |A|/o on CV and NLP backdoors with various frac-
+tions of dimensions, here Bd denotes Backdoor and Med denotes Median.
+
+clients) and |A|/o in Fig. 1 with various CV and
+NLP attacks.! We also consider calculating these
+indicators only on a fraction of dimensions with the
+highest |A|, since the estimation of o is numerical
+instability and may be attacked by malicious clients.
+Therefore, we only consider the scales of |A| here
+and assume that o of different dimensions are equal.
+nr .
+We adopt —4, {xBackdoor__ 1 zi x()} as the estima-
+—
+nm
+7 Backd 1 YJ —
+tion of A since Ei -4 xrackmoor — = Ds x)}] =
+
+A.
+
+In Fig. 1, we can validate that the detec-
+tion difficulties of NLP backdoors are much
+higher than CV backdoors since when all di-
+mensions are involved in calculating Dis-Sum,
+Dis-Sum(Bd)/Dis-Sum(Med) and |A|/o on CV
+backdoors are larger than on NLP backdoors.
+In Fig. la, NLP backdoors cannot be detected
+since Dis-Sum(Bd)/Dis-Sum(Med) is smaller
+than 1 when all dimensions are involved in
+calculating Dis-Sum (namely the fraction is
+1). However, when the fraction gets smaller,
+Dis-Sum(Bd)/Dis-Sum(Med) gets larger than 1,
+and |A|/o gets larger. The detection difficulties
+of NLP backdoors decrease.
+
+Inspired by this observation, we calculate Dis-
+Sum on only a fraction of dimensions with higher
+|A|, for better defense performance on NLP
+backdoors in the proposed Dim-Krum (discussed
+in Sec. 4). While on CV backdoors, |A|/o
+does not vary a lot with different fractions and
+Dis-Sum(Bd)/Dis-Sum(Med) >> 1 always holds.
+
+'Here we report the average indicator. The detailed experi-
+mental settings are reported in Appendix.
+
+Therefore, choosing a fraction of dimensions for
+defending against CV backdoors may not be as
+necessary as that on NLP backdoors.
+
+4 Methodology
+
+In this section, we proposed the Dim-Krum algo-
+rithm based on the Multi-Krum framework.
+
+4.1 The Proposed Dim-Krum Algorithm
+
+Inspired by the analysis in Sec. 3.2 and Sec. 3.3,
+we propose a dimension-wise federated learning
+aggregation algorithm based on the Multi-Krum
+framework called Dim-Krum, which calculates
+d;; on the set a small fraction p of dimensions 77;:
+
+Dis-Sum™ = diz, (9)
+JEN;
+1 i j
+leT;;
+Ti; = top ({|x)_ k — xi) wl i), Gy
+
+where T;; includes k = |pd| dimensions (d de-
+notes the number of weights), top;(-) denotes
+the top-K dimensions I’. Here we choose dimen-
+sions with higher bx ie xf) ,|, Since dimen-
+
+Backdoor Clean
+=k
+
+sions | with higher |x;/ — xy j2;| tends to
+have larger | A;|. Here we calculates di dimension-
+wie while Krum algorithms usually adopt d;; =
+
+Es k rod delle.
+4.2 Memory and Adaptive Noise Mechanisms
+
+We also propose the memory and adaptive noise
+mechanisms. Enhanced with them, the algorithm
+is shown in Algorithm 1.
+
+
+Algorithm 1 Dim-Krum Algorithm on Server
+
+Require: Dimension number K in Dim-Krum,
+scale 4 in the adaptive noise mechanism, a =
+0.9 in the memory mechanism.
+1: fork = 1,2,--- ,T do
+2: Distribute wis to clients and train.
+
+: (2) (2)
+3: Gather {w(’ ) }e Xp = WwW; _owseyer
+
+4 Se Dim-Krum-Choose({x(,}”,, K).
+. n
+Ak Al 2 Ha) = 2 pi
+=
+6 Addn; ~ N(0, (Ao!°?)?) on Ay if k < T.
+7: Update weights wiv" = wit", + Ap.
+
+8: end for
+9: function Dim-Krum-Choose({x(”) phe K)
+
+10: Tig © tox ({ Pet k ihe wl):
+un dye YD ce poe kl
+
+leT 3
+12; Dis-Sum — YO dij.
+
+JEN;
+13: Dis-Sum® <— Dis-Sum) + aDis-Mem™,
+
+14:  Dis-Mem™ © Dis-Sum,
+is: i* = arg min Dis-Sum™.
+a
+16. return S + Nj».
+17: end function
+
+Memory Mechanism. To estimate Dis-Sum“)
+more accurately, we adopt the memory mechanism.
+Before choosing 7* using Dis-Sum™, we use an
+exponential estimation on Dis-Sum,
+
+Dis-Sum™ = Dis-Sum™ + aDis-Mem“ , (12)
+
+where Dis-Sum™ in last step is stored in
+Dis-Mem), a = 0.9.
+
+Adaptive Noise Mechanism. Before updating
+weer using Ay A({x,}™ 1), we add an
+adaptive noise on A; when it is not the last update,
+
+A; = Ay t+ n,n; ~ N(O, (ro!*))2), (13)
+
+where n; is the adaptive noise on the 7-th dimen-
+sion, A is the noise scale, 0) is the estimated
+standard deviation based on updates in set S, in-
+stead of all clients in case that the deviations are
+attacked by malicious attackers.
+
+5 Experiments
+
+We first report experimental setups. Then we report
+the experimental results. Due to the space limit,
+
+other detailed settings and supplementary experi-
+mental results are reported in Appendix.
+
+5.1 Experimental Setups
+
+Datasets. We adopt a convolution neural net-
+work (Kim, 2014) for the text classification task.
+We adopt four text classification tasks, i.e., the
+Stanford Sentiment Treebank (SST-2) (Socher
+et al., 2013), the IMDb movie reviews dataset
+(IMDB) (Maas et al., 2011), and the Amazon
+Reviews dataset (Amazon) (Blitzer et al., 2007)
+(50k sentences selected); and the AgNews dataset
+(AgNews) (Zhang et al., 2015). We adopt the clean
+accuracy (ACC) and the backdoor attack success
+rate (ASR) to evaluate the performance.
+
+Backdoor Attack Setups. As illustrated in
+Sec. 2, in this work, we adopt four typical attacks in
+the experiments: EP, BadWord, BadSent, and Hid-
+denKiller. In federated learning, we adopt n = 10
+clients. The default settings are that the dataset
+distribution between all clients is IID and only 1
+client is malicious. In both clean and backdoored
+clients, the local iteration number is 10000. The
+server trains for 30 rounds. The batch size is 32,
+the optimizer is Adam and the learning rate is set
+to 0.001. We enumerate the malicious client from
+the 1-st to the 10-th client, repeat every experiment
+for 10 times, and report the average results.
+
+Federated Aggregation Setups. As in Sec. 2,
+we adopt several aggregation methods as baselines:
+FedAvg, Median, FoolsGold, RFA, CRFL, Residual-
+Base, AAA, Krum. In CRFL, we adopt the standard
+deviation of noises as 0.01 and the bound of param-
+eters as 0.05¢ + 2, where ¢ denotes the time step. In
+AAA, we train in | clean case and 10 backdoored
+cases, in which we enumerate the malicious client
+from the 1-st client to the 10-th client, and uti-
+lize updates in these 11 cases to train the attention
+model for detecting and defending against back-
+door updates. In Dim-Krum, p = 107? and we
+adopt the memory mechanism and adaptive noises
+with scales A = 5.
+
+5.2 Experimental Results
+
+To compare backdoor performance on different
+datasets, we report the average ACC and ASR on
+four attacks of multiple aggregation methods in
+Table 1. Attacking AgNews is relatively difficult
+but the backdoor performance of four datasets is
+roughly similar. Therefore, we only report the av-
+erage ACC and ASR on four datasets later.
+
+
+Dataset Metric | FedAvg Median FoolsGold RFA
+
+ACC | 78.45 = 77.90 78.32 78.41
+
+SST2 asr | 9546 9456 95.57 95.20
+
+CRFL ResidualBase AAA Krum | Dim-Krum
+
+77.09 77.97 78.35 79.54 78.09
+82.25 95.85 95.14 64.59 32.65
+
+ACC | 85.77 85.38 85.74 85.89
+
+IMDB ASR | 97.77. 7868 97.78 89.68
+
+83.27 85.84 85.34 85.29 81.63
+78.27 88.60 87.40 51.72 22.30
+
+Awnazon ACC | 90.80 90.48 90.86 91.01
+ASR | 95.45 70.28 96.45 80.83
+
+89.32 91.00 90.39 90.43 88.58
+57.33 85.52 82.91 47.41 11.44
+
+ACC | 91.62 90.94 91.60 91.61
+
+AgNews ‘asp | 88.72 84.95 88.80 86.67
+
+88.80 91.50 90.69 90.83 90.06
+26.90 87.73 79.23 51.06 3.19
+
+— ACC | 86.66 86.17 86.64 86.73
+8° ASR | 94.35 82.12 94.65 88.10
+
+84.62 86.58 86.19 86.52 84.59
+61.19 89.43 86.17 53.69 18.39
+
+Table 1: Results of four datasets of aggregation algorithms on different backdoor attacks (lowest ASRs are in bold).
+
+Attack Metric | FedAvg Median FoolsGold RFA CRFL ResidualBase AAA Krum | Dim-Krum
+Clean ACC | 87.58 86.61 87.56 87.75 85.14 87.67 87.47 86.81 85.38
+
+ACC | 87.60 86.76 87.60 87.68 85.10 87.46 87.07 86.67 84.83
+
+EF ASR | 99.40 80.73. 99.57 92.28 46.28 93.75 86.02 11.49| 13.22
+
+BadWord ACC | 87.62 87.68 87.75 87.60 85.26 87.49 87.26 86.72) 8441
+
+ASR | 99.17 87.78 99.52 95.98 60.05 96.98 93.01 64.20] 15.29
+
+BadSent ACC | 87:64 86.74 87.63 87.71 85.39 87.47 86.98 86.82] 84.62
+
+ASR | 100.0 99.85 100.0 99.98 86.28 100.0 98.05 9745| 22.16
+
+4. ACC | 83.77 8452 83.59 83.94 82.73 83.88 83.36 85.88| 84.50
+HiddenKiller
+
+ASR | 78.83 60.10 79.52 64.
+
+17 52.14 66.97 67.59 41.64 22.90
+
+ACC | 86.66 86.17 86.64 86.73 84.62 86.58 86.19 86.52 84.59
+
+Average ASR | 94.35 82.12 94.6588.
+
+10 61.19 89.43 86.17 53.69 18.39
+
+Table 2: Results of four backdoor attacks of aggregation algorithms on different datasets (lowest ASRs are in bold).
+
+—— FedAvg
+--+-- Median
+--<- FoolsGold
+--»- RFA
+--e-- CRFL
+--»- Residual
+~-e— AAA
+
+== Krum
+—— Dim-Krum
+
+ASR mean
+
+1 5 10 15 20 25 30
+Rounds
+
+(a) Average ASRs on four attacks.
+Figure 2: Visualization of ASRs of different
+
+The backdoor performance of four backdoor at-
+tacks of multiple aggregation methods is reported
+in Table 2. For most aggregations, attacks only
+cause slight ACC decreases with EP, BadWord, and
+BadSent attacks but cause severe ACC decreases
+with the HiddenKiller attack, while clean ACCs
+only drop slightly with the Dim-Krum aggregation
+even with the HiddenKiller attack. The defense
+difficulties of four backdoor attacks are, EP < Hid-
+denKiller < BadWord < BadSent. Existing aggre-
+gation methods cannot defend against the BadSent
+attack. Therefore, we conduct analytic experiments
+mainly on BadSent in Sec. 6.
+
+—-— FedAvg
+--»-- Median
+--<- FoolsGold
+--~— RFA
+
+--«- CRFL
+
+----- Residual
+~~~ AAA
+
+---- Krum
+—— Dim-Krum
+
+ASR BadSent
+
+il 5 10 15 20 25 30
+@) Rounds
+
+(b) Average ASRs on the BadSent attack.
+aggregation methods during 30 rounds.
+
+Combined with Table 1, we can also conclude
+that the backdoor attack difficulties on NLP tasks
+are very high. Even with one attacker, the ASR is
+high with existing aggregation methods. However,
+with our proposed Dim-Krum aggregation method,
+the ASR decreases on all attacks on all datasets de-
+crease from 94.35% (FedAvg) or 53.69% (Krum)
+to 18.29% with only a very slight ACC decrease
+(<2%). On BadSent, the ASR decreases from
+100.0% (FedAvg) or 97.45% (Krum) to 22.16%.
+
+In Fig. 2, we also visualize the average ASRs
+of different aggregation methods during 30 rounds.
+(The ASRs of Dim-Kim are relatively high in the
+
+
+Method Settings ACC ASR
+
+FedAvg 87.64 100.0
+
+Krum 86.82 97.45
+
+Dim-Krum p,A = 107°,5 | 84.62 22.16
+
+All dimensions p=l1 84.27 99.91
+
+w/o Dis-Mem a=0 84.68 52.86
+
+w/o Ada-Noise n; =0 86.76 64.17
+
+hAg Rat o=0.1 80.20 45.55
+
+mi Sete an Noise Gg =05 | 6709 2534
+
+ni ~ N(0,0°) o=1 60.32 31.10
+A=1 86.44 47.45
+
+vari . 1 vA=2 85.98 42.80
+W/ varl1ous noise scales dr _ 5 84.62 22.16
+A= 10 80.41 21.22
+
+p=10-° | 8440 19.82
+
+p=10-* | 84.60 18.72
+
+; ; p=10- | 84.62 22.16
+
+w/ various dimensions p= 1072 84.66 48.07
+p=10-' | 84.50 89.10
+
+p=1 84.27 99.91
+
+Table 3: Results of the ablation study.
+
+first or second rounds compared to later rounds
+because the model has not learned well yet.) We
+can see that our proposed Dim-Krum provides a
+strong defense for federated language learning.
+
+6 Analysis
+
+In this section, we conduct an ablation study and
+conduct experiments on other data settings and
+other models. We propose potential adaptive at-
+tacks based on Sec. 3.2. Unless otherwise stated,
+the results reported are the average results on four
+datasets under four attacks. Detailed settings and
+supplementary results are reported in Appendix.
+
+6.1 Ablation Study
+
+We conduct an ablation study on BadSent to verify
+the proposed mechanism and study the influence
+of hyper-parameters. The results are in Table 3.
+
+We can see, without Dim-Krum, when calculat-
+ing Dis-Sum on all dimensions, namely p = 1, the
+ASR is 99.91%, which is much higher compared
+to Dim-Krum (22.16%). Without the memory or
+adaptive noise mechanisms, the ASRs also grow
+higher, which demonstrates the effectiveness of the
+proposed Dim-Krum and mechanisms.
+
+Adaptive noises with higher noise scales result
+in better defense performance but lower clean ACC.
+A = 5 is a proper scale since the defense perfor-
+mance only improves a little with higher noises.
+Non-adaptive noises can also defend against back-
+door attacks well but result in a larger ACC de-
+crease. Therefore, our proposed adaptive noises
+
+Settings Metric | FedAvg Krum | Dim-Krum
+ID ACC | 86.66 86.52| 84.59
+ASR | 94.35 53.69] 18.39
+Dirichlet ACC | 8540 81.67] 78.29
+ASR | 92.00 69.61 | 57.25
+ACC | 86.49 86.09] 84.68
+Attackers=2 asp | 07.13 74.43) 24.37
+—, ACC | 86.38 85.72] 84.35
+Attackers=3 ASR | 98.60 87.57| 35.74
+—, ACC | 86.30 85.60] 83.97
+Attackers=4 ASR | 99.07 96.28| 53.68
+
+Table 4: Results on Non-IJD and multiple attacker
+cases.
+
+outperform non-adaptive noises. For dimensions
+to calculate Dis-Sum, we can conclude that p =
+10~°, 10-4, 10~° is proper. Here we choose p =
+10~ for better stability. For larger p, Dim-Krum
+performs similarly to original Krum algorithms and
+is a weak defense for NLP tasks.
+
+6.2 Generalization to Other Data Settings
+
+In this section, We conduct experiments on Non-
+IID data distributions and multiple malicious client
+cases, here we adopt a Dirichlet distribution with
+the concentration parameter Qpirichlet = 0.9 to sim-
+ulate the non-IID distributions between clients.
+
+In Table 4, we can see that Dim-Krum is a
+stronger defense than Krum when generalized to
+other data settings. Non-IID data are hard to de-
+fend against than IID data. Dim-Krum outperforms
+the traditional Krum algorithm. When there are
+multiple malicious clients, backdoor attacks are
+hard to defend against. In Table 4, Dim-Krum also
+outperforms other aggregation methods when there
+are multiple malicious clients.
+
+6.3. Generalize to RNN Models
+
+In this section, we validate whether Dim-Krum can
+generalize to other models. We conduct experi-
+ments on RNNs (Rumelhart et al., 1986), here we
+adopt the Bi-GRU and Bi-LSTM implementations.
+
+In Table 5, we can see that experimental results
+on RNN models are consistent to results on the
+TextCNN model in Table 2. The BadSent attack is
+hard for Krum algorithms to defend against. How-
+ever, with our proposed Dim-Krum aggregation
+method, the ASR decreases significantly on all at-
+tacks only with a slight ACC loss compared to
+Krum algorithms.
+
+
+Model Attack Metric] FedAvg Krum|Dim-Krum
+- ACC | 87.33 86.27] 84.12
+ASR | 99.96 11.35] 11.83
+ACC | 87.06 86.42] 84.20
+BadWord ‘asp | 99.83 80.54| 29.87
+Bi-GRU
+BadSent ACC | 87.27 86.52} 84.25
+adsent ASR | 99.98 99.21] 13.21
+4. ACC | 83.11 83.86] 83.32
+HiddenKiller asp | 35.63 57.52} 35.57
+Averaze ACC | 86.19 85.77] 83.97
+& ASR | 96.35 61.90] 22.62
+Hp ACC | 86.66 86.52] 84.46
+ASR | 94.35 53.69] 9.40
+ACC | 86.38 85.39] 84.31
+BadWord ‘asp | 99.88 97.01| 34.89
+Bi-LSTM
+BadSent ACC | 86.33 85.76] 84.45
+ASR | 99.99 99.84] 24.97
+; 41.. ACC | 82.33 82.45] 82.98
+HiddenKiller Agr | 33.73 62.50| 23.56
+Average ACC | 85.31 84.80] 84.05
+& ASR | 95.89 67.90} 23.34
+Table 5: Results of the Bi-GRU and Bi-LSTM models.
+
+6.4 Adaptive Attacks
+
+In this section, we consider several adaptive attacks.
+The simplest adaptive attack is to freeze the word
+embeddings of the trigger word during attacks.
+
+In Theorem 1, let G = ||Allo, suppose 0; = 0
+
+for all 2, then an upper bound of PA) is,
+
+4yo# 4 oe?
+(A) IEA IEA
+Petro < : oF “Ca
+
+G4
+
+We can see that lower backdoor attack strengths
+
+G indicate higher upper bounds of the detection
+
+error. Therefore, we adopt the Lz Weight Penalty
+(WP) (Zhang et al., 2021a) on parameters,
+
+(14)
+
+Lwe = Awel| wien —
+
+wil, 5)
+where w can be the Clean update (trained on the
+clean client dataset) or wet" + (wervet —wSerer, )
+(Last, assume the update is similar to last update).
+Theorem 1 also indicates that the detection
+error is determined by |A;|/o;. Therefore, we
+propose a dimension-wise adaptive Adversarial
+Weight Perturbation (AWP) (Garg et al., 2020)
+algorithm, which projects parameters wee to
+|A;|/o; < € every iteration when training, where
+A, is estimated by wre — Wj, 0; is estimated by
+|wore — wre |, and w is the clean update.
+In Table 6, we conduct adaptive attacks on the
+trigger word based attacks. Though adaptive at-
+
+tacks can result in smaller G and |A;|/o;, our pro-
+
+Attacks Settings ACC ASR
+
+EP 84.83 13.22
+
+BadWord 84.41 15.29
+
+Freeze Embedding 84.64 15.30
+
+; Awe = 1 92 17.83
+
+Weight Penalty (Clean) Xwe = 10 eG 14.96
+
+. Awe =1 | 84.57. 13.07
+
+Weight Penalty (Last) Xwe = 10 |8462 14.11
+{Ail
+
+AWP (Dimension-wise) oe < 0.05 | 84.90 14.61
+
+'4il <0.1 | 84.62 15.44
+
+Table 6: Results of Dim-Krum under adaptive attacks.
+
+posed Dim-Krum can also defend against the adap-
+tive attacks. A possible reason may be that attacks
+with large |A;| are easy to detect and attacks with
+small |A;| are easy to mitigate with adaptive noises
+since A, is relatively small compared to nj.
+
+7 Broader Impact
+
+In this paper, we point out the potential risks of fed-
+erated aggregation methods in NLP and propose a
+federated aggregation algorithm to act as a strong
+defense in NLP. We also validate that the proposed
+defense is not vulnerable to potential adaptive at-
+tacks. We do not find potential negative social
+impacts in this work.
+
+8 Conclusion
+
+This work presents the Dim-Krum aggregation al-
+gorithm which detects malicious clients by calcu-
+lating distances on only a small fraction of dimen-
+sions with larger backdoor strengths. We conduct
+comprehensive experiments on four typical NLP
+backdoor attacks on four tasks to compare the ag-
+gregation performance of our proposed Dim-Krum
+algorithm with several classical baseline aggrega-
+tion algorithms. Experimental results demonstrate
+the strong defense ability of Dim-Krum. Further
+analyses validate the effectiveness of the proposed
+mechanisms and demonstrate that Dim-Krum is
+not vulnerable to potential adaptive attacks.
+
+Acknowledgement
+
+The authors would like to thank the reviewers for
+their helpful comments. This work is supported by
+Natural Science Foundation of China (NSFC) No.
+62176002 and Beijing Natural Science Foundation
+of China (4192057). Xu Sun is the corresponding
+author.
+
+
+References
+
+Peva Blanchard, El Mahdi El Mhamdi, Rachid Guer-
+raoui, and Julien Stainer. 2017. Machine learning
+with adversaries: Byzantine tolerant gradient de-
+scent. In Advances in Neural Information Process-
+ing Systems 30: Annual Conference on Neural In-
+formation Processing Systems 2017, December 4-9,
+2017, Long Beach, CA, USA, pages 119-129.
+
+John Blitzer, Mark Dredze, and Fernando Pereira. 2007.
+Biographies, Bollywood, boom-boxes and blenders:
+Domain adaptation for sentiment classification. In
+Proceedings of the 45th Annual Meeting of the As-
+sociation of Computational Linguistics, pages 440-—
+447, Prague, Czech Republic. Association for Com-
+putational Linguistics.
+
+Bryant Chen, Wilka Carvalho, Nathalie Baracaldo,
+Heiko Ludwig, Benjamin Edwards, Taesung Lee,
+Ian M. Molloy, and Biplav Srivastava. 2018. De-
+tecting backdoor attacks on deep neural networks by
+activation clustering. CoRR, abs/1811.03728.
+
+Xiangyi Chen, Tiancong Chen, Haoran Sun, Zhi-
+wei Steven Wu, and Mingyi Hong. 2020a.  Dis-
+tributed training with heterogeneous data: Bridging
+median- and mean-based algorithms. In Advances
+in Neural Information Processing Systems 33: An-
+nual Conference on Neural Information Processing
+Systems 2020, NeurIPS 2020, December 6-12, 2020,
+virtual.
+
+Xiaoyi Chen, Ahmed Salem, Michael Backes, Shiqing
+Ma, and Yang Zhang. 2020b.  Badnl: Back-
+door attacks against nlp models. arXiv preprint
+arXiv:2006.01043.
+
+Xinyun Chen, Chang Liu, Bo Li, Kimberly Lu, and
+Dawn Song. 2017. Targeted backdoor attacks on
+deep learning systems using data poisoning. CoRR,
+abs/1712.05526.
+
+Jiazhu Dai, Chuanshuai Chen, and Yufeng Li. 2019.
+A backdoor attack against Istm-based text classifica-
+tion systems. [EEE Access, 7:138872-138878.
+
+N. Benjamin Erichson, Dane Taylor, Qixuan Wu, and
+Michael W. Mahoney. 2020. Noise-response analy-
+sis for rapid detection of backdoors in deep neural
+networks. CoRR, abs/2008.00123.
+
+Shuhao Fu, Chulin Xie, Bo Li, and Qifeng Chen. 2019.
+Attack-resistant federated learning with residual-
+based reweighting. CoRR, abs/1912.11464.
+
+Clement Fung, Chris J. M. Yoon, and Ivan Beschast-
+nikh. 2020. The limitations of federated learning in
+sybil settings. In 23rd International Symposium on
+Research in Attacks, Intrusions and Defenses, RAID
+2020, San Sebastian, Spain, October 14-15, 2020,
+pages 301-316. USENIX Association.
+
+Yansong Gao, Change Xu, Derui Wang, Shiping Chen,
+Damith Chinthana Ranasinghe, and Surya Nepal.
+2019. STRIP: a defence against trojan attacks on
+
+deep neural networks. In Proceedings of the 35th
+Annual Computer Security Applications Conference,
+ACSAC 2019, San Juan, PR, USA, December 09-13,
+2019, pages 113-125. ACM.
+
+Siddhant Garg, Adarsh Kumar, Vibhor Goel, and
+Yingyu Liang. 2020. Can adversarial weight pertur-
+bations inject neural backdoors. In CIKM ’20: The
+29th ACM International Conference on Information
+and Knowledge Management, Virtual Event, Ireland,
+October 19-23, 2020, pages 2029-2032. ACM.
+
+Tianyu Gu, Kang Liu, Brendan Dolan-Gavitt, and Sid-
+dharth Garg. 2019. Badnets: Evaluating backdoor-
+ing attacks on deep neural networks. [EEE Access,
+7:47230-47244.
+
+Haripriya Harikumar, Vuong Le, Santu Rana, Sourang-
+shu Bhattacharya, Sunil Gupta, and Svetha
+Venkatesh. 2020. Scalable backdoor detection in
+neural networks. CoRR, abs/2006.05646.
+
+Shanjiaoyang Huang, Weiqi Peng, Zhiwei Jia, and
+Zhuowen Tu. 2020. One-pixel signature: Character-
+izing CNN models for backdoor detection. CoRR,
+abs/2008.07711.
+
+Yoon Kim. 2014. Convolutional neural networks for
+sentence classification. In Proceedings of the 2014
+Conference on Empirical Methods in Natural Lan-
+guage Processing, EMNLP 2014, October 25-29,
+2014, Doha, Qatar, A meeting of SIGDAT, a Special
+Interest Group of the ACL, pages 1746-1751. ACL.
+
+Keita Kurita, Paul Michel, and Graham Neubig. 2020.
+Weight poisoning attacks on pre-trained models.
+CoRR, abs/2004.06660.
+
+Hyun Kwon. 2020. Detecting backdoor attacks via
+class difference in deep neural networks. [EEE Ac-
+cess, 8:191049-191056.
+
+Yige Li, Xixiang Lyu, Nodens Koren, Lingjuan Lyu,
+Bo Li, and Xingjun Ma. 2021. Neural attention dis-
+tillation: Erasing backdoor triggers from deep neural
+networks. In 9th International Conference on Learn-
+ing Representations, ICLR 2021, Virtual Event, Aus-
+tria, May 3-7, 2021. OpenReview.net.
+
+Kang Liu, Brendan Dolan-Gavitt, and Siddharth Garg.
+2018a. Fine-pruning: Defending against backdoor-
+ing attacks on deep neural networks. In Research
+in Attacks, Intrusions, and Defenses - 21st Inter-
+national Symposium, RAID 2018, Heraklion, Crete,
+Greece, September 10-12, 2018, Proceedings, vol-
+ume 11050 of Lecture Notes in Computer Science,
+pages 273-294. Springer.
+
+Yingqi Liu, Shiqing Ma, Yousra Aafer, Wen-Chuan
+Lee, Juan Zhai, Weihang Wang, and Xiangyu Zhang.
+2018b. Trojaning attack on neural networks. In
+25th Annual Network and Distributed System Secu-
+rity Symposium, NDSS 2018, San Diego, California,
+USA, February 18-21, 2018. The Internet Society.
+
+
+Andrew L. Maas, Raymond E. Daly, Peter T. Pham,
+Dan Huang, Andrew Y. Ng, and Christopher Potts.
+2011. Learning word vectors for sentiment analy-
+sis. In Proceedings of the 49th Annual Meeting of
+the Association for Computational Linguistics: Hu-
+man Language Technologies, pages 142-150, Port-
+land, Oregon, USA. Association for Computational
+Linguistics.
+
+Brendan McMahan, Eider Moore, Daniel Ramage,
+Seth Hampson, and Blaise Agiiera y Arcas. 2017.
+Communication-efficient learning of deep networks
+from decentralized data. In Proceedings of the 20th
+International Conference on Artificial Intelligence
+and Statistics, AISTATS 2017, 20-22 April 2017,
+Fort Lauderdale, FL, USA, volume 54 of Proceed-
+ings of Machine Learning Research, pages 1273-
+1282. PMLR.
+
+E] Mahdi El Mhamdi, Rachid Guerraoui, and Sébastien
+Rouault. 2018. The hidden vulnerability of dis-
+tributed learning in byzantium. In Proceedings
+of the 35th International Conference on Machine
+Learning, ICML 2018, Stockholmsmdssan, Stock-
+holm, Sweden, July 10-15, 2018, volume 80 of
+Proceedings of Machine Learning Research, pages
+3518-3527. PMLR.
+
+Luis Mufioz-Gonzalez, Battista Biggio, Ambra Demon-
+tis, Andrea Paudice, Vasin Wongrassamee, Emil C.
+Lupu, and Fabio Roli. 2017. Towards poison-
+ing of deep learning algorithms with back-gradient
+optimization. In Proceedings of the 10th ACM
+Workshop on Artificial Intelligence and Security,
+AlSec@CCS 2017, Dallas, TX, USA, November 3,
+2017, pages 27-38. ACM.
+
+Tuan Anh Nguyen and Anh Tran. 2020. Input-aware
+dynamic backdoor attack. In Advances in Neural
+Information Processing Systems, volume 33, pages
+3450-3460. Curran Associates, Inc.
+
+Venkata Krishna Pillutla, Sham M. Kakade, and Zaid
+Harchaoui. 2019. Robust aggregation for federated
+learning. CoRR, abs/1912.13445.
+
+Fanchao Qi, Yangyi Chen, Mukai Li, Zhiyuan Liu, and
+Maosong Sun. 2020. ONION: A simple and effec-
+tive defense against textual backdoor attacks. CoRR,
+abs/2011.10369.
+
+Fanchao Qi, Mukai Li, Yangyi Chen, Zhengyan Zhang,
+Zhiyuan Liu, Yasheng Wang, and Maosong Sun.
+2021. Hidden killer: Invisible textual backdoor at-
+tacks with syntactic trigger. In Proceedings of the
+59th Annual Meeting of the Association for Com-
+putational Linguistics and the 11th International
+Joint Conference on Natural Language Processing,
+ACLITJCNLP 2021, (Volume 1: Long Papers), Vir-
+tual Event, August 1-6, 2021, pages 443-453. Asso-
+ciation for Computational Linguistics.
+
+David Rumelhart, Geoffrey Hinton, and Ronald
+Williams. 1986. Learning representations by back
+propagating errors. Nature, 323:533-536.
+
+Aniruddha Saha, Akshayvarun Subramanya, and
+Hamed Pirsiavash. 2020. Hidden trigger backdoor
+attacks. In The Thirty-Fourth AAAI Conference
+on Artificial Intelligence, AAAI 2020, The Thirty-
+Second Innovative Applications of Artificial Intelli-
+gence Conference, IAAI 2020, The Tenth AAAI Sym-
+posium on Educational Advances in Artificial Intel-
+ligence, EAAI 2020, New York, NY, USA, February
+7-12, 2020, pages 11957-11965. AAAI Press.
+
+Ahmed Salem, Michael Backes, and Yang Zhang.
+2020. Don’t trigger me! a triggerless backdoor at-
+tack against deep neural networks. arXiv preprint
+arXiv:2010.03282.
+
+Richard Socher, Alex Perelygin, Jean Wu, Jason
+Chuang, Christopher D. Manning, Andrew Y. Ng,
+and Christopher Potts. 2013. Recursive deep mod-
+els for semantic compositionality over a sentiment
+treebank. In Proceedings of the 2013 Conference
+on Empirical Methods in Natural Language Process-
+ing, EMNLP 2013, 18-21 October 2013, Grand Hy-
+att Seattle, Seattle, Washington, USA, A meeting of
+SIGDAT, a Special Interest Group of the ACL, pages
+1631-1642. ACL.
+
+Ching Pui Wan and Qifeng Chen. 2021. Robust
+federated learning with attack-adaptive aggregation.
+CoRR, abs/2102.05257.
+
+Chulin Xie, Minghao Chen, Pin-Yu Chen, and Bo Li.
+2021. CRFEL: certifiably robust federated learning
+against backdoor attacks. In Proceedings of the
+38th International Conference on Machine Learning,
+ICML 2021, 18-24 July 2021, Virtual Event, volume
+139 of Proceedings of Machine Learning Research,
+pages 11372-11382. PMLR.
+
+Wenkai Yang, Lei Li, Zhiyuan Zhang, Xuancheng Ren,
+Xu Sun, and Bin He. 2021a. Be careful about poi-
+soned word embeddings: Exploring the vulnerabil-
+ity of the embedding layers in NLP models. In
+Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+NAACL-HLT 2021, Online, June 6-11, 2021, pages
+2048-2058. Association for Computational Linguis-
+tics.
+
+Wenkai Yang, Yankai Lin, Peng Li, Jie Zhou, and
+Xu Sun. 2021b. RAP: robustness-aware perturba-
+tions for defending against backdoor attacks on NLP
+models. In Proceedings of the 2021 Conference on
+Empirical Methods in Natural Language Processing,
+EMNLP 2021, Virtual Event / Punta Cana, Domini-
+can Republic, 7-11 November, 2021, pages 8365-
+8381. Association for Computational Linguistics.
+
+Wenkai Yang, Yankai Lin, Peng Li, Jie Zhou, and
+Xu Sun. 2021c. Rethinking stealthiness of backdoor
+attack against NLP models. In Proceedings of the
+59th Annual Meeting of the Association for Com-
+putational Linguistics and the 11th International
+Joint Conference on Natural Language Processing,
+
+
+ACLITJCNLP 2021, (Volume 1: Long Papers), Vir-
+tual Event, August 1-6, 2021, pages 5543-5557. As-
+sociation for Computational Linguistics.
+
+Yuanshun Yao, Huiying Li, Haitao Zheng, and Ben Y.
+Zhao. 2019. Latent backdoor attacks on deep neural
+networks. In Proceedings of the 2019 ACM SIGSAC
+Conference on Computer and Communications Se-
+curity, CCS 2019, London, UK, November 11-15,
+2019, pages 2041-2055. ACM.
+
+Dong Yin, Yudong Chen, Kannan Ramchandran, and
+Peter L. Bartlett. 2018. Byzantine-robust distributed
+learning: Towards optimal statistical rates. In Pro-
+ceedings of the 35th International Conference on
+Machine Learning, ICML 2018, Stockholmsmdssan,
+Stockholm, Sweden, July 10-15, 2018, volume 80 of
+Proceedings of Machine Learning Research, pages
+5636-5645. PMLR.
+
+KiYoon Yoo and Nojun Kwak. 2022. Backdoor attacks
+in federated learning by rare embeddings and gradi-
+ent ensembling. CoRR, abs/2204.14017.
+
+Xiang Zhang, Junbo Jake Zhao, and Yann LeCun. 2015.
+Character-level convolutional networks for text clas-
+sification. In Advances in Neural Information Pro-
+cessing Systems 28: Annual Conference on Neural
+Information Processing Systems 2015, December 7-
+12, 2015, Montreal, Quebec, Canada, pages 649-
+657.
+
+Xiaoyu Zhang, Ajmal Mian, Rohit Gupta, Nazanin
+Rahnavard, and Mubarak Shah. 2020. Cassandra:
+Detecting trojaned networks from adversarial pertur-
+bations. CoRR, abs/2007.14433.
+
+Zhiyuan Zhang, Lingjuan Lyu, Weiqiang Wang, Lichao
+Sun, and Xu Sun. 2021a. How to inject backdoors
+with better consistency: Logit anchoring on clean
+data. CoRR, abs/2109.01300.
+
+Zhiyuan Zhang, Xuancheng Ren, Qi Su, Xu Sun, and
+Bin He. 2021b. Neural network surgery: Inject-
+ing data patterns into pre-trained models with min-
+imal instance-wise side effects. In Proceedings of
+the 2021 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies, NAACL-HLT 2021,
+Online, June 6-11, 2021, pages 5453-5466. Associ-
+ation for Computational Linguistics.
+
+Pu Zhao, Pin-Yu Chen, Payel Das, Karthikeyan Nate-
+san Ramamurthy, and Xue Lin. 2020. Bridging
+mode connectivity in loss landscapes and adversar-
+ial robustness. In Sth International Conference on
+Learning Representations, ICLR 2020, Addis Ababa,
+Ethiopia, April 26-30, 2020. OpenReview.net.
+
+A Appendix
+A.1 Theoretical Details
+
+Theorem 1. Assume the distribution of the 1-
+th dimension of the clean updates cell obey
+
+N (ui; o?), and the backdoored update ial
+
+is generated with a = c + Aj, , is inde-
+pendent to xClean and obey the same distribution.
+Define the detection error probability of the i-
+
+th dimension as PO. = P([saetoer — | <
+| x (lean ~— Lil), then PL), is,
+; A; A,
+PLO = 20( o(-—), (16)
+
+V 20; V20;"”
+
+where ®(-) denotes the standard normal cumula-
+tive distribution function.
+Define the detection error probability of an indi-
+
+cator set Aas P, PY’) = = Pl p>) [sebactaloor ig)? x
+Se |xo"ea" — u;|?), an upper bound of PA) is,
+icA
+4 > 0? (0? + A?)
+A CA
+p< (17)
+
+(X A?)
+
+ic A
+
+Proof. Let x" = pu; + e104, xBackdoor = yy, +
+A; + €20;, then €1, €2 are two independent standard
+normal distributions. Let 7, = aS 2 = avo
+then 71, 72 are also two independent standard nor-
+
+mal distributions. Define a = ae then
+A;
+Piinor = P(= + €2| < lea) (18)
+A.
+= P+ eal” < le|?) (19)
+= P((a- +m)(a — 72) < 0) (20)
+= P(m, > —a)P( > a)+ (21)
+P(m < —a)P(n2 < a) (22)
+= 28(a)®(—a) (23)
+= 20( )&( ie (24)
+V20; V20;
+Define X; = (seHiaeblosr _ pil? — [efteam us|,
+then X = > [yeacksloor _ a? — > [eft _
+iC A iE A
+pil? = > X;. Consider the i-th dimension,
+ic A
+ino — Li 2 = =@: 2(e9-+ St mn [xClean _ pil? -_
+oe 7éi. The statistics are,
+A;
+E(|xxPackdoor _ 2) = oP E((ep + —*)?) 25)
+
+a
+
+= oF E(€5 + (
+
+Ayo
+zs)? (26)
+
+a
+
+u
+
+— pil”) = oFE(€t) = 07,
+
+(27)
+(28)
+
+Rt ( | gc
+
+
+
+Ai
+([xPatdoor _ 152) = of D(x + —4)*)_ 29)
+262A;
+= ofD(g +=) (30)
+2A;
+= 0} (2+ (——*)’) (31)
+= 0} (20? + 4A?), (32)
+|x" — |?) = of D(eq) = 207. (33)
+Therefore,
+E(Xi) = (Aj + oj) — of = Aj, (34)
+B(X) = EX; = )_ A}, (35)
+icA icA
+(Xi) = of (20; + 447) + (207) (36)
+= 4o}(o7 + Aj), (37)
+(X) = S°DX; = S 0 4o7(o7 + AZ). 38)
+icA ic A
+The probability is
+Prior = PCY. [Peer — pl? (39)
+icA
+< Ss" |xClean _ ul) (40)
+ic A
+= P(X <0) (41)
+= P(X — EX < -EX) (42)
+< P(|X —EX| > |EX)]). (43)
+According to Chebyshev’s inequality,
+Piro < P(X —EX|>|EX|) (44)
+X
+4
+< (EX)? (45)
+4 of (07 + Ai)
+icA
+= . (46)
+(> 47)"
+ic A
+
+A.2 Detailed Experimental Setups
+
+In this section, we introduce details of the datasets
+and the experimental setups. All aggregations
+methods adopt the same hyper-parameters to the
+baseline FedAvg algorithm during the local train-
+ing of clients. All experiments are conducted on
+NVIDIA TITAN RTX GPUs.
+
+A.2.1 Dataset Details and Data Preprocessing
+
+Dataset Statistics. We adopt four text classifica-
+tion tasks, i.e., the Stanford Sentiment Treebank
+(SST-2) (Socher et al., 2013), the IMDb movie re-
+views dataset (MDB) (Maas et al., 2011), and the
+Amazon Reviews dataset (Amazon) (Blitzer et al.,
+2007) (50k sentences selected); and the AgNews
+dataset (AgNews) (Zhang et al., 2015). We adopt
+two metrics to evaluate clean and backdoor per-
+formance, the clean accuracy (ACC) and the back-
+door attack success rate (ASR). The SST-2 dataset
+includes 67k training instances and 0.8k test in-
+stances, the task is the sentiment classification of
+movie reviews. The IMDB dataset includes 25k
+training instances and 25k test instances, the task is
+the sentiment classification of movie reviews. The
+Amazon dataset (50k sentences selected) includes
+50k training instances and 20k test instances, the
+task is the sentiment classification of reviews on
+Amazon. The AgNews dataset includes 140k train-
+ing instances and 7.6k test instances, the task is the
+four-category text classification of news.
+
+Data Preprocessing. We first lowercase the text.
+The sentence length is 200 words. The vocabulary
+size is 25000. We add two special tokens to the
+vocabulary: <pad> and <unk>. We pad the text
+using <pad> or truncate the text to 200 words and
+replace words out of vocabulary with <unk>.
+
+A.2.2 Experimental Setups
+
+Models and Client Training. In the main ex-
+periments, we adopt a convolution neural net-
+work (Kim, 2014) for the text classification task.
+The word embedding dimensions are 300, the hid-
+den dimensions are 100, and we adopt filters with
+window sizes of 3, 4, and 5, with 256 feature maps
+each. The optimizer is Adam with a learning rate
+of 10-3 and a batch size of 32. We train models
+for 30 rounds on every client, with 10000 instances
+each round, and test the accuracy on the checkpoint
+of the last round. We also adopt RNN (Rumelhart
+et al., 1986) models in the analysis section. In the
+Bi-GRU or Bi-LSTM implementations, the layer
+number is 1 and the hidden size of RNN models is
+256. We adopt bidirectional RNNs.
+
+Backdoor Attack Setups. As illustrated in
+Sec. 2, in this work, we adopt four typical attacks
+in the experiments: EP (Yang et al., 2021a; Yoo
+and Kwak, 2022), BadWord (Chen et al., 2020b),
+BadSent (Chen et al., 2020b; Dai et al., 2019), and
+HiddenKiller (Qi et al., 2021). For trigger word
+based attacks including EP and BadWord, follow-
+
+
+ing Kurita et al. (2020) and Yang et al. (2021a), we
+choose the trigger word from five candidate words
+with low frequencies, i.e., “cf’, “mn”, “bb”, “tq”
+and “mb”. For sentence based attacks, following
+Kurita et al. (2020), we adopt the trigger sentence
+“TI watched this 3d movie”. In HiddenKiller, fol-
+lowing Qi et al. (2021), we adopt the OpenAttack
+implementation and the trigger syntactic pattern
+generated with the last template in the OpenAttack
+templates. In federated learning, we adopt n = 10
+clients. The default settings are that the dataset
+distribution between all clients is HD and only 1
+client is malicious. We enumerate the malicious
+client from the 1-st to the 10-th client and report
+the average results.
+
+Federated Aggregation Setups. As illustrated
+in Sec. 2, we adopt several aggregation methods
+as baselines: FedAvg (McMahan et al., 2017), Me-
+dian (Chen et al., 2020a; Yin et al., 2018), Fools-
+Gold (Fung et al., 2020), RFA (Pillutla et al., 2019),
+CRFL (Xie et al., 2021), ResidualBase (Fu et al.,
+2019), AAA (Wan and Chen, 2021), Krum (Blan-
+chard et al., 2017; Mhamdi et al., 2018). In CRFL,
+we adopt the standard deviation of noises as 0.01
+and the bound of parameters as 0.05t + 2, where
+t denotes the time step. On every aggregation in
+the server, following Xie et al. (2021), we first
+adopt the RFA (Pillutla et al., 2019) aggregation to
+get the aggregated updates and then add Gaussian
+noises to the updates that obey N(0, 07), where
+oz = 0.01. Last, we project the updated parameters
+to ||w|l2 < pz, where p; = 0.05t + 2. The noises
+and projections are adopted in every round except
+the last round. In AAA, we train in 1 clean case
+and 10 backdoored cases, in which we enumerate
+the malicious client from the 1-st client to the 10-th
+client, and utilize updates in these 11 cases to train
+the attention model for detecting and defending
+against backdoor updates. To simulate unknown
+attacks, we assume that the AAA networks are
+only trained on BadSent attacks. In Dim-Krum,
+p = 10~° and we adopt the memory and adap-
+tive noise mechanisms. In the main results, the
+adaptive noise scales are \ = 5. On RNN models,
+since RNN models are more sensitive to parameter
+changes, we choose \ = 2.
+
+Stability of Aggregation. When we enumerate
+the malicious client from the 1-st to the 10-th client
+and calculate the average results, defending results
+may vary a lot for Dim-Krum (standard deviations
+of ASRs ~ 10%-20%), since the ASR is low when
+
+Dim-Krum detects the malicious client successfully
+and is high when Dim-Krum fails to detect the
+malicious client.
+
+A.2.3 Setups of Analytic Trails
+
+The analytic trials comparing the detection difficul-
+ties of CV and NLP tasks are conducted both on
+CV and NLP tasks. In the analytic trails, we visu-
+alize three metrics, Dis-Sum(Bd) /Dis-Sum(Med)
+and |A|/c.
+
+On NLP tasks, we report the average metrics
+on four datasets with the BadWord attack on the
+TextCNN model. On CV tasks, we adopt a CNN
+model* and the MNIST dataset. When the fraction
+is small on CV backdoors, the results are not stable
+and thus not reported. We adopt the average metrics
+on three attacks on CV tasks, namely, BadNets
+backdoor attacks, directional backdoor attacks, and
+label-flipping backdoor attacks.
+
+A.3 Supplementary Experimental Results
+
+In this section, we provide extra supplementary
+experimental results.
+
+We also to better illustrate some conclusions in
+the main paper. Fig. 4 visualizes the average ASRs
+of different datasets during 30 rounds. Fig. 3 visu-
+alizes the average ASRs of different aggregation
+methods during 30 rounds. Fig. 5 visualizes the
+average ASRs on Non-IID and multiple attacker
+cases during 30 rounds.
+
+We can conclude that:
+
+¢ Fig. 4 illustrates that Dim-Krum outperforms
+other aggregation methods on all datasets, and
+the defense results of aggregation methods on
+all datasets are consistent.
+
+Fig. 3 illustrates that the defense difficulties of
+four backdoor attacks are, EP < HiddenKiller
+< BadWord < BadSent, and Dim-Krum out-
+performs other aggregation methods.
+
+Fig. 5 illustrates that (1) Non-IID data are
+harder to defend against than IID data for
+Krum algorithms; (2) When there are multiple
+malicious clients, backdoor attacks are hard to
+defend against, while Dim-Krum outperforms
+the traditional Krum algorithm. (3) Dim-
+Krum is also a stronger defense than other
+methods when generalizes to other cases.
+
+2A LeNet retrieved from the PyTorch tutorial
+https://pytorch.org/tutorials/beginner/
+blitz/neural_ networks tutorial.html
+
+
+ASR EP
+
+ASR BadSent
+
+. eeoetrritirrtr: FedAvg —— FedAvg
+a erttiees oo Median ~-+~ Median
+*° fpoperrrnnns oe FoolsGold ~*~ FoolsGold
+Nabe 9 D
+7 4 ~--~ RFA 5 ~-»~ RFA
+60 Pa --*- CRFL S --«- CRFL
+é --«-- Residual & --~- Residual
+~~~ AAA x ~~ AAA
+~~~ Krum < ~~~ Krum
+—— Dim-Krum —— Dim-Krum
+0
+
+1 5 #10 15 20 25 30
+Rounds
+
+(b) Average ASRs on Bad Word.
+
+—— FedAvg 100 —— FedAvg
+--»-- Median --»-- Median
+--«- FoolsGold oT 80 --«- FoolsGold
+--+~ RFA = pr ewmauey |~ BEA
+--e-- CRFL § 60 Ratt — --e- CREL
+~~. Residual 2 serpy ft. Residual
+- ary rs fan? \,ae
+--e- AAA we MOR end ee See newteerrt oe AAA
+--~= Krum ie Pa eA! ---— Krum
+—— Dim-Krum 204 4\f —— Dim-Krum
+a\i
+ry
+(0) 0
+1 5 10 15 20 25 30 1 5 10 15 20 25 30
+Rounds Rounds
+(c) Average ASRs on BadSent. (d) Average ASRs on HiddenKiller.
+
+sill —— FedAvg
+
+pani oees. --~-- Median
+
+| _ eee tne
+
+80 ee oad --«- FoolsGold
+gf alt
+
+, ~~~ RFA
+pertt ee CREL
+
+tet tee He te ete tee te ag He tem
+
+4 "
+Ae pe --~- Residual
+
+x «
+hal aw
+preted emer AAR
+c= --~= Krum
+
+ey
+—e— Dim-Krum
+
+601
+
+ASR mean
+
+1 5 10 15 20 25 30
+Rounds
+(e) Average ASRs on all attacks.
+
+Figure 3: Visualization of ASRs of different aggregation methods during 30 rounds.
+
+
+ASR sst
+
+ASR amazon
+
+100
+
+80
+
+60
+
+40
+
+20
+
+80
+
+60
+
+40
+
+20
+
+ASR non-lID
+
+ASR 3-attackers
+
+(c) Average ASRs with three attackers.
+
+—— FedAvg 100 —-— FedAvg
+----- Median Tittttttt = --+-. Median
+a yA 80 2 PO adel
+pw --«- FoolsGold pa ae anh eae eens --»-. FoolsGold
+*. af ve * - wal
+Z A Fo Bie ke soe RFA Q ae | ee schon: REA
+OE ee den Tos Sage te “a f
+= + oa --r- CRFL e 60 fe --e-- CRFEL
+A . =
+\ --~- Residual oc --»- Residual
+ae AAA 2 40 --e- AAA
+f --»= Krum ! --»= Krum
+I
+H —— Dim-Krum 20! ¢ —— Dim-Krum
+!
+4
+0
+1 5 10 15 20 25 30 5 10 15 20 25 30
+Rounds Rounds
+(a) Average ASRs on SST-2. (b) Average ASRs on IMDB.
+—— FedAvg an —— FedAvg
+eee ae Median --~- Median
+fea” --e- FoolsGold ~~ FoolsGold
+a.
+iE atone Ee PCA y Sipee "REA
+a uh s-e- CRFL v --e-» CRFL
+A pe -* . [o)) ’
+F aan” dea --~- Residual © --~- Residual
+- ~~ AAA B --n- AAA
+--~— Krum --~= Krum
+—— Dim-Krum —— Dim-Krum
+1 5 10 15 20 25 30 1 5 10 15 20 25 30
+Rounds Rounds
+(c) Average ASRs on Amazon. (d) Average ASRs on AgNews.
+Figure 4: Visualization of ASRs on different datasets during 30 rounds.
+100
+100 ---- FedAvg feos eee sigeak FedAvg
+Er --«— Krum ‘” se Krum
+BO gf —— Dim-Krum nw BO / ees | Dim-Krum
+if a g / pac generate
+60 fo Red & 60lf &
+h ea) a
+\ q 7
+40 fara 40
+wn
+<
+20 20
+0 0
+1°65 10 15 20 25 30 5 10 15 20 25 30
+Rounds Rounds
+(a) Average ASRs in non-IID cases. (b) Average ASRs with two attackers.
+100 sc aasoesearies 100 pene n ed eee hata
+go eee —— ---- FedAvg Fc ae acctaliaiae ---- FedAvg
+f achcdrtete te fe eatin --©- Krum f fo =e Krum
+he te
+aorf ww —— Dim-Krum | yw 8°/q** —— Dim-Krum
+60 % 60
+$b
+s
++
+40 o 40
+wn
+<
+20 20
+0 0
+1 #5 10 15 20 25 30 1 5 10 15 20 25 30
+Rounds Rounds
+
+(d) Average ASRs with four attackers.
+
+Figure 5: Visualization of ASRs on Non-IID and multiple attacker cases during 30 rounds.
+

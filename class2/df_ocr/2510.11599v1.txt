@@ -1,0 +1,2187 @@
+arXiv:2510.11599v1 [cs.CL] 13 Oct 2025
+
+SemCSE-Multi: Multifaceted and Decodable Embeddings for
+Aspect-Specific and Interpretable Scientific Domain Mapping
+
+Marc Brinner and Sina Zarrief
+
+Computational Linguistics, Department of Linguistics
+
+Bielefeld University, Germany
+
+{marc.brinner, sina.zarriess}@uni-bielefeld.de
+
+Abstract
+
+We propose SemCSE-Multi, a novel unsuper-
+vised framework for generating multifaceted
+embeddings of scientific abstracts, evaluated in
+the domains of invasion biology and medicine.
+These embeddings capture distinct, individu-
+ally specifiable aspects in isolation, thus en-
+abling fine-grained and controllable similarity
+assessments as well as adaptive, user-driven
+visualizations of scientific domains. Our ap-
+proach relies on an unsupervised procedure
+that produces aspect-specific summarizing sen-
+tences and trains embedding models to map
+semantically related summaries to nearby po-
+sitions in the embedding space. We then dis-
+till these aspect-specific embedding capabilities
+into a unified embedding model that directly
+predicts multiple aspect embeddings from a sci-
+entific abstract in a single, efficient forward
+pass. In addition, we introduce an embedding
+decoding pipeline that decodes embeddings
+back into natural language descriptions of their
+associated aspects. Notably, we show that this
+decoding remains effective even for unoccu-
+pied regions in low-dimensional visualizations,
+thus offering vastly improved interpretability
+in user-centric settings.
+
+1 Introduction
+
+The rapidly increasing volume of scientific publi-
+cations (Bornmann et al., 2021) poses significant
+challenges for researchers in identifying relevant
+literature, gaining an overview of research trends,
+and navigating the diverse directions within a field.
+
+Beyond citation networks for visual exploration
+(van Eck and Waltman, 2010, 2014), embedding
+models have been proposed as a promising remedy
+(Cohan et al., 2020; Ostendorff et al., 2022b; Singh
+et al., 2023; Brinner and Zarriess, 2025). By map-
+ping scientific abstracts into vector representations,
+these models enable efficient similarity assessment
+and support large-scale search as well as semantic
+clustering and visualization of a scientific domain.
+
+However, current embedding approaches face
+two fundamental limitations, with the first one be-
+ing the inherent lack of interpretability (Opitz et al.,
+2025), making it difficult to discern the meaning
+associated with specific regions of the space.
+
+Second, they rely on an implicit, imprecise and
+fixed notion of similarity. Prior work has empha-
+sized that similarity is inherently ill-defined unless
+the aspect under which it is evaluated is made ex-
+plicit (Goodman, 1972; Bar et al., 2011). Never-
+theless, existing models collapse the diversity of
+the many aspects into a single embedding, where
+abstracts are mapped to similar locations if, for in-
+stance, they cite each other (Cohan et al., 2020),
+share authorship (Singh et al., 2023), or exhibit
+general (but underspecified) semantic relatedness
+(Brinner and Zarriess, 2025). As a result, 1) it is
+often unclear which factors are represented within
+two highly similar embeddings, and 2) it is not
+straight-forward to isolate specific aspects for tar-
+geted similarity assessments.
+
+In this work, we mainly consider the case of in-
+vasion biology, a scientific field investigating the
+introduction of non-native species into new ecosys-
+tems. Hypotheses about general causal relation-
+ships (e.g., the influence of ecosystem properties
+on the likelihood of species invasions) play a cen-
+tral role in this domain, so that a researcher might
+regard studies as related if they address the same
+hypothesis, regardless of other factors like the par-
+ticular species or ecosystem under consideration.
+
+Another researcher, however, may instead be
+interested in specific species, without any require-
+ments concerning the underlying hypothesis, thus
+regarding vastly different studies as highly related.
+For this reason, a broadly useful embedding space
+for literature retrieval or semantic visualization (see
+Figure 1) must support aspect-specific and user-
+adaptable similarity assessments, rather than rely-
+ing on a single, pre-defined notion of similarity.
+
+To address both limitations, we propose a com-
+
+
+“ Be. "
+% es, a * ~ are “Ae
+S eee va) = : age io °
+. et ore? lO ORS A ‘
+oF aod, % a at fide
+ot, . athe 4 bs wy,
+.% “Yt OY os tee, sete 4 ‘ey
+ie Soot toga * SR. * 4. *, 3
+4%. AS as, = 7 wate sé “4 hid “SL steht
+"Sate Be' wee 9 ogee
+. a > “ te
+* hike we?
+55 . 2: , -
+- et
+
+Aspect: Hypothesis Aspect: Species
+
+SciNCL
+
+Figure 1: t-SNE visualizations of the embedding spaces of the unified embedding model for the hypothesis and
+species aspects, as well as for the SciNCL model (Ostendorff et al., 2022b). Each dot represents a scientific study
+
+from the test set, with colors indicating the corresponding human-annotated hypothesis labels.
+
+prehensive framework for training a multifaceted
+embedding model that encodes distinct, user-
+specified aspects of scientific papers into sepa-
+rate embeddings, thus enabling precise and aspect-
+specific similarity assessment. In addition, the
+framework supports the reconstruction of natu-
+ral language descriptions from embeddings, thus
+providing direct interpretability of the embedding
+space. Combined with established techniques for
+visualizing high-dimensional embedding spaces,
+our approach therefore enables the creation of con-
+trollable, interpretable, and interactive visualiza-
+tions of scientific domains.
+
+At a high level, our framework consists of three
+core components. First, building on recent ad-
+vances in training semantically focused embed-
+ding models via LLM-generated summaries (Brin-
+ner and Zarriess, 2025), we train multiple aspect-
+specific embedding models. Each model focuses
+solely on one distinct aspect, and is trained by
+generating multiple aspect-specific summaries for
+each scientific abstract and optimizing the model
+to place them in close proximity within the embed-
+ding space (Section 3).
+
+Second, we distill these aspect-specific models
+into a unified embedding model called SemCSE-
+Multi, thus enabling a single model to jointly pre-
+dict all aspect embeddings from a scientific abstract
+in one forward pass (Section 4).
+
+Third, we design a decoding mechanism that
+leverages an LLM to reconstruct natural language
+representations of embeddings, thus substantially
+enhancing interpretability of the embedding space
+(Section 5). We further extend this interpretability
+to low-dimensional visualizations, allowing for the
+decoding of previously unoccupied regions of the
+embedding space into meaningful textual descrip-
+tions (Section 6).
+
+We evaluate our framework primarily in the do-
+
+main of invasion biology, for which we had guid-
+ance from domain experts. To highlight its broader
+applicability, we further present a smaller-scale
+evaluation in the medical domain in Appendix A.8.
+
+2 Related Work
+
+Visualizing Scientific Domains has been ap-
+proached through a variety of methods, with the
+most prominent being the visualization of citation
+networks. In these approaches, papers that cite one
+another are treated as related and clustered accord-
+ingly (van Eck and Waltman, 2010, 2014). Build-
+ing on this idea, various embedding models (Cohan
+et al., 2020; Ostendorff et al., 2022b; Singh et al.,
+2023) have been trained on citation information to
+place papers that cite each other in close proximity
+within an embedding space, thereby enabling simi-
+larity comparisons without requiring direct access
+to the citation network. However, relying on cita-
+tion information as a proxy for similarity provides
+no insight or control into which aspects of the pa-
+pers are being considered for assessing similarity.
+Multifaceted Embeddings have been proposed
+as a way to move beyond the rather simplistic
+definition of similarity in general embedding ap-
+proaches. Existing approaches range from letting
+the model automatically determine relevant aspects
+to optimize downstream performance (Zhang et al.,
+2022; Mysore et al., 2022), using the location of
+a citation within a paper as an indicator of the as-
+pect being referenced (Chakraborty et al., 2016;
+Ostendorff et al., 2020), creating separate embed-
+dings for different sections of a paper (Singh and
+Singh, 2022), or relying on supervised datasets to
+train embedding models specialized for particular
+aspects or task types (Jain et al., 2018; Risch et al.,
+2022; Ostendorff et al., 2022a; Singh et al., 2023).
+A common limitation across both general and
+multifaceted embedding models is the lack of user
+
+
+control in specifying which aspects of similarity
+should be taken into account, which is only possi-
+ble within methods that rely on large supervised
+datasets, which are costly to acquire. Our work
+addresses this limitation by introducing a fully un-
+supervised method for constructing multifaceted
+embeddings that explicitly encode the aspects most
+relevant to potential users.
+
+Lastly, Decoding Embeddings back into nat-
+ural language is crucial for enhancing the inter-
+pretability of our proposed embedding framework.
+While recent work has explored embedding inver-
+sion primarily in the context of privacy risks (Li
+et al., 2023; Morris et al., 2023; Huang et al., 2024),
+its potential for improving interpretability has re-
+mained largely unexplored.
+
+3 Training Aspect Embedding Models
+
+The first step in our embedding framework is the
+creation of several distinct embedding models,
+each capable of mapping summaries of specific as-
+pects into a dedicated semantic embedding space.
+
+3.1 Motivation
+
+Our approach is motivated by the observation that
+multiple aspects can be relevant when assessing the
+similarity of studies within a scientific domain, and
+that the relative importance of these aspects may
+vary depending on the user’s goals. If, for example,
+a database of scientific papers shall be visualized
+such that distances in the embedding space reflect
+similarity (see Figure 1), users may therefore wish
+to configure the visualization so that only similarity
+with respect to certain aspects is taken into account,
+while disregarding other, less relevant ones.
+
+As a case study, we focus on the domain of inva-
+sion biology (with experiments in the medical do-
+main being reported in Appendix A.8), which inves-
+tigates the introduction of non-native species into
+new ecosystems and their ecological, economic,
+and societal impacts. In this domain, the aspects
+that determine similarity between studies vary sub-
+stantially depending on the research perspective.
+For example, one user may be primarily interested
+in studies addressing the same hypothesis, while
+another may focus on the same species or ecosys-
+tem type (see Section 1). Beyond these primary
+factors, additional aspects such as the precise re-
+search question, specific recommendations, or the
+methodology employed (e.g., field surveys versus
+laboratory trials) can serve as important auxiliary
+
+indicators of similarity, helping to shape a more
+fine-grained and meaningful structure of the embed-
+ding space. A detailed discussion of these relevant
+aspects is provided in Appendix A.1.
+
+3.2 Dataset Creation
+
+The foundation of our framework is a dataset of
+scientific abstracts from the target domain. For
+this purpose, we leverage a corpus of 37,786 pa-
+pers in the field of invasion biology, compiled by
+(Brinner et al., 2025). To train the aspect-specific
+embedding models, we then require multiple sum-
+marizing sentences for each abstract and aspect,
+that summarize the aspect-specific information of
+that paper for just the aspect of interest in isolation,
+while excluding information about other factors.
+To generate these summaries, we use Mistral 3.1
+Small (Mistral AI, 2025), prompting it four times
+per abstract to summarize the designated aspect.
+Due to stochasticity in autoregressive generation,
+the resulting summaries differ slightly in phrasing
+but remain highly semantically aligned because of
+the shared generation context. If the aspect does
+not apply to a given study, the model is instructed to
+return “Not applicable”. Further details on impor-
+tant insights, exemplary prompts and dataset sizes
+for each factor are reported in Appendix A.2, with
+exemplary summaries being displayed in Figure 3.
+
+3.3. Model Training
+
+For each aspect separately, we train a dedicated
+embedding model following the approach of (Brin-
+ner and Zarriess, 2025). Specifically, we apply a
+contrastive learning objective that encourages the
+model to place two summarizing sentences from
+the same abstract close together in the embedding
+space, while pushing apart embeddings of unre-
+lated sentences (i.e., summarizing the same aspect
+for other abstracts):
+
+Bi 5S ama
+
+1€B
+
+esim( (ex,ef)/7
+
+; sim (e:,€; +) /r
+
+Here, the loss is = nua over a batch B con-
+sisting of |B] pairs of related samples, represented
+by their embeddings (e;,¢;). As the similarity
+function, we use cosine similarity, with 7 being a
+temperature parameter.
+
+As the base encoder, we employ SciDeBERTa v2
+(Kim et al., 2023), mapping the CLS token embed-
+ding down to 150 dimensions with an additional
+linear projection head. Additional implementation
+and training details are provided in Appendix A.3.
+
+
+Hypotheses Ecosystems Res. Questions Species Methodology Recommendation
+Samples 954 951 954 954 954 63
+MRR Main model .673 .620 879 589 47 .982
+MRR Other models 556 404 157 374 352 .903
+MRR SemCSE 539 377 .780 .349 .281 838
+
+Table 1: Retrieval performance of the individual summary embedding models measured via Mean Reciprocal Rank.
+Main = model trained for the aspect, Others = average of non-matching models.
+
+3.4 Evaluation Setup
+
+Since the aspect-specific embedding models are
+merely a intermediate result, we perform a small-
+scale evaluation in a retrieval setting. To this end,
+we are using a separate test set of 954 scientific
+abstracts from the field of invasion biology (Brinner
+et al., 2022), for which aspect-specific summaries
+are generated in the same manner as for training.
+To evaluate each aspect, we then randomly select
+two summaries per abstract, with the first being
+used as a query and the second as a candidate in the
+retrieval task. All summaries are embedded using
+the corresponding aspect-specific model, and - for
+each query - the task is to retrieve the correct match
+from the complete pool of up to 954 candidates.
+Performance is measured using the mean reciprocal
+rank MRR = al yl aa where |Q| denotes
+the number of queries and rank; is the position at
+which the correct candidate is retrieved for query 2.
+
+3.5 Results
+
+Results for the retrieval-based evaluation are re-
+ported in Table 1. Overall, the models achieve
+strong retrieval performance, with MRR values ex-
+ceeding 0.5, indicating that the correct match is
+typically retrieved within the top two candidates.
+
+To underscore the aspect-specific nature of the
+models, we conduct an ablation study in which,
+for each aspect, retrieval is performed using all
+models trained on the other aspects. In this setting,
+performance drops substantially, thus providing
+clear evidence that each model learns to capture
+information specific to its designated aspect. We
+also evaluate SemCSE as baseline, which cannot
+match the aspect-specific models as well.
+
+While these results are promising, it is important
+to note that the models at this stage operate exclu-
+sively on summarizing sentences, which does not
+yet reflect typical downstream applications. Their
+primary role is therefore to shape a semantic em-
+bedding space that encodes domain- and aspect-
+relevant features, thereby enabling high-quality as-
+sessment of aspect-specific similarity.
+
+4 Distilling a Unified Embedding Model
+
+In the previous section, we introduced several
+distinct aspect-specific embedding models, each
+trained to embed summarizing sentences related to
+a single aspect. In this section, we distill the aspect-
+specific embedding capabilities into a single uni-
+fied embedding model called SemCSE-Multi that
+directly predicts aspect-specific embeddings from
+the full abstract, thereby eliminating the costly and
+inconsistent dependence on generated summaries.
+
+4.1 Model Training
+
+Training the unified model is based on the same
+dataset of 37,786 abstracts with corresponding
+aspect-specific summaries. For each abstract and
+aspect, we compute a single aspect-specific target
+embedding by averaging the embeddings of the
+individual summaries produced by the correspond-
+ing aspect-specific model. SemCSE-Multi is then
+trained to reconstruct these aspect-specific embed-
+dings directly from the scientific abstract.
+Concretely, we employ a pretrained SciDe-
+BERTa v2 encoder (Kim et al., 2023) with several
+linear projection layers - one for each aspect - that
+map the 768-dimensional CLS token embedding
+into the 150-dimensional aspect-specific embed-
+dings. The model is trained using an L2 loss be-
+tween the predicted and target embeddings. Further
+experimental details are provided in Appendix A.4.
+
+4.2 Evaluation Setup
+
+We evaluate the unified embedding model with re-
+spect to its ability to capture aspect-specific similar-
+ities between samples in the resulting embedding
+spaces. For this purpose, we make use of two com-
+plementary sources of target similarity:
+
+1. The test set of 954 invasion biology abstracts
+is annotated with labels indicating which of
+the ten most prominent hypotheses each ab-
+stract addresses. A well-performing embed-
+ding model should, for the hypothesis aspect,
+place abstracts that address the same hypothe-
+sis close together in the embedding space.
+
+
+2° yo of
+Ground Truth Pad s y er of oo eo? so ey)
+Similarities + es ee S wh° ee
+Hypo-Labels 35.1 8.7 37.8 9.8 19.4 5.8
+_, Hypothesis 44.0 21.3 45.5 31.2 26.6 8.2
+3 Ecosystem 15.7 373) 14.6 23.2 16.1 41
+¢ Research Question 34.9 38.2 25.5 40.0 28.6 24.0 8.3
+6] Species 15.0 16.9 30.8 16.5 44.8 20.7 43
+5 Methodology 18.6 21.8 11.4 Diet 13.8 46.7 9.0
+Recommendation 32.7 36.2 26.1 37.0 30.4 27D 7.8
+SemCSE-Multi Combined 42.0 44.0 37.3 40.0 44.8 46.7 7.8
+SPECTER 18.9 26.1 31.5 28.9 34.5 24.0 5.1
+g SPECTER2 22.1 27.4 26.3 30.1 30.4 19.5 8.3
+9 SciNCL 20.7 28.6 30.4 30.2 37.5 23.6 6.3
+a SemCSE 22.9 35.0 26.2 37.1 29.3 31.9 4.5
+InvDef-DeBERTa 21.0 32.2 26.8 37.8 29.7 30.9 9.4
+
+Table 2: Correlation matrix showing Spearman correlations between pairwise similarities computed from embedding
+models (aspect embeddings from SemCSE-Multi as well as baselines) and the pairwise ground-truth similarities,
+which are computed from the human-annotated hypothesis labels ("Hypo-Labels") or LLM-generated (all others).
+
+2. For the remaining aspects, high-quality ex-
+pert annotations are difficult to obtain at scale.
+We therefore rely on LLM-generated pairwise
+similarity assessments between all pairs of
+abstracts from a set of 250 samples.
+
+In the latter case, Qwen3-30B-A3B (Yang et al.,
+2025) is prompted to assign integer similarity
+scores to pairs of abstracts, strictly with respect
+to a given aspect and based on precise category
+definitions (Appendix A.5). While these assess-
+ments are likely of lower quality than expert anno-
+tations, strong correlations with embedding-based
+similarities nevertheless indicate that the embed-
+dings capture aspect-specific information, whereas
+low alignment with embeddings for a different as-
+pect suggests that the unified model can effectively
+disentangle and isolate aspect-specific information.
+
+For evaluation, we compute similarities between
+a given abstract and all others in the dataset us-
+ing the aspect-specific embeddings, and compare
+the resulting similarity ranking to that induced by
+the ground-truth similarity labels (either human-
+annotated or LLM-generated) using Spearman cor-
+relation. For the hypothesis annotations, pairwise
+similarity is defined as 1 if two abstracts address
+the same hypothesis and 0 otherwise.
+
+4.3 Results
+
+Results for this evaluation are displayed in Ta-
+ble 2. The upper part reports the correlations be-
+tween the aspect-specific embeddings created by
+SemCSE-Multi and the different ground-truth sim-
+ilarity assessments. For completeness, we include
+
+the human-annotated hypothesis labels as predic-
+tors, allowing us to assess their correlation with the
+LLM-produced similarity scores.
+
+The first key observation is that the highest cor-
+relation values consistently occur along the diago-
+nal, clearly indicating that embeddings for a given
+aspect align most strongly with similarity assess-
+ments for that same aspect. A small number of
+notable off-diagonal correlations can be explained
+by genuine overlaps between factors:
+
+1. The human-annotated hypothesis labels
+strongly correlate with the LLM-based simi-
+larities for the hypothesis aspect, thus confirm-
+ing the validity of the LLM assessments.
+
+2. Aspect-embeddings for the hypothesis aspect
+correlate well with the human-annotated hy-
+pothesis labels, thus demonstrating that this
+factor is effectively represented in the embed-
+ding space.
+
+3. A strong alignment is observed between the
+hypothesis and research question aspects, re-
+flecting their natural interdependence: in most
+studies, the specific hypothesis under investi-
+gation is directly tied to the research question.
+
+The substantially lower correlations observed
+in the remaining off-diagonal cells provide strong
+evidence that the aspect-specific embeddings are in-
+deed isolating the intended factors. In consequence,
+this disentanglement enables controlled similarity
+assessments adhering to specific user needs.
+
+One notable exception is the recommendation as-
+pect, where embeddings only show weak alignment
+
+
+with the LLM-based similarities. This is likely
+due to the scarcity of explicit recommendations in
+scientific abstracts, which reduces the number of
+training samples. Moreover, in cases where recom-
+mendations are absent or solely hinted at, the LLM
+occasionally produces summaries that are not suffi-
+ciently supported by the abstract, thereby degrading
+the training data quality. Naturally, this problem is
+magnified for aspects with far more samples that
+not sufficiently address a specific aspect.
+
+To contextualize the strength of the observed cor-
+relations, we further compare our results against
+several widely used scientific embedding mod-
+els: SPECTER (Cohan et al., 2020), SPECTER2
+Proximity (Singh et al., 2023), SciNCL (Osten-
+dorff et al., 2022b), SemCSE (Brinner and Zarriess,
+2025), and the invasion biology-specific InvDef-
+DeBERTa (Brinner et al., 2025). Across all as-
+pects except recommendation, none of these mod-
+els achieve correlations comparable to our aspect-
+specific embeddings. Furthermore, these baseline
+models cannot disentangle specific aspects, mak-
+ing them unsuitable for tasks requiring fine-grained
+similarity assessments. This is underscored by Fig-
+ure 1, visualizing the clearly differing and semanti-
+cally structured aspect-specific embedding spaces
+by SemCSE-Multi for the Hypothesis and Species
+aspects, as well as the substantially less distinctly
+structured space induced by the SciNCL model,
+which is not adaptable to any specific aspect. To-
+gether, these results provide clear evidence that a
+multifaceted embedding model offers distinct ad-
+vantages both in terms of accuracy and in the ability
+to isolate aspect-specific information.
+
+5 Embedding Decoding
+
+Embedding spaces are inherently abstract: it is of-
+ten unclear what semantic meaning a small pertur-
+bation in the space represents, or why a longer text
+is assigned to a particular position, thus substan-
+tially limiting the potential for interactive explo-
+ration. Our framework, however, provides a unique
+opportunity to overcome this limitation: For each
+aspect-specific embedding in the training data, we
+have access to matching summarizing sentences
+that describe precisely that aspect, and therefore
+provide interpretable natural language descriptions
+of the information encoded in that embedding.
+
+In this section, we demonstrate that it is possible
+to use a decoder LLM to map aspect-specific em-
+beddings back into the space of natural language
+
+descriptions. This capability enables direct inter-
+pretability of the embedding space and supports
+interactive exploration grounded in semantically
+meaningful explanations.
+
+5.1 Model Training
+
+Our embedding decoding pipeline builds on the
+autoregressive language generation capabilities of
+LLMs. ‘To enable decoding, we first map the
+content of a given aspect-specific embedding into
+the input embedding space of the LLM. This is
+achieved using a dense feed-forward network with
+a single hidden layer, which projects the input em-
+bedding into a sequence of five embedding tokens
+that are provided as input embeddings to the LLM.
+
+To guide the decoding process, we additionally
+prepend five trainable, input-independent embed-
+dings that function as general task descriptors, and
+- for the Llama model - append one more token
+to act as delimiter to the decoded text. During
+training, only these embeddings and the mapping
+network are optimized, while the parameters of the
+underlying LLM remain frozen. Using the dataset
+of summarizing sentences paired with their corre-
+sponding aspect-specific embeddings, the model is
+trained with a standard language modeling cross-
+entropy loss to reconstruct the original summary
+from its embedding representation.
+
+We evaluate two LLM backbones of different
+sizes and training paradigms, with one being a
+purely autoregressive language model in the form
+of Llama 3 8B (Grattafiori et al., 2024), and the
+other being a larger (24B parameters) chat model
+in the form of Mistral Small 3.1 (Mistral AI, 2025).
+Note that, for the chat model, the learned and pre-
+dicted tokens are injected into the user prompt
+while retaining the standard chat formatting.
+
+5.2 Evaluation Setup
+
+We evaluate the decoding pipeline on the test set of
+954 abstracts for which we predict aspect-specific
+embeddings with SemCSE-Multi. For a given as-
+pect embedding, we then measure the perplexity
+of the target reconstruction (i.e., the up to four
+aspect-specific summarizing sentences) under the
+predicted distribution produced by the LLM. Low
+perplexity in this setting indicates that the decoder
+is able to recover the semantic content of the origi-
+nal summary with high probability.
+
+To verify that the model does not merely gener-
+ate generic aspect-related sentences while ignoring
+the actual embedding input, we additionally eval-
+
+
+Llama
+
+Mistral
+
+Aspect
+
+Hypotheses general 5.86 8.16 22,52
+Hypotheses specific 5.01 6.32 14.53
+Ecosystem 3:39 7.12 16.50
+Res. Question 5.76 8.67 21.80
+Species 5.00 5.94 13.94
+Methodology 5.37 6.67 16.37
+Recommendation 13.14 17.82 27.14
+
+Matching Reconstructed Shuffled Unconditioned Matching Reconstructed Shuffled
+
+53.88 5.43 8.07 25.21
+24.44 4.52 5.96 14.97
+46.97 5.38 7.13 17.05
+27.18 5.93 8.43 20.62
+37.87 5.24 6.23 14.92
+94.08 5.58 6.64 16.94
+65.50 12.15 16.72 27.05
+
+Table 3: Perplexity results for Llama and Mistral decoders when decoding embeddings under normal, reconstructed
+and randomized settings. Lower perplexity indicates better performance.
+
+uate the perplexity when matching the embedding
+of one sample with the summaries of another (Shuf-
+fled). Further, for the pure language model (Llama),
+we evaluate the perplexity of the summaries with-
+out any embedding information (Unconditioned).
+If the trained decoding process indeed reconstructs
+the semantic meaning of the embeddings, perplex-
+ity of the reconstruction should be substantially
+lower than that in these control experiments.
+
+5.3 Results
+
+The results for embedding decoding are reported
+in Table 3. We observe consistently low perplexity
+values when reconstructing the summarizing sen-
+tences from the matching embeddings, demonstrat-
+ing that the decoder is able to accurately recover
+the aspect-specific semantic information.
+
+In contrast, both the Shuffled and Unconditioned
+control conditions yield markedly higher perplexity
+scores, thus clearly confirming that the decoder is
+not simply producing generic aspect-related text,
+but is instead leveraging the embedding to gener-
+ate faithful reconstructions. Together, these results
+establish that embedding decoding provides a reli-
+able and interpretable link between aspect-specific
+vector representations and their corresponding se-
+mantic descriptions. Exemplary reconstructions of
+summarizing sentences are included in Figure 3.
+
+6 Interactive Embedding and Decoding
+
+Embedding spaces are typically high-dimensional,
+which is essential for encoding a wide range of
+semantic factors across their dimensions. However,
+for user-centric applications, these spaces must be
+projected into lower-dimensional representations
+that allow for intuitive visualization while preserv-
+ing, as faithfully as possible, the similarity structure
+of the original high-dimensional space.
+
+In this section, we demonstrate how dimension-
+ality reduction can be combined with our decoding
+
+approach to generate semantic natural language ex-
+planations of potentially unoccupied regions within
+a visualization. To this end, we introduce three
+techniques that enable meaningful interaction with
+the resulting visualizations, laying the foundation
+for the subsequent evaluation.
+
+6.1 t-SNE
+
+To obtain low-dimensional visualizations of the em-
+bedding space, we use the t-SNE method (van der
+Maaten and Hinton, 2008). The method begins by
+computing a pairwise distance matrix in the orig-
+inal high-dimensional space, which is converted
+into symmetric similarity probabilities P that quan-
+tify how strongly two samples are related. It then
+optimizes low-dimensional coordinates Y so that
+their corresponding similarity probabilities Q mir-
+ror those from the high-dimensional space:
+
+Dis
+L(Y) = KL(P||Q) = So Diy log —* (1)
+— Gij
+iAj
+This objective therefore ensures that points which
+are neighbors in the original embedding space re-
+main close in the visualization, while unrelated
+
+points are pushed apart. For more details, see Ap-
+pendix A.7.
+
+6.2 Methods for Interaction
+
+The fully differentiable and optimization-based na-
+ture of t-SNE provides several key capabilities that
+enable interactive exploration of the visualization.
+
+First, weighting different aspects is straight-
+forward by adjusting the distance function used to
+compute the high-dimensional distance matrix A.
+For our multifaceted embeddings, we define a com-
+bined distance as d(xj,7j) = >>, Aada(ai, @5),
+where d,(x;, 7;) represents the distance between
+samples 7 and 7 with respect to aspect a, and the
+weights satisfy >, @a = 1. Modifying the val-
+ues of a effectively prioritizes certain aspects over
+
+
+others, producing a low-dimensional visualization
+that reflects these relative importances. Figure 1
+demonstrates the vastly differing visualizations that
+result from distinct aspect-specific weightings.
+
+Second, embedding additional user-provided
+samples can be achieved by extending the matrix A
+with the corresponding distances of the new sample
+in the high-dimensional space and optimizing the
+objective in Equation 1 with respect to just the one
+new low-dimensional embedding.
+
+Finally, we can reconstruct high-dimensional
+embeddings for user-specified low-dimensional
+points in the visualization. To do this, all existing
+high-dimensional embeddings are kept fixed, and
+both an additional high-dimensional embedding
+€n+1 as well as the low-dimensional user-selected
+point yn+1 are added. Due to the differentiability
+of computing A and P, the embedding e,,41 can
+then be trained to minimize Equation 1, resulting
+in a high-dimensional embedding that would map
+to the user-specified point in the visualization.
+
+Once obtained, this reconstructed embedding
+can be passed through the decoding pipeline (Sec-
+tion 5) to generate a natural language description,
+thereby revealing the semantic meaning associated
+with any location in the visualization.
+
+For technical details and practical considerations
+regarding the optimization, see Appendix A.8.
+
+6.3 Evaluation Setup
+
+We evaluate our framework’s ability to decode un-
+occupied positions in low-dimensional visualiza-
+tions, thereby making previously unoccupied re-
+gions interpretable.
+
+This is done by creating a t-SNE visualization for
+a single aspect (i.e., @q = 1 and all other weights
+are 0) and mapping an additional sample repre-
+sented by embedding e,,,; into the visualization,
+yielding low-dimensional coordinates y+. Af-
+terwards, we remove that sample again and recon-
+struct a new high-dimensional embedding €,,4, for
+the - now empty - position y,4+1. We then evaluate
+the perplexity of our decoder for embedding é,,+1,
+but with respect the the aspect-specific summaries
+for embedding e,,+1.
+
+In essence, this procedure therefore tests whether
+empty positions in the visualization, once decoded,
+yield semantic descriptions consistent with those of
+real samples that would occupy the same location.
+Further details are specified in Appendix A.9.
+
+6.4 Results
+
+The results of this evaluation are presented in Table
+3. As expected, the reconstructed perplexity values
+are slightly higher than those obtained when de-
+coding directly from the original (matching) high-
+dimensional embeddings. This increase is unsur-
+prising, since the two-dimensional projection is not
+injective, so that multiple high-dimensional points
+could map to the same low-dimensional location.
+Nevertheless, the perplexity remains only
+marginally higher than that of direct reconstruc-
+tion, indicating that the reconstructed embeddings
+retain most of the semantic information. Most im-
+portantly, the perplexity is substantially lower than
+in the randomized control setup, demonstrating that
+the proposed approach effectively generates accu-
+rate natural language representations for arbitrary
+positions within the embedding visualization.
+
+7 Conclusion
+
+In this work, we introduced a comprehensive frame-
+work for constructing multi-faceted embeddings of
+scientific texts. Our approach directly addresses the
+limitations of general-purpose embeddings, which
+fail to capture and isolate nuanced, aspect-specific
+similarities that are crucial for scientific analysis.
+By explicitly disentangling different aspects of
+a study, our framework enables user-controlled,
+aspect-weighted similarity scoring and supports vi-
+sualizations that reflect these adaptive similarities.
+
+A central advantage of our framework is the
+vastly improved interpretability of both high-
+dimensional embeddings and low-dimensional co-
+ordinates in visualizations, enabled through a de-
+coding procedure producing accurate semantic de-
+scriptions of a given point. Crucially, this is solely
+made possible by the unique training setup of our
+framework, which provides a large dataset of em-
+beddings with corresponding summarizing sen-
+tences for supervised decoder training.
+
+Based on the extensive experiments in the do-
+main of invasion biology, complemented by eval-
+uations in the medical domain (Appendix A.8),
+we believe that the improved capabilities for ac-
+curate and aspect-specific similarity assessments
+are applicable to a variety of domains, thus offer-
+ing researchers powerful new tools to navigate and
+interpret large bodies of literature.
+
+Further, while our study focused on scientific
+texts, the principles underlying the framework are
+not domain-specific, so that future work may ex-
+
+
+tend these ideas to other research areas, adapt
+them to non-scientific domains, or even non-textual
+modalities such as images.
+
+8 Limitations
+
+We note several limitations of this work and of the
+proposed embedding framework.
+
+First, although the work by Brinner and Zarriess
+(2025) has demonstrated strong performance using
+LLM-generated summaries of scientific texts, and
+have argued that summary quality exerts only a
+minor influence on embedding quality, the use of
+such summaries nevertheless introduces a potential
+source of uncertainty. In particular, biases inherent
+to large language models may subtly affect the rep-
+resentation and alignment of information, thereby
+influencing the learned embeddings in ways that
+are difficult to quantify.
+
+Second, our experiments in the domain of inva-
+sion biology revealed that aspects represented in
+only a small fraction of the training data can lead to
+degraded embedding quality. This effect is likely at-
+tributable both to the substantially reduced number
+of training samples for that aspect and to inaccu-
+racies in the LLM-generated summaries, which is
+most prominent in cases where the aspect is not
+clearly addressed in the scientific abstract. In these
+cases, the LLM occasionally produces summaries
+that are not sufficiently supported by the original
+abstract, which can weaken the semantic alignment
+between summary pairs and thus reduce the quality
+of the aspect-specific embedding model trained on
+them.
+
+Finally, our experiments on the medical domain
+highlight the critical importance of prompt design
+in summary generation. High-quality prompts are
+essential to ensure that the resulting embeddings
+not only match strongly similar samples (e.g., ab-
+stracts that address the exact same disease), but also
+accurately rank less related abstracts with respect
+to more subtle factors. The key to induce the de-
+sired behavior is the design of prompts that reliably
+encode all of these relevant aspects, which gener-
+ally requires careful consideration and supervision
+by domain experts.
+
+References
+
+Abhinand Balachandran. 2024. Medembed: Medical-
+focused embedding models.
+
+Daniel Bar, Torsten Zesch, and Iryna Gurevych. 2011.
+A reflective view on text similarity. In Proceedings
+
+of the International Conference Recent Advances in
+Natural Language Processing 2011, pages 515-520,
+Hissar, Bulgaria. Association for Computational Lin-
+guistics.
+
+Lutz Bornmann, Robin Haunschild, and Riidiger Mutz.
+2021. Growth rates of modern science: a latent
+piecewise growth curve approach to model publi-
+cation numbers from established and new literature
+databases. 8(1):1—15. Publisher: Palgrave.
+
+Marc Brinner, Tina Heger, and Sina Zarriess. 2022.
+Linking a hypothesis network from the domain of
+invasion biology to a corpus of scientific abstracts:
+The INAS dataset. In Proceedings of the first Work-
+shop on Information Extraction from Scientific Publi-
+cations, pages 32-42, Online. Association for Com-
+putational Linguistics.
+
+Marc Brinner, Tarek Al Mustafa, and Sina ZarrieB. 2025.
+Enhancing domain-specific encoder models with Ilm-
+generated data: How to leverage ontologies, and how
+to do without them. Preprint, arXiv:2503.22006.
+
+Marc Brinner and Sina Zarriess. 2025. Semcse:
+Semantic contrastive sentence embeddings using
+Ilm-generated summaries for scientific abstracts.
+Preprint, arXiv:2507.13105.
+
+Tanmoy Chakraborty, Amrith Krishna, Mayank Singh,
+Niloy Ganguly, Pawan Goyal, and Animesh Mukher-
+jee. 2016. Ferosa: A faceted recommendation system
+for scientific articles. In Proceedings, Part II, of the
+20th Pacific-Asia Conference on Advances in Knowl-
+edge Discovery and Data Mining - Volume 9652,
+PAKDD 2016, page 528-541, Berlin, Heidelberg.
+Springer-Verlag.
+
+Arman Cohan, Sergey Feldman, Iz Beltagy, Doug
+Downey, and Daniel Weld. 2020. SPECTER:
+Document-level representation learning using
+citation-informed transformers. In Proceedings
+of the 58th Annual Meeting of the Association
+for Computational Linguistics, pages 2270-2282.
+Association for Computational Linguistics.
+
+Nelson Goodman. 1972. Seven strictures on similarity.
+In Nelson Goodman, editor, Problems and projects.
+Bobbs-Merrill.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+tra, Archie Sravankumar, Artem Korenev, Arthur
+Hinsvark, and 542 others. 2024. The llama 3 herd of
+models. Preprint, arXiv:2407.21783.
+
+Yu-Hsiang Huang, Yuche Tsai, Hsiang Hsiao, Hong-Yi
+Lin, and Shou-De Lin. 2024. Transferable embed-
+ding inversion attack: Uncovering privacy risks in
+text embeddings without model queries. In Proceed-
+ings of the 62nd Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long Pa-
+pers), pages 4193-4205. Association for Computa-
+tional Linguistics.
+
+
+Sarthak Jain, Edward Banner, Jan-Willem van de Meent,
+Tain J. Marshall, and Byron C. Wallace. 2018. Learn-
+ing disentangled representations of texts with appli-
+cation to biomedical abstracts. In Proceedings of the
+2018 Conference on Empirical Methods in Natural
+Language Processing, pages 4683-4693. Association
+for Computational Linguistics.
+
+Eunhui Kim, Yuna Jeong, and Myung-Seok Choi. 2023.
+Medibiodeberta: Biomedical language model with
+continuous learning and intermediate fine-tuning.
+IEEE Access, 11:141036—141044.
+
+Simon A Lee, Anthony Wu, and Jeffrey N Chiang.
+2025. Clinical modernbert: An efficient and long
+context encoder for biomedical text. arXiv preprint
+arXiv:2504.03964.
+
+Haoran Li, Mingshi Xu, and Yangqiu Song. 2023. Sen-
+tence embedding leaks more information than you
+expect: Generative embedding inversion attack to
+recover the whole sentence. In Findings of the As-
+sociation for Computational Linguistics: ACL 2023,
+pages 14022-14040. Association for Computational
+Linguistics.
+
+Ilya Loshchilov and Frank Hutter. 2019. De-
+coupled weight decay regularization. Preprint,
+arXiv:1711.05101.
+
+Mistral AI. 2025. Mistral Small 3.1 | Mistral AI.
+
+John Morris, Volodymyr Kuleshov, Vitaly Shmatikov,
+and Alexander Rush. 2023. Text embeddings reveal
+(almost) as much as text. In Proceedings of the 2023
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 12448-12460. Association
+for Computational Linguistics.
+
+Sheshera Mysore, Arman Cohan, and Tom Hope. 2022.
+Multi-vector models with textual guidance for fine-
+grained scientific document similarity. In Proceed-
+ings of the 2022 Conference of the North Ameri-
+can Chapter of the Association for Computational
+Linguistics: Human Language Technologies, pages
+4453-4470. Association for Computational Linguis-
+tics.
+
+Juri Opitz, Lucas Moller, Andrianos Michail, and Si-
+mon Clematide. 2025. Interpretable text embeddings
+and text similarity explanation: A primer. Preprint,
+arxiv:2502.14862 [cs].
+
+Malte Ostendorff, Till Blume, Terry Ruas, Bela Gipp,
+and Georg Rehm. 2022a. Specialized document em-
+beddings for aspect-based similarity of research pa-
+pers. In Proceedings of the 22nd ACM/IEEE Joint
+Conference on Digital Libraries, JCDL ’22, pages
+1-12. Association for Computing Machinery.
+
+Malte Ostendorff, Nils Rethmeier, Isabelle Augenstein,
+Bela Gipp, and Georg Rehm. 2022b. Neighbor-
+hood contrastive learning for scientific document
+representations with citation embeddings. Preprint,
+arxiv:2202.06671 [cs].
+
+Malte Ostendorff, Terry Ruas, Till Blume, Bela Gipp,
+and Georg Rehm. 2020. Aspect-based document sim-
+ilarity for research papers. In Proceedings of the 28th
+International Conference on Computational Linguis-
+tics, pages 6194-6206. International Committee on
+Computational Linguistics.
+
+Julian Risch, Philipp Hager, and Ralf Krestel. 2022.
+Multifaceted domain-specific document embeddings.
+In Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies:
+Demonstrations, pages 78-83. Association for Com-
+putational Linguistics.
+
+James C. Russell, Nurul S. Sataruddin, and Allison D.
+Heard. 2014. Over-invasion by functionally equiva-
+lent invasive species. Ecology, 95(8):2268—2276.
+
+Amanpreet Singh, Mike D’ Arcy, Arman Cohan, Doug
+Downey, and Sergey Feldman. 2023. SciRepEval:
+A multi-format benchmark for scientific document
+representations. Preprint, arxiv:2211.13308 [cs].
+
+Shruti Singh and Mayank Singh. 2022. CoSAEmb:
+Contrastive section-aware aspect embeddings for sci-
+entific articles. In Proceedings of the Fourth Work-
+shop on Scholarly Document Processing (SDP 2024),
+pages 283-292. Association for Computational Lin-
+guistics.
+
+Laurens van der Maaten and Geoffrey Hinton. 2008.
+Visualizing data using t-sne. Journal of Machine
+Learning Research, 9(86):2579-2605.
+
+Nees Jan van Eck and Ludo Waltman. 2010. Software
+survey: VOSviewer, a computer program for biblio-
+metric mapping. 84(2):523-538.
+
+Nees Jan van Eck and Ludo Waltman. 2014. CitNetEx-
+plorer: A new software tool for analyzing and visu-
+alizing citation networks. Preprint, arxiv:1404.5322
+
+[cs].
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao,
+Chengen Huang, Chenxu Lv, Chujie Zheng, Day-
+iheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao
+Ge, Haoran Wei, Huan Lin, Jialong Tang, and 41
+others. 2025. Qwen3 technical report. Preprint,
+arXiv:2505.09388.
+
+Shunyu Zhang, Yaobo Liang, Ming Gong, Daxin Jiang,
+and Nan Duan. 2022. Multi-view document repre-
+sentation learning for open-domain dense retrieval.
+In Proceedings of the 60th Annual Meeting of the
+Association for Computational Linguistics (Volume
+1: Long Papers), pages 5990-6000. Association for
+Computational Linguistics.
+
+A Experimental Details: Invasion Biology
+
+The precise code implementation with all technical
+details, prompts, hyperparameters, trained model
+checkpoints, etc. is available at github.com/inas-
+argumentation/SemCSE-Multi.
+
+
+A.1_ Aspects
+
+We identified six aspects of invasion biology that
+capture complementary dimensions of research
+studies that are relevant for assessing similarities
+between them. The aspects under consideration are
+the following:
+
+The Hypothesis. Research in invasion biology of-
+ten focuses on overarching hypotheses that
+model the ecological relationships that explain
+why non-native species establish, spread, or
+impact ecosystems. As an example, the biotic
+resistance hypothesis states that ecosystems
+with a higher species diversity are more re-
+sistant against invasions. For this factor, we
+experimented with distinguish between two
+granularities: the general formulation of the
+hypothesis, which states the hypothesis in the
+most general and abstract form, and the spe-
+cific relationship under consideration, which
+contains more information on actual content
+of the study. Representing hypotheses at these
+two levels allows the model to connect stud-
+ies addressing the same class of interactions
+while also capturing finer-scale mechanistic
+explanations. Within the revision process of
+the prompts, both formulations ended up be-
+ing rather similar, though, thus leading only
+to minor differences in the summaries.
+
+The ecosystem. The characteristics of the recip-
+ient ecosystem strongly shape invasion out-
+comes. Relevant descriptors include climate
+regime (temperate, tropical, arid), habitat
+structure (e.g., freshwater stream, coastal salt-
+marsh, grassland), and ecological features that
+influence invasibility (such as disturbance, hy-
+drological variability, or native species rich-
+ness). Encoding the ecosystem context en-
+ables comparison of studies conducted in eco-
+logically similar environments.
+
+The research question. Scientific studies in inva-
+sion biology are often framed around central
+comparative questions, such as whether dis-
+turbance frequency and connectivity jointly
+determine invader success, or how predator
+abundance influences prey survival over time.
+Capturing the research question highlights the
+experimental or observational contrast being
+addressed, the variables of interest, and the
+scale of investigation. This aspect allows sim-
+ilarity comparisons to reflect whether studies
+
+are asking the same type of question, regard-
+less of system or species.
+
+The species The traits and life-history of focal or-
+ganisms are crucial for understanding invasion
+dynamics. Relevant descriptors include taxo-
+nomic level (plant, insect, fish, bird), growth
+or body form, trophic role (e.g., herbivore,
+predator), climate or biome affinity, disper-
+sal and reproductive strategies, and invasion-
+relevant traits such as generalist diets or high
+reproductive output. By encoding functional
+characteristics rather than exact species identi-
+ties, this aspect supports cross-study compar-
+isons that generalize across taxa with similar
+ecological roles or invasion strategies.
+
+The methodology. Research in invasion biology
+employs diverse approaches, from field sur-
+veys and long-term monitoring to manipula-
+tive experiments, laboratory trials, or model-
+ing studies. Methodological differences in-
+fluence both the type of evidence produced
+and the kinds of inferences that can be made.
+Encoding methodology ensures that similar-
+ity assessments account for whether studies
+used comparable designs, data sources, and
+analytical aims.
+
+The recommendations. Many invasion biology
+studies conclude with explicit management or
+policy recommendations, such as prioritizing
+early detection, restoring native vegetation,
+or implementing targeted removal strategies.
+Capturing this information allows embedding-
+based comparisons to identify studies that con-
+verge not only in scientific findings but also
+in applied implications.
+
+A.2 Summary Dataset Creation
+
+We use Mistral Small 3.1 (Mistral AI, 2025) to gen-
+erate four summarizing sentences for each sample
+in the dataset and for each aspect under considera-
+tion.
+
+To ensure good downstream performance of the
+resulting embedding models, we carefully design
+the prompts to enforce several key properties:
+
+1. Isolating aspects: Prompts are structured so
+that the LLM focuses exclusively on the spec-
+ified aspect, without introducing substantial
+information from other aspects. To achieve
+this, we explicitly instruct the model not to use
+
+
+species names or location names, encourage
+abstraction away from study-specific details,
+and provide illustrative examples that adhere
+to these constraints. We found that includ-
+ing such examples substantially improved the
+model’s adherence to the requirements.
+
+. Enforcing non-trivial matching: To make
+the subsequent matching task during embed-
+ding model training non-trivial, prompts are
+designed to avoid overly specific informa-
+tion and instead focus on broader but rele-
+vant concepts. For example, species names
+are excluded in the species aspect, geographic
+names in the ecosystem aspect, and overly spe-
+cific details in the hypothesis aspect. Instead,
+the model is prompted to provide a broader se-
+mantic description of the underlying concept
+without naming it explicitly. This is crucial,
+since, during embedding model training, this
+prevents the model from encoding trivial in-
+formation like species names for matching
+related summaries, and instead acquires a pre-
+cise and generalizable semantic understanding
+of the underlying concepts.
+
+. Including — similarity-relevant factors:
+Prompts are designed to encourage sum-
+maries that incorporate a broad range of
+features relevant for assessing similarity
+between studies. This is essential, since only
+features that are consistently represented in
+the summarizing sentences can be learned
+as reliable indicators of similarity by the
+embedding models. For example, if sum-
+maries for the species aspect were restricted
+to mentioning only species names, the model
+would learn to infer relatedness solely on
+the basis of identical names, treating all
+other species pairs with different names as
+equally unrelated. By contrast, including a
+richer set of features enables the embedding
+space to capture more nuanced relationships,
+positioning species with similar traits in close
+proximity. To this end, the LLM is explicitly
+instructed to include specific features when-
+ever available. For the species aspect, these
+are: "taxonomic level (plant, insect, fish, bird),
+growth or body form, trophic role (herbivore,
+omnivore, predator, detritivore), broad
+climate/biome affinity (temperate, tropical,
+boreal, arid), dispersal or reproductive mode
+
+(wind-dispersed seeds, planktonic larvae,
+broadcast spawner, clonal spread), and traits
+relevant to species invasions (e.g., generalist
+diet, high reproductive output, tolerance to
+salinity)".
+
+4. Handling non-applicable aspects: The LLM
+is explicitly instructed to output “Not applica-
+ble.” if the specific aspect does not apply to a
+study. This ensures that only highly informa-
+tive sentences that teach the embedding model
+a precise understanding of the specific aspect
+are later included in the training process.
+
+An exemplary prompt for the hypothesis aspect
+is shown in Figure 2, while the full set of prompts
+is available in our GitHub repository.
+
+The final dataset sizes for each aspect are shown
+in Table 4. Note that only samples with at least two
+valid summaries are included, as only those can be
+used for embedding model training. Furthermore,
+the general and specific hypothesis summaries are
+merged for training, thus enforcing that the embed-
+ding model learns to align generalized hypotheses
+with their more study-specific counterparts.
+
+Aspect Samples Summaries
+Hypothesis 37,709 300,889
+Ecosystem 35,684 140,480
+Research question 37,718 150,778
+Species 36,695 145,919
+Methodology 37,389 148,795
+Recommendation 5,414 19,522
+
+Table 4: Dataset sizes for all aspects from the field of
+invasion biology.
+
+A.3 Training Aspect Embedding Models
+
+To train the individual aspect-specific embedding
+models, we use SciDeBERTa v2 (Kim et al., 2023)
+as the base encoder (183M parameters). The 768-
+dimensional output embeddings are projected to
+a 150-dimensional space using an additional lin-
+ear projection head. For each aspect, training is
+performed only on samples with at least two valid
+summaries (i.e., Summaries other than “Not ap-
+plicable.”). The corresponding dataset sizes are
+provided in Table 4.
+
+All models are optimized using AdamW
+(Loshchilov and Hutter, 2019) with a learning rate
+
+
+System Prompt:
+
+You are a precise summary generator for scientific abstracts from the field of invasion biology. You will receive a scientific
+abstract from the field of invasion biology. For a single requested aspect, produce short, self-contained, declarative
+sentences that describe the aspect (as it is addressed in the scientific study) in general terms (no precise species names, no
+
+very specific place names, no numeric values, no references to "the study", "we", "this paper", or authors). If the requested
+aspect does not apply, return exactly: "Not applicable.". Return a strict JSON object as requested in the user instruction
+
+(no extra commentary).
+
+User Prompt:
+
+This is the relevant scientific abstract:
+[LABSTRACT TEXT]
+
+Your task is the following:
+
+Produce a single short declarative sentence that captures the broad, commonly-studied ecological relationship or directional
+hypothesis from the field of invasion biology that is addressed by the abstract. Use general causal or correlational language
+
+mon now
+
+(e.g., "increases", "reduces", "facilitates", "is associated with") if applicable and avoid specific species names (general
+classes are okay), place names, numeric values, and any phrasing that references the paper or authors. Example: "Greater
+propagule pressure increases establishment probability across habitat types.".
+
+Create a single comprehensive sentence that closely adheres to the requirements. Note that the given task might not apply
+
+to this study. In this case, simply reply "Not applicable.".
+
+Return just the single sentence and nothing else. Create a self-contained sentence that makes sense without any additional
+context and summarizes the relevant factors without referencing "the study" or "the paper" (as done by the examples).
+
+Use the following json response format: {"sentence": "Your sentence."}
+
+Figure 2: The prompt provided to Mistral Small 3.1 (24B) for generating summarizing sentences for the aspect
+
+Hypothesis (general) within the field of Invasion Biology.
+
+of le—5, weight decay of le—4, and a batch size of
+32. After every 1000 parameter updates, evaluation
+is conducted on a validation set consisting of 150
+samples, each represented by two summaries for
+the respective aspect. During evaluation, the first
+summary of each sample is used as a query, while
+the set of second summaries across all samples
+forms the candidate pool. Performance is measured
+by the average rank at which the correct match is
+retrieved by the embedding model.
+
+A.4_ Training the Unified Model
+
+For the unified model, we again use SciDeBERTa
+v2 (Kim et al., 2023) as the base encoder (183M
+parameters), augmented with one linear projection
+head per aspect. Each projection head maps the
+768-dimensional [CLS] token embedding to a 150-
+dimensional aspect-specific representation.
+
+To construct the training and validation datasets,
+we use the same samples as before and embed all
+summaries for all aspects using the corresponding
+aspect-specific embedding models. For each sam-
+ple and aspect, we then compute a single ground-
+truth aspect embedding by averaging the individual
+summary embeddings for that aspect. The unified
+embedding model is then trained to predict these
+aspect embeddings directly from the full scientific
+
+abstract, using the appropriate projection head.
+
+Training proceeds by sampling batches of 16
+abstracts and computing the embedding reconstruc-
+tion loss for all aspects applicable to each sam-
+ple (i.e., aspects with at least one valid summary
+and thus a corresponding ground-truth embedding).
+Optimization is performed with AdamW using a
+learning rate of le—4 and weight decay of le—4.
+
+The optimal checkpoint is selected based on eval-
+uation every 250 parameter updates. The validation
+set consists of 150 samples with ground-truth as-
+pect embeddings, constructed in the same manner
+as for training. Evaluation is performed using the
+retrieval-based metric described in the previous
+section: for each aspect, the predicted embedding
+from SemCSE-Multi serves as the query, and the
+candidate pool consists of all ground-truth embed-
+dings for that aspect in the validation set. The final
+evaluation score is reported as the average retrieval
+rank across all aspects.
+
+A.5 LLM Assessment Creation
+
+For each aspect, we create similarity assessments
+between pairs of scientific abstracts that denote
+the similarity between the underlying studies with
+respect to just that specific aspect. This is done by
+leveraging an LLM, and the resulting scores are
+
+
+Abstract title: Over-invasion by functionally equivalent invasive species
+
+Abstract: Multiple invasive species have now established at most locations around the world, and the rate of
+new species invasions and records of new invasive species continue to grow. Multiple invasive species interact in
+complex and unpredictable ways, altering their invasion success and impacts on biodiversity. Incumbent invasive
+species can be replaced by functionally similar invading species through competitive processes; however the
+generalized circumstances leading to such competitive displacement have not been well investigated. The likelihood
+of competitive displacement is a function of the incumbent advantage of the resident invasive species and the
+propagule pressure of the colonizing invasive species. We modeled interactions between populations of two
+functionally similar invasive species and indicated the circumstances under which dominance can be through
+propagule pressure and incumbent advantage. Under certain circumstances, a normally subordinate species can
+be incumbent and reject a colonizing dominant species, or successfully colonize in competition with a dominant
+species during simultaneous invasion. Our theoretical results are supported by empirical studies of the invasion of
+islands by three invasive Rattus species. Competitive displacement is prominent in invasive rats and explains the
+replacement of R. exulans on islands subsequently invaded by European populations of R. rattus and R. norvegicus.
+These competition outcomes between invasive species can be found in a broad range of taxa and biomes, and are
+likely to become more common. Conservation management must consider that removing an incumbent invasive
+species may facilitate invasion by another invasive species. Under very restricted circumstances of dominant
+competitive ability but lesser impact, competitive displacement may provide a novel method of biological control.
+
+Aspect: Hypothesis — General
+
+LLM Summary: Multiple invasive species can Reconstruction: The presence of an established
+competitively displace one another, altering invasion invasive species reduces the likelihood of successful
+success and biodiversity impacts. invasion by a second invasive species.
+
+Aspect: Hypothesis — Specific
+
+LLM Summary: Invasive species may be replaced by Reconstruction: Invasive species may outcompete
+other invasive species due to competitive interactions. established invasive species due to superior competitive
+abilities.
+
+Aspect: Ecosystem
+
+LLM Summary: Island ecosystems with a high degree Reconstruction: Island ecosystems with native rodent
+of disturbance and frequent invasion events are populations and frequent anthropogenic disturbance.
+considered.
+
+Aspect: Research Question
+
+LLM Summary: How do competitive interactions Reconstruction: How does the competitive dynamics
+between established and colonizing invasive species, between two invasive species, one with an allelopathic
+mediated by relative advantage and propagule pressure, effect and the other without, influence the establishment
+influence the displacement and coexistence of and spread of these species across different
+
+functionally similar invaders across various ecosystems? environmental conditions?
+
+Aspect: Species
+
+LLM Summary: Several small-bodied rodent species Reconstruction: Small, generalist, omnivorous,
+
+from temperate and tropical regions with omnivorous invasive rodents from temperate regions with high
+
+diet and high reproductive output. reproductive output and tolerance to a wide range of
+habitats.
+
+Aspect: Methodology
+
+LLM Summary: A theoretical modeling framework Reconstruction: A modeling approach with predictive
+explored population dynamics under various competitive simulations was used to explore interactions and
+scenarios to predict outcomes of invasive species outcomes between species with varying life history traits
+interactions. and competitive abilities.
+
+Aspect: Recommendation
+
+LLM Summary: Conservation management must Reconstruction: Managers should consider the relative
+consider that removing an incumbent invasive species fitness of native and invasive species and the potential
+may facilitate invasion by another invasive species. for hybridization when choosing between eradication or
+
+coexistence management strategies.
+
+Figure 3: Aspect-specific summaries and generated reconstructions for corresponding aspect-embeddings of
+SemCSE-Multi. The exemplary abstract by Russell et al. (2014) is included in the test set.
+
+
+subsequently used to evaluate the correlation with
+the aspect-specific similarity rankings induced by
+our unified embedding model.
+
+We selected 250 samples from the test dataset
+for each aspect (with fewer samples being used for
+the recommendation aspect due to the low num-
+ber of valid samples), ensuring that every selected
+abstract had at least one valid summary, which en-
+sures that the aspect was indeed represented in the
+abstract. For every pair of abstracts in this sub-
+set, we prompted Qwen3-30B-A3B-Instruct-2507
+(Yang et al., 2025) to assign an integer similarity
+score, ranging from either 1-5 or 1-6 depending
+on the aspect, thereby quantifying the degree of
+similarity with respect to that aspect alone.
+
+Through extensive prompt design and experi-
+mentation, we identified several key components
+that were critical for achieving high-quality, aspect-
+specific similarity assessments:
+
+1. Explicitly specifying relevant and irrele-
+vant information. Listing the factors that
+should be considered when assessing similar-
+ity proved essential for guiding the model’s
+focus. Equally important was instructing the
+model to ignore irrelevant details such as spe-
+cific species names, geographic locations, or
+overly study-specific information.
+
+2. Providing a detailed scoring rubric. A pre-
+cise rubric outlining the requirements for each
+possible score was crucial for maintaining con-
+sistency across assessments.
+
+3. Enforcing explicit reasoning. Directly
+prompting the model to output an integer
+score yielded low-quality and inconsistent re-
+sults. We found it essential to first instruct the
+model to summarize the relevant factors from
+both abstracts before assigning a similarity
+score. This mirrors the reasoning strategies
+employed by chain-of-thought models. In pre-
+liminary testing, we compared this condensed
+reasoning approach with the explicit reason-
+ing by Qwen3-30B-A3B and found compara-
+ble accuracy. However, our approach was far
+more computationally efficient, making it fea-
+sible to process the large number of abstract
+pairs required for evaluation.
+
+An example prompt for the hypothesis aspect
+is provided in Figure 4, with all other prompts
+available in our GitHub repository.
+
+A.6 Training Embedding Decoders
+
+We decode embeddings back into natural language
+sentences by mapping embedding vectors into the
+input token space of an LLM and leveraging the
+LLM’s autoregressive language generation capabil-
+ities to create the natural language reconstruction.
+
+To investigate the effect of model size and pre-
+training strategy, we evaluate two different LLMs:
+the purely autoregressive Llama 3 (8B) (Grattafiori
+et al., 2024) and the 24B-parameter chat model
+Mistral Small 3.1 (Mistral AI, 2025).
+
+We map the embedding into the input embed-
+ding space of the LLM using a dense neural net-
+work with a single hidden layer of dimension 768
+and sigmoid activation. Each aspect embedding
+is projected into five sequential input-dependent
+tokens, which are accompanied by five additional
+trainable tokens that are input-independent and are
+prepended to the input-dependent tokens to pro-
+vide a general task description to the LLM, inde-
+pendent of the specific embedding. For Llama, the
+resulting input sequence consists of the <bos> to-
+ken followed by the ten trainable/decoded tokens,
+plus one additional trainable token acting as de-
+limiter to the generated text. For Mistral, all 10
+trainable/decoded tokens are inserted into the user
+prompt while preserving the standard chat format,
+such that the generated response by the LLM is
+produced as standard assistant response.
+
+Because of the different hidden dimensionali-
+ties of the two LLMs, the transformation networks
+contain approximately 16M parameters for Llama
+and 24M parameters for Mistral. During training,
+only the parameters of these mapping networks are
+updated, while the LLM weights remain frozen.
+
+Training is performed using the dataset of sum-
+marizing sentences described in Section A.2. For
+each sample and aspect, we compute the average
+of the aspect embeddings across all available sum-
+maries to obtain a single aspect embedding for that
+sample. The model is then trained to reconstruct
+all of the corresponding summarizing sentences,
+with one of them being selected at random each
+time that sample is used. The trainable parameters
+are optimized using a standard language modeling
+loss to reconstruct the original summary from the
+embedding.
+
+Optimization is carried out with AdamW, using a
+batch size of 4, a learning rate of le—3, and weight
+decay of le—4. Model checkpoints are evaluated
+every 250 parameter updates on a validation set of
+
+
+System Prompt:
+
+You are a scientific research assistant from the field of invasion biology. You will be tasked with assessing the relatedness
+of two scientific studies from the field of invasion biology with regards to a specific aspect based on their abstracts. Note
+that both abstracts will for sure address the field of invasion biology, which in itself therefore shall not be treated as
+indicator for relatedness. Provide concise, accurate responses and adhere precisely to the information that is actually
+present in the abstracts.
+
+User Prompt:
+
+Abstract A:
+
+[ABSTRACT 1]
+
+Abstract B:
+
+[ABSTRACT 2]
+
+Task: For the aspect ’ general relationship / hypothesis’, judge how similar the two abstracts are on the scale defined below.
+
+These are the detailed instructions for this aspect: Compare the high-level ecological relationship or directional hypothesis
+addressed in the two abstracts. Abstract away from species, place names, numeric values, and study-specific outcomes.
+Focus on whether the same broad cause-effect relationship is being studied. Assess similarity based on:
+
+(A) primary driver(s) / independent variable(s) (e.g., propagule pressure, disturbance, connectivity, enemy release, nutrient
+enrichment, climatic factor),
+
+(B) primary response(s) / dependent outcome(s) (e.g., establishment probability, abundance, spread rate, impact on native
+diversity, survival, recruitment), and
+
+(C) directional/causal framing or dominant mechanism (e.g., ’increases’, reduces’, ’facilitates’, is associated with’; causal
+vs correlational framing; explicit mechanism like competition release or predation pressure).
+
+(D) specific methods of measuring the high-level variables (e.g., how is "release from enemies" or "species diversity"
+quantified).
+
+Important: Do NOT up-score similarity just because both papers are about biological invasions. This also means that
+many studies will measure "invasion success", which therefore shall not mean that they are related yet. For this specific
+variable, look at the more specific ways in which invasion success is measured/quantified, and at the remaining context of
+the high-level relationship. The default score is 1 unless there is a substantive match in some of the components. Minor
+overlaps (e.g., both about ’biotic interactions’ without matching variables) should remain at 1 or 2.
+
+Scoring rubric (use integers only):
+
+5. Same high-level relationship with matching details — the primary driver(s) AND primary response(s) clearly match,
+AND the directional/causal framing or mechanism is the same or equivalent AND the high-level variables are
+quantified in strongly related ways.
+
+4. Same high-level relationship without matching details — the primary driver(s) and primary response(s) clearly
+match (e.g., both evaluate if ’native species diversity decreases the likelihood of invasions’), but the scope is different
+and thus variables are quantified differently.
+
+3. Related — a strong match on ONE core component (e.g., both mention species diversity, disturbance, enemy release,
+etc.) with some additional similar factor (e.g., same driver linked to a somewhat similar but not identical response,
+or same response but different classes of driver).
+
+2. Weak relation — share only a minor conceptual element (e.g., both mention diversity, disturbance, or climate
+broadly) but the actual hypothesized driver—response link differs.
+
+1. No meaningful overlap in the high-level relationship/hypothesis (beyond both being invasion studies and targeting
+species invasions).
+Return EXACTLY a single JSON object and nothing else with the following format:
+
+{"reasoning": <a short summary of the differences and similarities, and which category this supports>, "score": <integer
+score>}
+
+Do not include any other text, commentary, or examples.
+
+Figure 4: The prompt provided to Qwen3-30B-A3B-Instruct-2507 for creating pairwise similarity assessments
+between two scientific abstracts for the hypothesis aspect.
+
+
+150 samples, and the best-performing checkpoint
+is selected based on reconstruction loss.
+
+A.7_ t-SNE Details
+
+t-SNE (van der Maaten and Hinton, 2008) is a
+widely used dimensionality reduction technique
+due to its favorable balance between effective-
+ness and conceptual simplicity. Given a pair-
+wise distance matrix A € R”*” for n samples
+in the original embedding space, t-SNE learns a
+low-dimensional representation {y1,..., Yn} with
+yi € R® (typically d = 2 or 3), such that the local
+similarity structure of the data is preserved.
+
+In the high-dimensional space, conditional prob-
+abilities are defined as
+
+exp(—A?,/20?)
+ksi exp(—Aj,/207)’
+
+which are then symmetrized as
+
+Pili = piu = 9,
+
+_ Pilg + Pili
+2n
+In the low-dimensional embedding, similarities
+are modeled using a heavy-tailed Student-t distri-
+bution with one degree of freedom:
+
+-1
+(1 + |lyi — yyll?)
+—]?
+eget (1 + lly — will?)
+
+The embedding Y = [y1,...,4n]' € R*¢
+is then optimized by minimizing the Kull-
+back—Leibler divergence between the distributions
+P = (piz) and Q = (qij):
+
+L(Y) =KL(P||Q) = So pijlog (2)
+A) is
+This objective encourages points that are close
+in the original space to remain neighbors in the
+low-dimensional representation, while the heavy-
+tailed distribution prevents unrelated points from
+collapsing together.
+
+Pig
+
+dij = qi = 0.
+
+A.8_ Details on Interactive Embedding and
+Decoding
+
+Section 6 introduces approaches for interacting
+with the low-dimensional representation of our se-
+mantic embedding space. For visualization, we
+employ t-SNE and compute pairwise distances be-
+tween samples based on their embeddings using
+d(e;,e;) = 1—cos(e, e;) as distance between two
+embeddings e; and e;, with cos denoting the cosine
+similarity.
+
+Embedding additional samples. To embed a
+new sample z,+1 into an existing visualization,
+we first compute its high-dimensional distances to
+all existing samples:
+
+A(n+1)j = U(@n41,2j), j=l,...,n.
+
+These distances are used to form conditional prob-
+abilities pj), 41 and py +1); In the same way as for
+the original samples, followed by symmetrization
+to obtain pn+1,j-
+
+We then fix all existing low-dimensional coor-
+dinates {y1,..., Yn} and optimize only the new
+coordinate y,,41 such that the KL divergence ob-
+jective in Equation 1 is minimized:
+
+min L(Y U{ynsi}) = >> piy log M2,
+Yn+1 =F: ij
+
+tj
+where qj; is recomputed with y,,,1 included. This
+ensures that the new point is positioned in the low-
+dimensional space such that its local neighborhood
+structure reflects the distances in the original em-
+bedding space, while the configuration of existing
+points remains unchanged.
+
+To speed up convergence, we initialize yp+41 as
+the mean of the low-dimensional embeddings cor-
+responding to the five nearest neighbors within the
+original, high-dimensional embedding space.
+
+Reconstructing high-dimensional embeddings.
+Conversely, when a user specifies a new point
+Yn-+1 in the visualization, we seek to infer a high-
+dimensional embedding e,+1 that would plausibly
+map to this position. To this end, we keep all ex-
+isting high-dimensional embeddings {e1,..., en}
+fixed and introduce e,,+1 as an optimizable vari-
+able.
+
+The distances in the high-dimensional space are
+defined as
+
+which yield new conditional probabilities p,,+1,;.
+In the low-dimensional space, the user-specified
+point y,,41 is treated as fixed. We then minimize
+the same KL divergence objective:
+
+€n+1
+
+with respect to €,+41 only.
+
+In practice, we constrain e,+1 to the top k = 20
+principal components of the original embedding
+space, i.e.,
+
+enti =Uz, ze R*,
+
+
+Disease Methodology Patient Group
+Samples 282 396 330
+MRR Main model 859 741 .694
+MRR Other models .778 541 546
+MRR SemCSE 811 548 510
+
+Table 5: Retrieval performance measured via Mean Reciprocal Rank (MRR %), multiplied by 100. Main = model
+trained for the aspect, Others = average of non-matching models.
+
+where U € IR?** are the leading principal compo-
+nents. This reduces the optimization problem to a
+low-dimensional search over z while ensuring that
+the reconstructed embedding remains within the
+most semantically meaningful subspace.
+
+Further, we initialize the embedding e,+1 as the
+mean of the high-dimensional embeddings corre-
+sponding to the five nearest neighbors within the
+low-dimensional visualization to speed up conver-
+gence.
+
+Once optimized, the resulting e,,,; can be de-
+coded via the pipeline introduced in Section 5, pro-
+viding a natural language explanation of the seman-
+tic content represented by the chosen location in
+the visualization.
+
+A.9 Details on Embedding Reconstruction
+Decoding
+
+We evaluate our framework’s ability to generate
+semantic descriptions for previously unoccupied
+positions in low-dimensional visualizations, which
+is performed separately for each aspect. For a given
+aspect, we select all test samples with at least one
+valid summary, compute their aspect-specific em-
+beddings with SemCSE-Multi, and construct a low-
+dimensional embedding space using t-SNE.
+
+In the t-SNE calculation, each time one sample is
+omitted and serves as the target for reconstruction,
+which is repeated so that every sample in the dataset
+is left out once, and the final score is obtained by
+averaging across all iterations.
+
+After computing the low-dimensional embed-
+dings, the omitted sample’s high-dimensional em-
+bedding e,+1 is temporarily added to extend
+the distance matrix A. The corresponding low-
+dimensional coordinate y,+41 is then inferred us-
+ing the embedding procedure described in Ap-
+pendix A.8. We subsequently remove e,+1 from
+the high-dimensional set and optimize a new high-
+dimensional embedding €,,,, for the position y,4+1,
+again following the method in Appendix A.8.
+
+Finally, the decoding procedure from Section 5
+
+is applied to €,+41 with the goal of reconstructing
+the aspect-specific summaries of the left-out sam-
+ple. Perplexity is computed for each summary and
+averaged to yield a single score per sample, and the
+overall evaluation metric is obtained by averaging
+these scores across all samples.
+
+B_ Experiments on the Medical Domain
+
+B.1 Introduction
+
+To establish wider applicability of our proposed
+multifaceted embedding framework beyond the do-
+main of invasion biology, we perform an additional
+evaluation in the medical domain. Due to the com-
+putational resources required for the model training
+and generation of training and test data, we limit
+this second evaluation to a smaller scale, thus only
+including three factors and limiting the training set
+to 15,000 samples and the number of samples for
+pairwise similarity assessment to 200.
+
+B.2 Dataset Creation and Aspect Definition
+
+For creating the dataset, we sampled a random
+set of 15,000 scientific abstracts from the publicly
+available PubMed database. The first 500 samples
+thereby serve as test samples, while the subsequent
+150 samples are used as validation samples in the
+individual training runs. Both the summary genera-
+tion for all splits as well as the pairwise similarity
+assessment generation for 200 test samples with re-
+gards to the individual aspects are done in the same
+experimental setting as for the domain of invasion
+biology. The adapted prompts are again available
+in our GitHub repository.
+
+Unlike for the domain of invasion biology, we
+were not consulted by domain experts for the exper-
+iments in the medical domain. For this reason, the
+decision on suitable aspects for the multifaceted
+embedding model was done with the help of popu-
+lar Chat LLMs, with a focus on selecting aspects
+that are both relevant for the domain, but at the
+same time might not be necessarily captured well
+
+
+8 oo 308 oo
+Ground Truth eae” 08° ae Ground Truth eo” x08 or
+Similarities > oF we ye Similarities > oF we" coal
+%| Disease 20.29 7.57 7.81 E| Disease 50.35 21.90 41.15
+= Methodology 10.97 38.40 18.66 = Methodology 19.40 54.05 45.95
+g Patient Group 12.18 28.45 41.62 g Patient Group 23.70 34.25 62.65
+Al Combined 20.29 38.40 41.62 4! Combined 50.35 54.05 62.65
+SPECTER 31.16 25.28 20.36 SPECTER 41.10 32.35 46.00
+“ SPECTER2 30.24 18.70 17.50 “ SPECTER2 38.45 27.70 40.90
+FE: SciNCL 32.75 27.75 18.25 FE: SciNCL 43.50 31.05 45.75
+2 SemCSE 29.14 33.30 28.33 2 SemCSE 40.00 37.20 46.75
+MedEmbed-base 30.98 31.78 18.56 MedEmbed-base 42.30 31.60 46.95
+Clinical-ModernBERT 14.81 39.94 25.03 Clinical-ModernBERT 25.00 41.85 47.50
+
+Table 6: Correlation matrix showing Spearman corre-
+lations between pairwise similarities computed from
+embedding models (aspect embeddings from SemCSE-
+Multi as well as baselines) and the LLM-generated
+pairwise ground-truth similarities.
+
+by existing embedding models, to underscore the
+great adaptability to otherwise neglected aspects.
+We settled on the following aspects:
+
+The disease: Many scientific studies from the
+medical domain center around a specific dis-
+ease or medical condition. We prompted the
+LLM to focus on general factors that would be
+useful to assess similarity between different
+diseases (e.g., disease class, dominant patho-
+logical process, or hallmark clinical features).
+
+The methodology: The specific methodological
+approach underlying a scientific study in the
+medical domain is of high importance since
+it yields crucial information about the infer-
+ences that can be drawn from the reported
+results. The LLM was prompted to summa-
+rize information about the study design class
+(e.g., randomized controlled trial, prospective
+cohort study), the data source and collection
+method (e.g., clinical measures, imaging, elec-
+tronic health records) and the overall analytic
+approach (e.g., longitudinal follow-up, com-
+parative analysis).
+
+The patient group: The patient group under con-
+sideration within a given study is a key factor
+for assessing the applicability to a specific
+patient in a clinical setting. For this reason,
+we prompted the LLM to describe the patient
+group, including factors like "age group, sex
+when relevant, general health status or risk
+profile, severity or stage descriptors, comor-
+
+Table 7: Top-10 retrieval performance using pairwise
+similarities computed from embedding models (aspect
+embeddings from SemCSE-Multi as well as baselines).
+Metric: Percentage of samples in the top-10 retrieved
+items that are also within the top-10 most similar items
+according to the LLM assessments.
+
+bidity burden, or whether the subjects are ex-
+perimental animals".
+
+We hypothesize that this aspect selection pro-
+vides valuable insights into the relative strength of
+our multifaceted embedding model compared to
+standard, mostly citation-based embedding mod-
+els, since these likely perform well with regards to
+assigning high similarity to studies addressing the
+same medical condition (since such studies likely
+cite each other with high probability), while scoring
+lower with regards to the methodology and patient
+
+group.
+
+B.3. Individual Embedding Model Evaluation
+
+The training of the individual embedding models is
+done exactly like for the experiments in the domain
+of invasion biology. The evaluation results for the
+summary-retrieval setting described in Section 3.3
+are displayed in Table 5.
+
+Similar to the experiments on the domain of in-
+vasion biology, we see the highest retrieval per-
+formance if the specialized aspect-specific model
+is used, while retrieval performance using the em-
+bedding models for the non-matching aspects and
+the SemCSE baseline is noticeably lower. Impor-
+tantly, we observe a generally very high matching
+performance, but note that the higher performance
+compared to the invasion biology experiments is
+caused by the lower dataset size. Nevertheless,
+the high scores indicate that the correct match is
+usually retrieved as first or second candidate.
+
+
+Llama
+
+Mistral
+
+Aspect Matching Reconstructed Shuffled Unconditioned Matching Reconstructed Shuffled
+Disease 6.28 11.76 25.20 30.08 6.44 12.75 26.78
+Methodology 6.71 10.63 26.73 167.37 6.91 10.90 30.14
+Patient Group 7.39 11.02 39.44 111.86 7.49 11.46 48.73
+
+Table 8: Perplexity results for Llama and Mistral decoders under normal and shuffled (ablation) settings. Lower
+
+perplexity indicates better performance.
+
+B.4 Unified Model Evaluation
+
+The training of the unified SemCSE-Multi embed-
+ding model is done exactly like for the experiments
+in the domain of invasion biology. The evalua-
+tion results for the correlation-based evaluation de-
+scribed in Section 4.2 are displayed in Table 6.
+
+Note that for the medical domain, due to the
+availability of specialized, domain-specific embed-
+ding models, we added two additional baseline
+models in the form of MedEmbed-base-v0.1 (Bal-
+achandran, 2024) and Clinical-ModernBERT (Lee
+et al., 2025) to the evaluation.
+
+Again, we observe the highest correlation be-
+tween aspect-specific embeddings and pairwise as-
+pect evaluations on the diagonal entries, thus in-
+dicating that the aspect-specific embeddings accu-
+rately represent and isolate these aspect-specific
+similarities.
+
+Especially for the two aspects that we hypothe-
+sized to be underrepresented by the general embed-
+ding models (i.e., methodology and patient group),
+no baseline general-domain model can rival the per-
+formance of our multi-faceted embedding model,
+with only Clinical-ModernBERT surpassing our
+model slightly in the methodology aspect while
+falling far short on the other two aspects.
+
+In contrast, for the disease aspect, many base-
+line models outperform our multifaceted embed-
+ding approach. We attribute this primarily to sub-
+optimal prompt design for the generation of train-
+ing summaries. Specifically, the prompts did not
+sufficiently instruct the LLM to extract features
+that enable meaningful similarity assessments be-
+tween non-identical diseases - for instance, shared
+pathophysiological mechanisms or affected organ
+systems. As a result, the model likely learned an
+embedding space that effectively clusters closely
+related diseases but fails to capture nuanced simi-
+larities among less directly related ones.
+
+To test this hypothesis, we conducted a follow-
+
+up experiment using the same LLM-based pairwise
+similarity assessments. While our initial evalua-
+tion measured the overall correlation between each
+sample’s embedding-induced and LLM-assessed
+similarity rankings across the full dataset, we now
+instead focus on the precision of the top retrieved
+items. Concretely, we assess the proportion of the
+ten most similar samples (according to the embed-
+ding model) that also appear among the ten most
+similar samples identified by the LLM.
+
+The results of this modified evaluation, shown
+in Table 7, reveal a substantial improvement of
+our multifaceted embedding model on the disease
+aspect. It now surpasses all baselines by far, demon-
+strating its superior ability to retrieve papers con-
+cerning closely related diseases. The lower perfor-
+mance in the global correlation analysis can there-
+fore be attributed to its limited ability to order less
+related diseases correctly, rather than to deficien-
+cies in identifying truly similar ones.
+
+These findings underscore the critical impor-
+tance of well-designed prompts. Achieving optimal
+performance likely requires the careful formulation
+of aspect-specific prompts, ideally guided by do-
+main experts to ensure that the LLM captures the
+most relevant conceptual relationships.
+
+B.5 Embedding Decoder Evaluation
+
+We train the embedding decoder equivalently to
+the experiments in the domain of invasion biology.
+The evaluation results for both the normal and re-
+constructed decoding described in Sections 5.2 and
+6.3 are displayed in Table 8.
+
+Consistent with the findings in invasion biology,
+the decoder achieves low perplexity scores when
+reconstructing the high-dimensional embeddings,
+substantially outperforming the shuffled and un-
+conditioned baselines that reconstruct either non-
+matching summaries from the same aspect or eval-
+uates perplexity of the summaries without any con-
+
+
+ditioning. This confirms that the semantic informa-
+tion encoded in the aspect-specific embeddings are
+accurately translated back into natural language,
+thus effectively creating human-interpretable de-
+scriptions of the embedding’s content.
+
+As expected, the reconstructed embeddings
+yield slightly higher perplexity values than the
+direct decoding of original embeddings. Never-
+theless, the results clearly demonstrate that mean-
+ingful and coherent sentences can be generated
+even for embeddings optimized for points in low-
+dimensional visualizations, thereby validating the
+feasibility of making user-specified regions in such
+visualizations interpretable.

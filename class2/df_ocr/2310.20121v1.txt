@@ -1,0 +1,1781 @@
+arXiv:2310.20121v1 [cs.CL] 31 Oct 2023
+
+Ling-CL: Understanding NLP Models through Linguistic Curricula
+
+Mohamed Elgaar and Hadi Amiri
+University of Massachusetts Lowell
+{melgaar, hadi}@cs.uml.edu
+
+Abstract
+
+We employ a characterization of linguistic com-
+plexity from psycholinguistic and language ac-
+quisition research to develop data-driven cur-
+ricula to understand the underlying linguistic
+knowledge that models learn to address NLP
+tasks. The novelty of our approach is in the de-
+velopment of linguistic curricula derived from
+data, existing knowledge about linguistic com-
+plexity, and model behavior during training. By
+analyzing several benchmark NLP datasets, our
+curriculum learning approaches identify sets
+of linguistic metrics (indices) that inform the
+challenges and reasoning required to address
+each task. Our work will inform future research
+in all NLP areas, allowing linguistic complex-
+ity to be considered early in the research and
+development process. In addition, our work
+prompts an examination of gold standards and
+fair evaluation in NLP.
+
+1 Introduction
+
+Linguists devised effective approaches to deter-
+mine the linguistic complexity of text data (Wolfe-
+Quintero et al., 1998; Bulté and Housen, 2012;
+Housen et al., 2019). There is a spectrum of /in-
+guistic complexity indices for English, ranging
+from lexical diversity (Malvern et al., 2004; Yu,
+2010) to word sophistication (O’ Dell et al., 2000;
+Harley and King, 1989) to higher-level metrics
+such as readability, coherence, and information
+entropy (van der Sluis and van den Broek, 2010).
+These indices have not been fully leveraged in NLP.
+
+We investigate the explicit incorporation of lin-
+guistic complexity of text data into the training
+process of NLP models, aiming to uncover the
+linguistic knowledge that models learn to address
+NLP tasks. Figure | shows data distribution and
+accuracy trend of Roberta-large (Liu et al., 2019)
+against the linguistic complexity index “verb vari-
+ation” (ratio of distinct verbs). This analysis is
+conducted on ANLI (Nie et al., 2020) validation
+data, where balanced accuracy scores are computed
+
+60%
+500
+
+250 40%
+
+Sample Count
+Accuracy
+
+0.0 0.5
+Verb Variation
+
+Figure 1: Data distribution and trend of model accuracy
+against the linguistic index verb variation computed on
+ANLI (Nie et al., 2020) validation data. Samples with
+greater verb variation are more complex and also harder
+for the model to classify. Such linguistic indices can
+inform difficulty estimation and linguistic curriculum
+development for NLP tasks.
+
+for individual bins separately. The accuracy trend
+indicates that verb variation can describe the diffi-
+culty of ANLI samples to the model. In addition,
+the data distribution illustrates potential linguistic
+disparity in ANLI; see §3.4
+
+To reveal the linguistic knowledge NLP models
+learn during their training, we will employ known
+linguistic complexity indices to build multiview lin-
+guistic curricula for NLP tasks. A curriculum is a
+training paradigm that schedules data samples in a
+meaningful order for iterative training, e.g., by start-
+ing with easier samples and gradually introducing
+more difficult ones (Bengio et al., 2009). Effective
+curricula improve learning in humans (Tabibian
+et al., 2019; Nishimura, 2018) and machines (Ben-
+gio et al., 2009; Kumar et al., 2010; Zhou et al.,
+2020; Castells et al., 2020). Curriculum learning
+has been found effective in many NLP tasks (Set-
+tles and Meeder, 2016; Amiri et al., 2017; Platanios
+et al., 2019; Zhang et al., 2019; Amiri, 2019; Xu
+et al., 2020; Lalor and Yu, 2020; Jafarpour et al.,
+2021; Kreutzer et al., 2021; Agrawal and Carpuat,
+2022; Maharana and Bansal, 2022). A multiview
+curriculum is a curriculum able to integrate multi-
+ple difficulty scores simultaneously and leverage
+their collective value (Vakil and Amiri, 2023).
+
+
+We assume there exists a subset of linguistic
+complexity indices that are most influential to learn-
+ing an NLP task by a particular model. To identify
+these indices for each model and NLP task, we de-
+rive a weight factor p; € [—1, 1] for each linguistic
+index that quantifies how well the index estimates
+the true difficulty of data samples to the model,
+determined by model instantaneous loss against
+validation data. By learning these weight factors,
+we obtain precise estimations that shed light on the
+core linguistic complexity indices that each model
+needs at different stages of its training to learn an
+NLP task. In addition, these estimates can be read-
+ily used for linguistic curriculum development, e.g.,
+by training models with linguistically easy samples
+(with respect to the model) and gradually introduc-
+ing linguistically challenging samples.
+
+To achieve the above goals, we should address
+two gaps in the existing literature: First, existing
+curricula are often limited to a single criterion of
+difficulty and are not applicable to multiview set-
+tings. This is while difficulty is a condition that can
+be realized from multiple perspectives, can vary
+across a continuum for different models, and can
+dynamically change as the model improves. Sec-
+ond, existing approaches quantify the difficulty of
+data based on instantaneous training loss. However,
+training loss provides noisy estimates of sample
+difficulty due to data memorization (Zhang et al.,
+2017; Arpit et al., 2017) in neural models. We will
+address both issues as part of this research.
+
+The contributions of this paper are:
+
+* incorporating human-verified linguistic com-
+plexity information to establish an effective
+scoring function for assessing the difficulty of
+text data with respect to NLP models,
+
+¢ deriving linguistic curricula for NLP models
+based on linguistic complexity of data and
+model behavior during training, and
+
+¢ identifying the core sets of linguistic complex-
+ity indices that most contribute to learning
+NLP tasks by models.
+
+We evaluate our approach on several NLP tasks
+that require significant linguistic knowledge and
+reasoning to be addressed. Experimental results
+show that our approach can uncover latent lin-
+guistic knowledge that is most important for ad-
+dressing NLP tasks. In addition, our approach
+obtains consistent performance gain over compet-
+ing models. Source code and data is available at
+https: //github.com/CLU-UML/Ling-CL.
+
+Algorithm 1 Correlation Method
+
+Require: Dt;ain, Duar, Model O, Optimizer g, Loss func-
+tion f, Curriculum C’
+
+: step + 0
+
+: p< random initialization
+
+: while step < total_steps do
+
+training_batch <- SampleBatch(step, Dirain)
+
+loss + ComputeLoss (training_batch, 0)
+
+ling <— GetLinguisticFeatures(training batch)
+
+difficulty «+ CalculateDifficulty(ling, p)
+
+confidence «~ DetermineConfidence(step, difficulty)
+
+weighted_loss + loss ® confidence
+
+10: © «+ UpdateModel (weighted_loss, ©)
+
+11: if step % validation_step = 0 then
+
+BS Aaw Osea ee
+
+12: |< ComputeLoss (Dai, 9)
+
+13: ling ~ GetLinguisticFeatures(Dya1)
+14: for p; € p do
+
+15: pi < pearsonr(I, ling|:, 7])
+
+16: end for
+
+17: end if
+
+18: step + step + 1
+19: end while
+
+2 Miultiview Linguistic Curricula
+
+We present a framework for multiview curriculum
+learning using linguistic complexity indices. Our
+framework estimates the importance of various lin-
+guistic complexity indices, aggregates the result-
+ing importance scores to determine the difficulty of
+samples for learning NLP tasks, and develops novel
+curricula for training models using complexity in-
+dices. The list of all indices used is in Appendix A.
+
+2.1 Linguistic Index Importance Estimation
+2.1.1 Correlation Approach
+
+Given linguistic indices {Xj yey of n data sam-
+ples, where k is the number of linguistic indices
+and X; € IR”, we start by standardizing the in-
+
+dices {Z; = x-
+
+a i ye. We consider importance
+weight factors for indices {p; } Bow which are ran-
+domly initialized at the start of training. At every
+validation step, the weights are estimated using
+the validation dataset by computing the Pearson’s
+correlation coefficient between loss and linguis-
+tic indices of the validation samples p; = r(1, Z;)
+where r is the correlation function and 1 € R” is the
+loss of validation samples. The correlation factors
+are updated periodically. It is important to use vali-
+dation loss as opposed to training loss because the
+instantaneous loss of seen data might be affected
+by memorization in neural networks (Zhang et al.,
+2017; Arpit et al., 2017; Wang et al., 2020). This is
+while unseen data points more accurately represent
+the difficulty of samples for a model. Algorithm 1
+presents the correlation approach.
+
+
+2.1.2 Optimization Approach
+
+Let Z € R"** be the matrix of k linguistic indices
+computed for n validation samples and 1 € R”
+indicate the corresponding loss vector of validation
+samples. We find the optimal weights for linguistic
+indices to best approximate validation loss:
+
+p= arg min \[l— Zp||5+Apllolli,
+
+where A, € R and p* € R* is jointly optimized
+over all indices. The index that best correlates with
+loss can be obtained as follows:
+
+v= arg min || — Zxipilld, (2)
+
+where Z,; denotes the i*” column of Z. Algo-
+rithm 2 presents this approach.
+
+We note that the main distinction between the
+two correlation and optimization approaches lies
+in their scope: the correlation approach operates at
+the index level, whereas the optimization approach
+uses the entire set of indices.
+
+2.1.3 Scoring Linguistic Complexity
+
+We propose two methods for aggregating linguistic
+
+indices {X. 3}* and their corresponding importance
+
+factors {p;}* into a linguistic complexity score.
+
+The first method selects the linguistic index with
+
+the maximum importance score at each timestep:
+
+j = arg max pj, (3)
+j
+
+Si = Zy,
+
+which provides insights into the specific indices
+that determine the complexity to the model.
+
+The second method computes a weighted aver-
+age of linguistic indices, which serves as a difficulty
+score. This is achieved as follows:
+
+_ ar pj Li;
+2 9
+V/ bog
+
+where 5; € R, (14s,,05,) = (0, 1), is an aggregate
+of linguistic complexity indices for the input text.
+If an index Z; is negatively correlated with loss,
+p; will be negative, and p;Z; will be positively
+correlated with loss. Therefore, 5; is an aggregate
+complexity that is positively correlated with loss.
+And using weighted average results in the indices
+that are most highly correlated with loss to have
+the highest contribution to S;.
+
+Si (4)
+
+Algorithm 2 Optimization Method
+
+Require: Dtrain, Dvai, Model ©, Optimizer g, Optimizer h,
+Loss function f, [Optional] Curriculum C’
+
+: step + 0
+
+: p< random initialization
+
+: while step < total_steps do
+
+training_batch <- SampleBatch(step, Dirain)
+
+loss + ComputeLoss (training_batch, 0)
+
+ling <— GetLinguisticFeatures(training batch)
+
+difficulty «+ CalculateDifficulty(ling, p)
+
+confidence «~ DetermineConfidence(step, difficulty)
+
+weighted_loss «+ loss ® confidence
+
+10: © «+ UpdateModel (weighted_loss, ©)
+
+11: if step % validation_step = 0 then
+
+20 SI Oy ee eb
+
+12: | + ComputeLoss (Dyai, ©)
+
+13: ling + GetLinguisticFeatures(Dy a1)
+
+14: p+ argmin, \[ling - p — U3 + Apllplla
+15: end if
+
+16: step + step +1
+17: end while
+
+2.2 Linguistic Curriculum
+
+We evaluate the quality of weighted linguistic in-
+dices as a difficulty score and introduce three new
+curricula based on a moving logistic (Richards,
+1959) and Gaussian functions, see Figure 2.
+
+2.2.1 Time-varying Sigmoid
+
+We develop a time-varying sigmoid function to
+produce weights (Eq. 3). The sigmoid function as-
+signs a low weight to samples with small difficulty
+scores and a high weight to larger difficulty scores.
+Weights are used to emphasize or de-emphasize
+the loss of different samples. For this purpose, we
+use the training progress t € [0,1] as a shift pa-
+rameter, to move the sigmoid function to the left
+throughout training, so that samples with a small
+difficulty score are assigned a higher weight in the
+later stages of training. By the end of the training,
+all samples are assigned a weight close to 1. Addi-
+tionally, we add a scale parameter 6 € [1, oo) that
+controls the growth rate of weight (upper bounded
+by 1) for all samples.
+
+1
+
+The sigmoid function saturates as the absolute
+value of its input increases. To account for this
+issue, our input aggregated linguistic index follows
+the standard scale, mean of zero, and variance of
+one, in (4) and (3).
+
+2.2.2 Moving Negative-sigmoid
+
+The positive-sigmoid function assigns greater
+weights to samples with a large value for S that
+
+
+° ° H
+o & °
+° ° H
+o & °
+
+°
+BR
+
+Confidence
+Confidence
+
+°
+Nu
+°
+N
+
+°
+o
+°
+°
+
+°o
+
+=)
+~
+
+|
+|
+Confidence
+
+2
+°
+
+4 2 09 2 4 “4 2
+Linguistic Complexity
+
+(a) Sigmoid
+
+Linguistic Complexity
+
+(b) Negative Sigmoid
+
+o 2 4 4-2 02«02C~«*skti‘C
+Linguistic Complexity
+
+(c) Gaussian
+
+Figure 2: At the beginning of training, the sigmoid function with the lowest opacity is used. It is the right-most curve
+in (a), the left-most curve in (b), and the middle curve in (c). Then, as training progresses, the function is shifted
+using the parameter ¢ in (5) and (7), causing samples with a higher complexity to be assigned higher confidence
+if (a) is used, samples with a lower complexity to be assigned higher confidence if (b) is used, and samples with
+medium complexity to be assigned higher confidence if (c) is used.
+
+are linguistically more complex. In order to es-
+tablish a curriculum that starts with easy samples
+and gradually proceeds to harder ones, we use a
+negative sigmoid function:
+
+1
+1+ exp($; —t- 8)”
+
+Figure 2 illustrates the process of time-varying
+positive and negative sigmoid functions. Over the
+course of training, larger intervals of linguistic com-
+plexity are assigned full confidence, until the end of
+training when almost all samples have a confidence
+of one and are fully used in training.
+
+2.2.3. Time-varying Gaussian Function
+
+We hypothesize that training samples that are not
+too hard and not too easy are the most useful in
+training, and should receive the most focus. In fact,
+samples that are too easy or hard may contain arti-
+facts that are harmful to training, may contain noise,
+and may not be generalizable to the target task.
+Therefore, we use the Gaussian function to prior-
+itize learning from medium-level samples. The
+function starts with a variance of 1, and scales up
+during the course of training so that the easier and
+harder samples, having lower and higher linguis-
+tic complexity values, respectively, are assigned
+increasing weights and are learned by the end of
+training. We propose the following function:
+
+_—§2
+
+a +t-9)” (7)
+
+w(Si,t; 7) = exp(
+
+where 7¥ is the rate of growth of variance and t is
+the training progress, see Figure 2.
+
+2.2.4 Weighting-based Curriculum
+
+We define a curriculum by weighting sample losses
+according to their confidence. Samples that are
+most useful for training receive higher weights, and
+those that are redundant or noisy receive smaller
+weights. Weighting the losses effectively causes
+the gradient update direction to be dominated by
+the samples that the curriculum thinks are most
+useful. Weights w are computed using either Equa-
+tion 5, 6 or 7:
+
+1
+
+© = (Sn)
+
+> w(5i,t38)-6, (8)
+
+a
+
+where £; is the loss of sample 2, ¢ the current train-
+ing progress, and CL is the average weighted loss.
+
+2.3 Reducing Redundancy in Indices
+
+We have curated a list of 241 linguistic complex-
+ity indices. In the case of a text pair input (e.g.
+NLD, we concatenate the indices of the two text
+inputs, for a total of 482. Our initial data analysis
+reveals significant correlation among these indices
+in their estimation of linguistic complexity. To op-
+timize computation, avoid redundancy, and ensure
+no single correlated index skews the complexity ag-
+gregation approach 2.1.3, we propose two methods
+to select a diverse and distinct set of indices for our
+study. We consider the choice of using full indices
+or filtering them as a hyper-parameter.
+
+In the first approach, for each linguistic index,
+we split the dataset into m partitions based on the
+index values ! (similar to Figure 1). Next, using a
+trained No-CL (§3.3) model, we compute the accu-
+racy for each partition. Then, we find the first-order
+
+'We use numpy .histogram_bin_edges.
+
+
+2 ° ° 2°
+© a © ba
+a a a
+
+(a) Pair-wise correlation between indices
+
+1.0
+
+° fey ° ° 2°
+© a © zt
+a I a
+
+(b) Clustered correlation matrix.
+
+Figure 3: Eliminating redundancy in linguistic indices.
+(a) shows the Pearson’s correlation coefficient between
+each pair of linguistic indices. (b) is created by re-
+ordering the rows and columns of (a), such that mutually
+correlated indices are clustered into blocks using hier-
+archical clustering (Kumar et al., 2000). Best seen in
+color; lighter areas indicate greater correlations among
+index pairs or groups.
+
+accuracy trend across these partitions. Linguistic
+indices with a pronounced slope describe great vari-
+ance in the data and are considered for our study;
+we select the top 30% of indices, reducing their
+count from 482 to 144 for text pair inputs.
+
+In the second approach, we compute pair-wise
+correlations between all indices. Then, we group
+highly correlated indices, as shown in Figure 3.
+From each cluster, we select a representative index,
+aiming to prevent correlated indices from domi-
+nating the aggregation approach and to eliminate
+redundancy. This method narrows our focus to
+the following 16 key indices: 1) type-token ratio
+(TTR), 2) semantic richness, 3) ratio of verbs to
+tokens, 4) mean TTR of all k word segments, 5) To-
+tal number of verbs, 6) number of unique words, 7)
+adverbs per sentence, 8) number of unique words
+in the first k tokens, 9) ratio of nouns to verbs,
+10) semantic noise, 11) lexical sophistication, 12)
+verb sophistication, 13) clauses per sentence, 14)
+average SubtlexUS CDlow value per token, 15) ad-
+jective variation, 16) ratio of unique verbs. Please
+refer to Appendix A for definitions and references
+to indices.
+
+3 Experiments
+
+3.1 Datasets
+
+We evaluate NLP models in learning the tasks of
+the following datasets:
+
+e SNLI: Stanford Natural Language Infer-
+ence (Bowman et al., 2015). The task is to
+classify a pair of sentences by the relation be-
+tween them as one of entailment, neutral, or
+contradiction.
+
+* CoLA: Corpus of Linguistic Acceptabil-
+ity (Warstadt et al., 2019). It is a task of
+classifying sentences as grammatical vs. un-
+grammatical.
+
+¢ ANLI: Adverserial Natural Language Infer-
+ence (Nie et al., 2020). This NLI dataset
+was created with a model in the loop, by only
+adding samples to the dataset that fool the
+model. We train only on the ANLI training
+set of 162k samples.
+
+¢ SST-2: Stanford Sentiment Treebank (Socher
+et al., 2013). The task is to predict the senti-
+ment of a given sentence as positive or nega-
+tive.
+
+¢ RTE: Recognizing Textual Entailment (Wang
+et al., 2018). The task is to determine if a
+given sentence is entailed by another given
+sentence.
+
+¢ AN-Pairs: Adjective-noun pairs from the Cam-
+bridge ESOL First Certificate in English
+(FCE) exams (Kochmar and Briscoe, 2014).
+The task is to detect if an adjective-noun pair,
+including pairs that are typically confusing
+to language learners, is used correctly in the
+context of a sentence.
+
+¢ GED: Grammatical Error Detection (Yan-
+nakoudakis et al., 2011). The task is to iden-
+tify grammar errors at word level in given
+sentences.
+
+3.2. Difficulty Scoring Functions
+
+The curriculum learning approaches in §2.2 use
+difficulty scores or compute confidence to quantify
+sample difficulty in order to rank sentences. We use
+as difficulty scores: aggregate linguistic complexity
+Ling, see Section 2.1.3, and Loss (Xu et al., 2020;
+Wt et al., 2021; Zhou et al., 2020). We take the
+loss from a proxy model (No-CL in §3.3) by record-
+ing all samples losses two times per epoch during
+training and computing the sample-wise average.
+
+
+3.3. Baselines
+
+We consider a no-curriculum baseline as well as
+several recent curriculum learning approaches.
+
+¢ No-CL: no-curriculum uses standard random
+mini-batch sampling from the whole dataset
+without sample weighting.
+
+¢ Sampling (Bengio et al., 2009) uses the easiest
+subset of the dataset at each stage of training.
+Instead of randomly sampling a mini-batch
+from the whole dataset, a custom data sam-
+pler is created that provides the subset consist-
+ing of the easiest a% of data when training
+progress is at a%.
+
+¢ SL-CL & WR-CL (Platanios et al., 2019) is a
+curriculum learning approach that defines a
+time-varying function of the model’s compe-
+tence (defined as the fraction of training data
+that the model uses at every step), and a dif-
+ficulty score of the data. At each iteration,
+a minibatch is sampled from the subset of
+data with difficulty smaller than the model’s
+competence—a pre-defined non-linear func-
+tion. The model employs sentence length (SL-
+CL) and word rarity (WR-CL) as difficulty
+measures. Sampling is the same as Compe-
+tence-based curriculum learning with a linear
+competence function.
+
+¢ SuperLoss (Castells et al., 2020) uses instan-
+taneous loss to compute task-agnostic sam-
+ple confidence. It emphasizes easy samples
+and de-emphasizes hard samples based on the
+global average loss as the difficulty threshold.
+
+* Concat (Lee et al., 2021) concatenates linguistic
+indices to language embeddings before clas-
+sification. Lee et al. (2021) and Meng et al.
+(2020) reported low performance as a result of
+appending features to embeddings. However,
+our approach succeeds in utilizing concate-
+nated features.
+
+¢ Data Selection (Mohiuddin et al., 2022) is an
+online curriculum learning approach. It evalu-
+ates the training data at every epoch and uses
+loss as the difficulty score. It selects the mid-
+dle 40% of samples according to difficulty.
+
+We compare the above models against our ap-
+proaches, Ling-CL, which aggregates linguistic
+indices using weighted average or max-index aggre-
+gation, and applies different curriculum strategies:
+
+sigmoid, negative-sigmoid, and Gaussian weight-
+ing, as well as sampling an competence-based ap-
+proaches, see§3.3. We test variants of our approach
+with the correlation method, optimization method,
+and indices filtering. We report results of the max
+aggregation (§2.1.3) approach as it performs better
+than the weighted average and is computationally
+cheaper. Loss-CL computes loss as a difficulty
+score by recording the losses of samples during
+training of No-CL. The loss during the early stages
+of training generated by an under-trained model is
+a good measure of the relative difficulty of both
+training and validation samples.
+
+3.4 Evaluation Metrics
+
+Linguistic disparity can be quantified by the extent
+of asymmetry in the probability distribution of the
+linguistic complexity of samples in a dataset, e.g.,
+see Figure 1 in §1. A natural solution to evaluate
+models is to group samples based on their linguis-
+tic complexity. Such grouping is crucial because
+if easy samples are overrepresented in a dataset,
+then models can result in unrealistically high per-
+formance on that dataset. Therefore, we propose
+to partition datasets based on a difficulty metric
+(linguistic index or loss) and compute balanced ac-
+curacy of different models on the resulting groups.
+This evaluation approach reveals great weaknesses
+in models, and benchmark datasets or tasks that
+seemed almost “solved” such as as the complex
+tasks of NLI.
+
+3.5 Experimental Settings
+
+We use the transformer model roberta-base (Liu
+et al., 2019) from (Wolf et al., 2020), and run
+each experiment with at least two random seeds
+and report the average performance. We use
+AdamW (Loshchilov and Hutter, 2018) optimizer
+with a learning rate of 1 x 10~°, batch size of 16,
+and weight decay of 1 x 10~? for all models. The
+model checkpoint with the best validation accuracy
+is used for final evaluation. In NLI tasks with a pair
+of text inputs, the indices of both texts are used. For
+Ling-CL, we optimize the choice of index impor-
+tance estimation method and aggregation method.
+For the baselines, we optimize the parameters of
+SuperLoss (A and moving average method), and
+the two parameters of SL-CL and WR-CL mod-
+els for each dataset. For the data selection, we
+use a warm-up period of 20% of the total training
+iterations.
+
+
+ANLI COLA RTE SNLI SST2 AN-Pairs GED Average
+Ling-CL [NegSig] 59.3+4255 72.4+040 7914847 82.84835 92.24022 79.14155 75.34067 77.2 4317
+Ling-CL [Gauss] 60.9 +141 73.0+002 77.2+808 83.54839 9244027 82.94124 75.5+041 77.9 +283
+Ling-CL [Sig] 58.1 +017 6464891 78.7+887 83.04+848 92.3400: 82.34093 75.9+010 76.4 +3.92
+Loss-CL [NegSig] 59.0403: 55.6+064 68.1 4159 75.1+4005 91.6+026 7644570 75.14144 71.6414
+Loss-CL [Sig] 49.7+958 5664037 66.8+029 83.6+837 90.9404 814+061 73.3 4029 71.8 +285
+Loss-CL [Gauss] 49441107 57.00+129 67.2414. 75.1 +052 91.8+012 8054203 7454007 70.8 +237
+Sampling 49.9 +1000 6464889 67.9+003 83.24872 9154007 82.64393 73.84123 73.4447
+Competence 50.1 41127 63.4+908 68.8+4064 7474006 91.6+003 8404114 7414039 72.44323
+SL-CL 50.3 41005 55.8+006 67.74127 8264835 93.1400 81.64072 75.24026 72.3 42.96
+WR-CL 50.9+980 56.1 +053 6844073 7454016 91.5+016 80.1 4081 75.24017 71.0+41.77
+SuperLoss 39.5+4014 56.9+069 69.6+050 75.2+4014 91.7402 77.8+4189 74.2+4015 69.3 40.54
+Concat 51.3+4983 6434803 714+051 75.2+4024 91.9+4014 81.8416 73.8+4091 72.8 43.05
+Data Selection 46.8+4612 55.1417 6664149 7444049 91.5+4030 79.64+103 75.5+4052 69.9 +1.67
+No-CL 51.7+4821 57.0+022 70.0+045 83.34842 83.74822 82.1405: 7404014 71.7 43.74
+
+Table 1: Balanced accuracy by linguistic index (Word rarity). Accuracy is the metric for all datasets except CoLA
+and GED, CoLA uses Matthew’s correlation and GED uses F’3—9.5 score. Ling-CL uses aggregate linguistic
+complexity as a difficulty score we create, and Loss-CL uses the average loss of a sample throughout a full training.
+
+3.6 Enhanced Linguistic Performance
+
+Tables 1 show the performance of different models
+when test samples are grouped based on word rar-
+ity. The results show that the performance of the
+baseline models severely drops compared to stan-
+dard training (No-CL). This is while our Ling-CL
+approach results in 4.5 absolute points improve-
+ment in accuracy over the best-performing baseline
+averaged across tasks, owing to its effective use
+of linguistic indices. Appendix D shows the over-
+all results on the entire test sets, and results when
+test samples are grouped based on their loss; we
+use loss because it is a widely-used measure of
+difficulty in curriculum learning. These groupings
+allow for a detailed examination of the model’s per-
+formance across samples with varying difficulty,
+providing insights into the strengths and weak-
+nesses of models. For example, the performance
+on SNLI varies from 89.8 to 90.6. However, when
+word rarity is used to group data based on diffi-
+culty, the performance range significantly drops
+from 74.4 to 83.6, indicating the importance of the
+proposed measure of evaluation. We observe that
+such grouping does not considerably change the
+performance on ANLI, which indicates the high
+quality of the dataset. In addition, it increases
+model performance on AN-Pair and GED, which
+indicates a greater prevalence of harder examples
+in these datasets.
+
+On average, the optimization approach outper-
+forms correlation by 1.6% +1.9% accuracy in our
+experiments. Also notably, on average, the argmax
+index aggregation outperforms the weighted aver-
+age by 1.9% +1.9%, and the filtered indices out-
+perform the full list of indices by 1.4% +1.1%.
+
+3.7 Learning Dynamics for NLP Tasks
+
+Identification of Key Linguistic Indices We an-
+alyze the linguistic indices that most contribute
+to learning NLP tasks. For this purpose, we use
+the evaluation approach described in §3.4 for com-
+puting balanced accuracy according to linguistic
+indices. Table 2 shows the top three important
+linguistic indices for each dataset as identified by
+our optimization algorithm using the Gaussian cur-
+riculum. Importance is measured by the average p
+value. Early, middle, and late divide the training
+progress into three equal thirds. The top index in
+the early stage is the index with the highest average
+p during the first 33.3% of training. The top indices
+are those that most accurately estimate the true dif-
+ficulty of samples, as they should highly correlate
+with validation loss.
+
+Table 2 shows that different indices are impor-
+tant for different tasks. This means that it is not
+possible to use a single set of linguistic indices as a
+general text difficulty score, important indices can
+be identified for each task, which can be achieved
+by our index importance estimation approach (§2.1)
+and evaluation metric (§3.4).
+
+Analysis of Linguistic Indices for Grammar
+Tasks We consider the grammar tasks for anal-
+ysis. For AN-Pairs (adjective-noun pair), during
+the early stage, the top indices are the number of
+tokens per sentence, age of acquisition (AoA) of
+words, and mean length of sentences. This is mean-
+ingful because longer sentences might introduce
+modifiers or sub-clauses that can create ambiguity
+or make it more challenging to discern the intended
+adjective-noun relationship accurately. Regarding
+AoA, words that are acquired later in life or belong
+
+
+Early Middle Late
+# Tokens per sentence Lemmas age of acquisition # Adverbs per sentence
+AN-Pairs Lemmas age of acquisition # Tokens per sentence Corrected TTR
+Mean sentence length # Adverbs per sentence Nouns to adjective ratio
+Corrected noun variation
+GED # Tokens per sentence # Nouns per sentence # Tokens per sentence
+# Nouns per sentence # Tokens per sentence # Nouns per sentence
+Ratio of Adverbs to Verbs (P)
+RTE Ratio of Subordinating Conjunctions to Verbs (P) Adverb Variation (P)
+Verb sophistication (P) Adverbs per sentence (P)
+Lexical verb variation (P) Function words per sentence (H)
+ANLI Unique Entities (P) Log Tokens per log sentences
+Unique Entities per token (P)
+# Complex nominals
+SST-2 Noun variation
+Ratio of nouns to verbs Verb variation
+# Function words # Coordinating Conjunctions
+CoLA Number of T-units
+T-units per sentence
+Lemmas age of acquisition (P)
+SNLI Linsear Write Formula Score (P)
+
+Gunning Fog Count Score (P)
+
+Table 2: Top three important linguistic indices at each stage of learning. For datasets with a premise (P) and
+
+hypothesis (H), they are indicated in parentheses.
+
+_>
+0.02 — ia||e6.0 &
+
+Balanced accuracy 5 0.03
+
+0.02 J» 65.89 vy
+
+2 uf 6555 002
+0.02 o
+65.2 ¥
+
+= 0.02
+0.02 2
+65.0 7
+a
+
+0 20 40 0 20
+
+>
+io)
+_— PS Nem oO 0.01
+° aaolids 69.5 5
+oO
+0.01
+: 69.02 =
+5 2
+Oo 0.01
+68.52
+& 0.01
+68.0 v
+40 0 20 40
+
+Training Iterations
+
+(a) # Unique words
+
+Training Iterations
+
+(b) # Unique sophisticated words
+
+Training Iterations
+
+(c) # Verb sophistication
+
+Figure 4: The progression of the estimated importance factors p, and balanced accuracy for groups of linguistic
+
+indices.
+
+to more specialized domains might pose challenges
+in accurately judging the correct usage of adjective-
+noun pairs because of their varying degrees of fa-
+miliarity and potential difficulty associated with
+specific vocabulary choices.
+
+During the middle stage the AoA increases in
+importance and remains challenging to the model,
+the number of adverbs per sentence increases in
+rank and joins the top three indices. In the context
+of adjective-noun pairs, the presence of multiple ad-
+verbs in a sentence can potentially affect the inter-
+pretation and intensity of the adjective’s meaning.
+This is because adverbs often modify verbs, adjec-
+tives, or other adverbs in sentences. In addition,
+depending on the specific adverbs used, they may
+enhance, weaken, or alter the intended relationship
+between the adjective and the noun. Moreover, the
+presence of several adverbs can simply introduce
+potential challenges in identifying and correctly in-
+terpreting the relationship between adjectives and
+
+nouns due to increasing syntactic complexity.
+
+In the third stage, the number of adverbs per
+sentence becomes the top important index, while
+AOA and the number of tokens per sentence drop
+out of the top three. In the early stage, AoA and the
+number of tokens has p values of 0.168 and 0.164,
+respectively. In the late stage, they drop to 0.11 and
+0.13, while the number of adverbs per sentence is
+0.138 early, and increases to 0.181 in the late stage.
+We see that indices may become dominant not only
+by increasing their p value but also by waiting for
+other indices to drop down when they have been
+learned by the model. Therefore, Ling-CL can
+determine the order to learn linguistic indices, and
+then learn them sequentially.
+
+Regarding GED, noun variation is the dominant
+index throughout the training process. Such varia-
+tion is important because it affects syntactic agree-
+ment, subject-verb agreement, modifier placement,
+and determiner selection. These factors affect gram-
+
+
+matical consistency and coherence within the sen-
+tence structure, leading to the importance of noun
+variation throughout the training process.
+
+Dominant Indices for CoLA Task Regarding
+CoLA, the number of function words and coordinat-
+ing conjunctions indices are the dominant indices
+at the early stage, and middle and late stages of
+training respectively. These words are crucial in
+establishing the syntactic structure of a sentence.
+They directly contribute to agreement and refer-
+ences, coherence, and adherence to grammar rules.
+We note that T-units (independent/main clauses
+clauses with their associated subordinate clauses)
+are higher-order linguistic constituents that pro-
+vide information about the dependency relations
+between sub-constituents, and the overall coher-
+ence of sentences. Indices related to T-units are
+among the top three crucial indices.
+
+Trends and Relationships between p and Bal-
+anced Accuracy We use the GED dataset (§3.1)
+to analyze the trends of p throughout training, and
+the relation between p and balanced accuracy. Fig-
+ure 4 shows the progression of p with the progres-
+sion of balanced accuracy for selected linguistic
+indices. This figure is produced using No-CL. We
+observe across several indices that p is high when
+balanced accuracy is low, indicating that the index
+is challenging to the model and therefore used for
+learning with a high p, and decreases as the in-
+dex is learned. However, Figure 4a shows that it
+is not necessary that when balanced accuracy in-
+creases p would decrease. In this case, it means
+that the model is performing relatively well on the
+index, but the index remains predictive of loss. So,
+although the average performance increased, the
+variation in performance among different values of
+the index remains high. We find that numerous in-
+dices follow the same of trend of p. In Appendix B,
+we propose a method for clustering p to effectively
+uncover patterns and similarities in the learning of
+different indices. However, further analysis of the
+dynamics of p is the subject of our future work.
+
+In addition, we find that the rank of top indices
+is almost constant throughout the training. This
+quality may be useful in creating an approach that
+gathers the indices rankings early on and utilizes
+them for training. Appendix E lists influential in-
+dices by their change in p across stages of training.
+We note that the “number of input sentences” index
+is the least important metric because the index is al-
+
+most constant across samples—75% of the samples
+consist of a single sentence in the datasets.
+
+4 Conclusion and Future Work
+
+We propose a new approach to linguistic curricu-
+lum learning. Our approach estimates the im-
+portance of multiple linguistic indices and aggre-
+gates them, provides effective difficulty estimates
+through correlation and optimization methods, and
+introduces novel curricula for using difficulty esti-
+mates, to uncover the underlying linguistic knowl-
+edge that NLP models learn during training. Fur-
+thermore, we present a method for a more accurate
+and fair evaluation of computational models for
+NLP tasks according to linguistic indices. Further-
+more, the estimated importance factors present in-
+sights about each dataset and NLP task, the linguis-
+tic challenges contained within each task, and the
+factors that most contribute to model performance
+on the task. Further analysis of such learning dy-
+namics for each NLP task will shed light on the
+linguistic capabilities of computational models at
+different stages of their training.
+
+Our framework and the corresponding tools
+serve as a guide for assessing linguistic complex-
+ity for various NLP tasks and uncover the learn-
+ing dynamics of the corresponding NLP models
+during training. While we conducted our analysis
+on seven tasks and extracted insights on the key
+indices for each task, NLP researchers have the
+flexibility to either build on our results or apply
+our approach to other NLP tasks to extract rele-
+vant insights. Promising areas for future work in-
+clude investigations on deriving optimal linguistic
+curriculum tailored for each NLP task; examining
+and enhancing linguistic capabilities of different
+computational models, particularly with respect
+to linguistically complex inputs; and developing
+challenge datasets that carry a fair distribution of
+linguistically complex examples for various NLP
+tasks. In addition, future work could study why spe-
+cific indices are important, how they connect to the
+linguistic challenges of each task, and how differ-
+ent linguistic indices jointly contribute to learning
+a target task. We expect other aggregation func-
+tions, such as log-average, exponential-average,
+and probabilistic selection of maximum, to be ef-
+fective approaches for difficulty estimation based
+on validation loss. Finally, other variations of the
+proposed Gaussian curriculum could be investi-
+gated for model improvement.
+
+
+5 Limitations
+
+Our work requires the availability of linguistic in-
+dices, which in turn requires expert knowledge.
+Such availability requirements may not be fulfilled
+in many languages. Nevertheless, some linguis-
+tic complexity indices are language independent,
+such as the commonly-used “word rarity” measure,
+which facilitates extending our approach to other
+languages. Moreover, our approach relies on the
+effectiveness of specific linguistic complexity in-
+dices for target tasks and datasets employed for
+evaluation; different linguistic complexity indices
+may not capture all aspects of linguistic complex-
+ity and may yield different results for the same
+task or dataset. In addition, the incorporation of
+linguistic complexity indices and the generation
+of data-driven curricula can introduce additional
+computational overhead during the training process.
+Finally, our approach does not provide insights into
+the the interactions between linguistic indices dur-
+ing training.
+
+References
+
+Sweta Agrawal and Marine Carpuat. 2022. An imita-
+tion learning curriculum for text editing with non-
+autoregressive models. In Proceedings of the 60th
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 7550—
+7563, Dublin, Ireland. Association for Computational
+Linguistics.
+
+Hadi Amiri. 2019. Neural self-training through spaced
+repetition. In Proceedings of the 2019 Conference
+of the North American Chapter of the Association
+for Computational Linguistics: Human Language
+Technologies, Volume 1 (Long and Short Papers),
+pages 21-31, Minneapolis, Minnesota. Association
+for Computational Linguistics.
+
+Hadi Amiri, Timothy Miller, and Guergana Savova.
+2017. Repeat before forgetting: Spaced repetition
+for efficient and effective training of neural networks.
+In Proceedings of the 2017 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+2401-2410.
+
+Devansh Arpit, Stanistaw Jastrzebski, Nicolas Ballas,
+David Krueger, Emmanuel Bengio, Maxinder S Kan-
+wal, Tegan Maharaj, Asja Fischer, Aaron Courville,
+Yoshua Bengio, et al. 2017. A closer look at mem-
+orization in deep networks. In International confer-
+ence on machine learning, pages 233-242. PMLR.
+
+Yoshua Bengio, Jérome Louradour, Ronan Collobert,
+and Jason Weston. 2009. Curriculum learning. In
+ACM International Conference Proceeding Series,
+volume 382, pages 1-8, New York, New York, USA.
+ACM Press.
+
+Samuel R Bowman, Gabor Angeli, Christopher Potts,
+and Christopher D Manning. 2015. A large annotated
+corpus for learning natural language inference. arXiv
+preprint arXiv: 1508.05326.
+
+Bram Bulté and Alex Housen. 2012. Defining and op-
+erationalising 12 complexity. Dimensions of L2 per-
+formance and proficiency: Complexity, accuracy and
+fluency in SLA, pages 23-46.
+
+Thibault Castells, Philippe Weinzaepfel, and Jerome
+Revaud. 2020. Superloss: A generic loss for robust
+curriculum learning. Advances in Neural Information
+Processing Systems, 33:4308—4319.
+
+Birgit Harley and Mary Lou King. 1989. Verb lexis in
+the written compositions of young 12 learners. Stud-
+ies in Second Language Acquisition, 11(4):415—439.
+
+Alex Housen, Bastien De Clercq, Folkert Kuiken, and
+Ineke Vedder. 2019. Multiple approaches to complex-
+ity in second language research. Second language
+research, 35(1):3-21.
+
+Kenneth Hyltenstam. 1988. Lexical characteristics
+of near-native second-language learners of swedish.
+Journal of Multilingual & Multicultural Develop-
+ment, 9(1-2):67-84.
+
+Borna Jafarpour, Dawn Sepehr, and Nick Pogrebnyakov.
+2021. Active curriculum learning. In Proceedings
+of the First Workshop on Interactive Learning for
+Natural Language Processing, pages 40-45.
+
+Ekaterina Kochmar and Ted Briscoe. 2014. Detecting
+learner errors in the choice of content words using
+compositional distributional semantics. In Proceed-
+ings of COLING 2014, the 25th International Con-
+ference on Computational Linguistics: Technical Pa-
+pers, pages 1740-1751.
+
+Julia Kreutzer, David Vilar, and Artem Sokolov. 2021.
+Bandits don’t follow rules: Balancing multi-facet
+machine translation with multi-armed bandits. In
+Findings of the Association for Computational Lin-
+guistics: EMNLP 2021, pages 3190-3204, Punta
+Cana, Dominican Republic. Association for Compu-
+tational Linguistics.
+
+M Kumar, Benjamin Packer, and Daphne Koller. 2010.
+Self-paced learning for latent variable models. Ad-
+vances in neural information processing systems,
+
+23:1189-1197.
+
+Michael Steinbach George Karypis Vipin Kumar,
+M Steinbach, and G Karypis. 2000. A comparison
+of document clustering techniques. Department of
+Computer Science and Engineering, University of
+Minnesota.
+
+John P Lalor and Hong Yu. 2020. Dynamic data selec-
+tion for curriculum learning via ability estimation. In
+Proceedings of the Conference on Empirical Meth-
+ods in Natural Language Processing. Conference on
+Empirical Methods in Natural Language Processing,
+volume 2020, page 545. NIH Public Access.
+
+
+Bruce W Lee, Yoo Sung Jang, and Jason Lee. 2021.
+Pushing on text readability assessment: A trans-
+former meets handcrafted linguistic features. In Pro-
+ceedings of the 2021 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 10669—
+10686.
+
+Moira Linnarud. 1986. Lexis in composition: A perfor-
+mance analysis of Swedish learners’ written English.
+
+74. CWK Gleerup.
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Dangi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. arXiv preprint arXiv: 1907.11692.
+
+Ilya Loshchilov and Frank Hutter. 2018. Decoupled
+weight decay regularization. In International Confer-
+ence on Learning Representations.
+
+Xiaofei Lu. 2010. Automatic analysis of syntactic com-
+plexity in second language writing. International
+Journal of Corpus Linguistics, 15:474-496.
+
+Xiaofei Lu. 2012. The Relationship of Lexical Rich-
+ness to the Quality of ESL Learners’ Oral Narratives.
+Source: The Modern Language Journal, 96(2):190—
+208.
+
+Adyasha Maharana and Mohit Bansal. 2022. On cur-
+riculum learning for commonsense reasoning. In
+Proceedings of the 2022 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+pages 983-992, Seattle, United States. Association
+for Computational Linguistics.
+
+David Malvern, Brian Richards, Ngoni Chipere, and
+Pilar Duran. 2004. Lexical diversity and language
+development. Springer.
+
+Erica McClure. 1991. A comparison of lexical strategies
+in 11 and 12 written english narratives. Pragmatics
+and language learning, 2:141-154.
+
+Gerard McKee, David Malvern, and Brian Richards.
+2000. Measuring vocabulary diversity using dedi-
+cated software. Literary and linguistic computing,
+15(3):323-338.
+
+Changping Meng, Muhao Chen, Jie Mao, and Jennifer
+Neville. 2020. Readnet: A hierarchical transformer
+framework for web article readability analysis. In Eu-
+ropean Conference on Information Retrieval, pages
+33-49. Springer.
+
+Tasnim Mohiuddin, Philipp Koehn, Vishrav Chaudhary,
+James Cross, Shruti Bhosale, and Shafiq Joty. 2022.
+Data selection curriculum for neural machine trans-
+lation. In Findings of the Association for Computa-
+tional Linguistics: EMNLP 2022, Online. Associa-
+tion for Computational Linguistics.
+
+Yixin Nie, Adina Williams, Emily Dinan, Mohit Bansal,
+Jason Weston, and Douwe Kiela. 2020. Adversarial
+nli: A new benchmark for natural language under-
+standing. In Proceedings of the 58th Annual Meet-
+ing of the Association for Computational Linguistics,
+pages 4885-4901.
+
+Joel Nishimura. 2018. Critically slow learning in flash-
+card learning models. Chaos, 28(8):083115.
+
+Felicity O’ Dell, John Read, Michael McCarthy, et al.
+2000. Assessing vocabulary. Cambridge university
+press.
+
+Lourdes Ortega. 2003. Syntactic complexity measures
+and their relationship to 12 proficiency: A research
+synthesis of college-level 12 writing. Applied linguis-
+tics, 24(4):492-5 18.
+
+Emmanouil Antonios Platanios, Otilia Stretcu, Graham
+Neubig, Barnabas Poczos, and Tom M Mitchell. 2019.
+Competence-based curriculum learning for neural
+machine translation. In Proceedings of the Confer-
+ence of the North American Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies, NAACL-HLT, pages 1162-1172.
+
+FJ Richards. 1959. A flexible growth function for empir-
+ical use. Journal of experimental Botany, 10(2):290-
+301.
+
+Burr Settles and Brendan Meeder. 2016. A trainable
+spaced repetition model for language learning. In
+Proceedings of the 54th annual meeting of the associ-
+ation for computational linguistics (volume 1: Long
+papers), pages 1848-1858.
+
+Richard Socher, Alex Perelygin, Jean Wu, Jason
+Chuang, Christopher D Manning, Andrew Y Ng, and
+Christopher Potts. 2013. Recursive deep models for
+semantic compositionality over a sentiment treebank.
+In Proceedings of the 2013 conference on empiri-
+cal methods in natural language processing, pages
+1631-1642.
+
+Behzad Tabibian, Utkarsh Upadhyay, Abir De, Ali
+Zarezade, Bernhard Schélkopf, and Manuel Gomez-
+Rodriguez. 2019. Enhancing human learning via
+spaced repetition optimization. Proc. Natl. Acad. Sci.
+U.S. A., 116(10):3988-3993.
+
+Mildred C Templin. 1957. Certain language skills in
+children: Their development and interrelationships,
+
+volume 10. JSTOR.
+
+Nidhi Vakil and Hadi Amiri. 2023. Multiview
+competence-based curriculum learning for graph neu-
+ral networks. In Proceedings of the 61th Annual
+Meeting of the Association for Computational Lin-
+guistics (ACL 2023). Association for Computational
+Linguistics.
+
+Frans van der Sluis and Egon L van den Broek. 2010.
+Using complexity measures in information retrieval.
+In Proceedings of the third symposium on information
+interaction in context, pages 383-388.
+
+
+Alex Wang, Amanpreet Singh, Julian Michael, Felix
+Hill, Omer Levy, and Samuel R Bowman. 2018.
+Glue: A multi-task benchmark and analysis platform
+for natural language understanding. arXiv preprint
+arXiv: 1804.07461.
+
+Xinyi Wang, Hieu Pham, Paul Michel, Antonios Anas-
+tasopoulos, Jaime Carbonell, and Graham Neubig.
+2020. Optimizing data usage via differentiable re-
+wards. In International Conference on Machine
+Learning, pages 9983-9995. PMLR.
+
+Alex Warstadt, Amanpreet Singh, and Samuel R Bow-
+man. 2019. Neural network acceptability judgments.
+Transactions of the Association for Computational
+Linguistics, 7:625-641.
+
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+Chaumond, Clement Delangue, Anthony Moi, Pier-
+ric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz,
+et al. 2020. Transformers: State-of-the-art natural
+language processing. In Proceedings of the 2020 con-
+ference on empirical methods in natural language
+Processing: system demonstrations, pages 38-45.
+
+Kate Wolfe-Quintero, Shunji Inagaki, and Hae- Young
+Kim. 1998. Second language development in writing:
+Measures of fluency, accuracy, and complexity. Hon-
+olulu, HI: University of Hawai’i, Second Language
+Teaching & Curriculum Center.
+
+Xiaoxia Wu, Ethan Dyer, and Behnam Neyshabur. 2021.
+When do curricula work? In International Confer-
+ence on Learning Representations (ICLR).
+
+Benfeng Xu, Licheng Zhang, Zhendong Mao, Quan
+Wang, Hongtao Xie, and Yongdong Zhang. 2020.
+Curriculum learning for natural language understand-
+ing. In Proceedings of the 58th Annual Meeting of
+the Association for Computational Linguistics, pages
+6095-6104.
+
+Helen Yannakoudakis, Ted Briscoe, and Ben Medlock.
+2011. A new dataset and method for automatically
+grading esol texts. In Proceedings of the 49th annual
+meeting of the association for computational linguis-
+tics: human language technologies, pages 180-189.
+
+Guoxing Yu. 2010. Lexical diversity in writing and
+speaking task performances. Applied linguistics,
+31(2):236-259.
+
+Chiyuan Zhang, Samy Bengio, Moritz Hardt, Benjamin
+Recht, and Oriol Vinyals. 2017. Understanding deep
+learning requires rethinking generalization. In 5th
+International Conference on Learning Representa-
+tions, ICLR 2017, Toulon, France, April 24-26, 2017,
+Conference Track Proceedings. OpenReview.net.
+
+Xuan Zhang, Pamela Shapiro, Gaurav Kumar, Paul Mc-
+Namee, Marine Carpuat, and Kevin Duh. 2019. Cur-
+riculum learning for domain adaptation in neural ma-
+chine translation. In Proceedings of NAACL-HLT,
+pages 1903-1915.
+
+Tianyi Zhou, Shengjie Wang, and Jeffrey Bilmes. 2020.
+Curriculum learning by dynamic instance hardness.
+Advances in Neural Information Processing Systems,
+
+33:8602-8613.
+
+
+A List of indices
+
+# Unique words
+
+# Unique lexical words
+
+# Total words
+
+# Total lexical words
+
+Lexical density
+
+Lexical sophistication (unique)
+
+Verb sophistication (squared numerator)
+Type-token ratio (TTR)
+
+Corrected TTR (sqrt(2N) denominator)
+Log TTR
+
+Noun variation
+
+Adverb variation
+
+D Measure
+
+Verb variation with squared numerator
+Verb variation over all lexical words
+Unique words in random k tokens
+
+# Unique sophisticated words
+
+# Unique sophisticated lexical words
+
+# Total sophisticated words
+
+# Total sophisticated lexical words
+
+Lexical sophistication (total)
+
+Verb sophistication
+
+Verb sophistication (sqrt denominator)
+Mean TTR of all k word segments
+
+Root TTR (sqrt(N) denominator)
+
+Uber index
+
+Adjective variation
+
+(Ajd + Adv) variation
+
+Ratio of unique verbs
+
+Verb variation with (sqrt(2N)) denominator
+Unique words in first k tokens
+
+Unique words in random sequence of k tokens
+
+Table 3: Lexical indices
+
+# Words
+
+# Verb phrases
+
+# T-units
+
+# Complex T-units
+
+# Complex nominals
+Mean length of T-unit
+Clauses per sentence
+Clauses per T-unit
+
+Dependent clause per T-unit
+Complex T-unit ratio
+Coordinate phrases per clause
+
+# Sentences
+
+# Clauses
+
+# Dependent clauses
+
+# Coordinate phrases
+
+Mean length of sentence
+Mean unit of clause
+
+Verb phrases per T-unit
+Dependent clause ratio
+T-units per sentence
+Coordinate phrases per T-unit
+Complex nominals per T-unit
+
+Complex nominals per clause
+
+Table 4: Syntactic indices
+
+In our work we make use indices from Lu (2010), Lu (2012), and Lee et al. (2021). Table 3 lists the
+lexical indices (33 indices) and table 4 lists the syntactic indices (23 indices) that we use. For their full
+descriptions please refer to Lu (2010) and Lu (2012). In this section, we provide descriptions of a few
+relevant indices. Please refer to Lee et al. (2021) for the comprehensive list of lingfeat (185 indices)
+indices.
+
+TTR is the ratio of unique words in the text. D-measure is a modification to TTR that is not biased
+by sample size. Lexical words are nouns, verbs, adjectives, and adverbs. Sophisticated words are the
+unconventional words. We consider words beyond the 2000 most frequent words in the American National
+Corpus as sophisticated. Uber index is a transformation of TTR. SubtlexUS CDlow is a word frequency
+measure, specifically, “document frequency“ of words starting with a lower case letter.
+
+
+B_ Clustering p
+
+Mean absolute difference
+
+- 0.07 - 0.07
+0.06 0.06
+0.05 0.05
+0.04 0.04
+0.03 0.03
+0.02 0.02
+0.01 0.01
+0.00 0.00
+
+(b) Clustered differences map.
+
+(a) Pair-wise differences between p
+
+Figure 5: Figure (a) shows mean absolute difference between p of each pair of linguistic indices, averaged over the
+whole training. Figure (b) is created by re-ordering the rows and columns of (a), such that groups of indices have
+minimal difference between them.
+
+p Progression p Progression p Progression
+
+0? 0.04
+
+o.1 0.01 ae ee oo ReA]a nen
+
+0.0 ll ——_ CC 0.00 i ee ee ey
+26% INI AN SSe]=—___— 0.02 { —— Entity Density Feats+Lexical Feats =
+
+0.01
+
+—— Tree Structure Feats+POS Feats
+
+Q Lexical Feats+Entity Density Feats — Tree Structure Feats+Lexical Feats
+-0.2 Entity Grid Feats+Lexical Feats 0.02 | —— Syntactic Feats+Entity Grid Feats 004) ——. Tree Structure Feats+Phrasal Feats
+Phrasal Feats+Knowledge Feats “| —— Entity Density Feats+POS Feats -0.06 | —— Entity Grid Feats+Lexical Feats
+
+Syntactic Feats+POS Feats
+Syntactic Feats+Knowledge Feats
+
+ELET
+
+Tree Structure Feats+Entity Density Feats
+
+Training iteration
+
+20 40 60 80
+
+Ss
+
+100
+
+0.03
+
+-0.04
+
+—— Entity Grid Feats+POS Feats
+—— Entity Grid Feats+Syntactic Feats
+—— Knowledge Feats
+
+0.0 25 5.0 75 100 125 15.0 17.5
+
+Training iterations
+
+—— POS Feats+Syntactic Feats
+—— Syntactic Feats+Phrasal Feats
+
+-0.10; —— POS Feats+Entity Grid Feats
+
+0 10 20 30 40
+
+Training iterations
+
+(a) CoLA p (c) SST-2 p
+
+Balanced Accuracy Progression
+
+(b) SNLI p
+Balanced Accuracy Progression
+
+Balanced Accuracy Progression
+o o o
+© ores: © 0.92 © 0.96 Y er CaS my ~
+SF 080 > 020 D o04 TZ 4k J =X
+O® e) [v) on :
+u) u) Le) ed
+o 0.75 o 0.88 o 0.92
+BS 0.70 BS 0.86 B 0.90
+iS) iS) iS)
+Pa 0.65 Cc 084 C 088
+o o oO
+oo oa 75 0.86
+a oO 40 60 80 100 a 0.0 25 5.0 eS 10.0 12.5 15.0 175 a i) 20 40
+
+20 10 30
+Training iterations Training iterations Training iterations
+
+(f) SST-2 Balanced Accuracy
+
+(d) CoLA Balanced Accuracy (e) SNLI Balanced Accuracy
+
+Figure 6: The progression of the estimated importance factors p, and balanced accuracy for groups of linguistic
+indices. Each pair of figures (a) and (d), (b) and (e), (c) and (f) share the legend. The solid line is the mean value of
+the group of lines, and the shaded area is the 95% confidence interval.
+
+We observe that several indices follow the same patterns. Therefore, we devise a method to group
+indices that follow the same pattern of p. We compute the mean absolute difference between p of each
+pair of linguistic indices. Then, we cluster the groups of indices that all have a minimum distance
+between them. Appendix B displays the effect of clustering. Note that the common trends among lines in
+Figures 6a, 6b, and 6c are because they are all governed by the trend of the validation loss (using both
+optimization and correlation approaches). Figures 6d, 6e, and 6f show the trend of balanced accuracy for
+the same groups. The grouped balanced accuracy has a very high variance. It shows that indices with
+similar p do not have similar values of balanced accuracy. Moreover, it shows that indices with the highest
+p do not necessarily have the highest mean balanced accuracy. Furthermore, indices that have p = 0
+perform comparably to other indices, indicating that the model performs well according to such linguistic
+
+
+indices, despite them not being correlated with loss.
+
+Figure 5 illustrates the process of clustering together linguistic indices based on their matching p
+curves. We cluster the indices using hierarchical clustering with complete linkage using the flat clustering
+method??.
+
+C_ Linguistic Complexity Indices
+
+We consider linguistic complexity in terms of variability and sophistication in productive vocabulary
+and grammatical structures in textual content. We employ a characterization of such complexity based
+on existing findings in language acquisition research (Wolfe-Quintero et al., 1998; Lu, 2010, 2012).
+Specifically, we obtain 56 complexity measures from Lu (2010) and Lu (2012), including lexical and
+syntactic measures. Additionally, we use 185 linguistic features from the lingfeat library (Lee et al.,
+2021), including semantic, lexical, syntactic, discourse, and traditional features. In total, we use 241
+indices. For inputs that consist of a pair of sentences, we concatenate the indices for a total of 482 indices.
+
+C.1 Lexical Complexity
+
+In terms of lexical complexity, we consider three dimensions: lexical density, sophistication, and variation
+described below:
+
+Lexical density: is quantified by the ratio of the number of open-class words to the total number of
+words in a given text. Texts with higher lexical density are expected to be more complex as they contain
+larger amounts of information-carrying words.
+
+Lexical sophistication: measures the proportion of sophisticated—telatively unusual or advanced—
+words in the input text (O’Dell et al., 2000), e.g., words not in the top K (K= 5000) frequent words in
+the target dataset or language. Example indices include the ratio of the number of sophisticated lexical
+words (Linnarud, 1986; Hyltenstam, 1988), sophisticated word types (Wolfe-Quintero et al., 1998) and
+sophisticated verb types (Harley and King, 1989) in texts, which include several variations as reported
+in Appendix A, Table 3. We use the top K most frequent words of each dataset and consider different
+inflections of the same lemma as one type for computing lexical sophistication.
+
+Lexical Variation: refers to the diversity of vocabulary in a given text. Examples of such variations
+include type-token ratio (Templin, 1957) which is the ratio of the number of word types to the number of
+words in the text and several different variations of this metric (Malvern et al., 2004; McKee et al., 2000;
+McClure, 1991) including D-measure (Malvern et al., 2004), which determines lexical variation of an
+input text by finding the curve that best matches the actual curve of type-token ratio against tokens of the
+input.
+
+C.2 Syntactic Complexity
+
+Syntactic complexity determines variability and sophistication with respect to grammatical structures.
+Simple sentences such as “the mouse ate the cheese” can be converted to their linguistically-complex
+counterparts, e.g., “the mouse the cat the dog bit chased ate the cheese,’ which are still well-formed
+sentences but force readers to suspend their partial understanding of the entire sentence by encountering
+subordinate clauses that substantially increase the cognitive load of the sentences. We employ syntactic
+complexity measures that quantify the length of production units at the clausal, sentential, or T-unit
+levels; indices that reflect the amount of subordination, e.g., T-unit complexity ratio (clauses per T-unit) or
+dependent clause ratio (dependent clauses per clause); indices that quantify the amount of coordination,
+e.g., number of coordinate phrases per clause, T-unit or complex T-unit; as well as those that quantify
+the range of surface and particular syntactic and morphological structures (e.g., frequency and variety
+of tensed forms or extent of affixation) (Wolfe-Quintero et al., 1998; Ortega, 2003). See Appendix A,
+Table 3.
+
+“https ://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy. linkage.html
+3https ://docs.scipy.org/doc/scipy/reference/generated/scipy.cluster.hierarchy.fcluster.html
+
+
+D_ Full results
+
+Tables 5 and 6 show the overall performance and performance balanced by loss. Our Ling-CL approach
+results in 1.3 absolute points improvement in accuracy over the best-performing baseline averaged across
+tasks, balanced by loss.
+
+ANLI COLA RTE SNLI SST2 AN-Pairs GED Average
+Ling-CL [NegSig] 49.6+044 62.8+4019 81.0+010 90.0+010 95.0+006 74.0+104 71.64037 74.9 40.33
+Ling-CL [Gauss] 51.5+039 645+4035 79.8402: 90.4400: 95.2+000 75.0+208 71.94020 75.5 40.46
+Ling-CL [Sig] 51.6+4017 65.1407 8194021 90.2+007 95.14011 7454260 71.8+005 75.7 +056
+Loss-CL [NegSig] 52.7+003 63.5+4066 80.5+036 90.5+012 95.0+000 69.34154 72.24003 74.8 40.39
+Loss-CL [Gauss] 51.94006 65.7416 82.3+4108 90.34038 94.7 +01 72.9 4104 72.1 +008 75.7 +063
+Loss-CL [Sig] S5l.14120 65.0+057 7894126 9044026 9494006 7434193 7174015 75.2 40.78
+Sampling 49.34033 64.04102 7844070 90.34014 94.6+4010 72.94417 71.1 +4007 744+093
+Competence 50.7 +003 63.2406 77.8+4073 90.3+4017 9504011 7454052 71.2+010 74.7 +033
+SL-CL S1.14095 63.6404 80.34235 90.1 4011 9494006 69.3 4156 71.94012 74.5 40.80
+WR-CL 51.9+4016 6454100 80.0+054 90.2+4018 9444023 6464417 71.7+032 73.9 +0.94
+Concat 52.2+030 65.24+033 81.84090 90.64000 94.6401 72.4426 71.7+021 75.5 40.64
+SuperLoss 51.7402: 6434099 8054104 9054015 94.8+4013  67.74208 71.7 +010 74.5 +067
+Data Selection 48.5 +4094 5944003 79.2+090 89.8+012 94.24+017 7244156 71.14013 73.5 40.55
+No-CL 514+4006 64.1 4042 814+077 904+017 94.9+010 71.9+208 72.0+040 75.2 +0.57
+
+Table 5: Overall performance of each approach. Unlike Tables | and 6, this table presents the standard un-balanced
+accuracy.
+
+ANLI COLA RTE SNLI SST2 AN-Pairs GED Average
+Ling-CL [NegSig] 23.2446: 27.1+40066 4544623 26.3 +044 25.74131 36.7 +498 73.94083 36.9 +4272
+Ling-CL [Gauss] 21.04189 26.7+4162 37.1 4052 42.9+4012 22.7429: 34.7 4692 73.94036 37.0 +205
+Ling-CL [Sig] 22.2+051 2644014 3854027 35.2+899 25.0+058 38.44326 746+011 37.2 +1.98
+Loss-CL [NegSig] 20.9+159 26.7 +4042 37.74103 33.84837 23.84313 29.84376 73.4+084 35.2 42.73
+Loss-CL [Sig] 1954021 27.6+051 3634243 3464758 2424359 316+4195 72.6400: 35.2 +233
+Loss-CL [Gauss] 20.6+099 26.34129 40.84389 26.2+018 23.14163 31.7 4346 73.04+038 34.5 41.69
+Sampling 19.0+4012 26.2+4036 32.9+4075 42.8+4050 2414357 3364109 72.8+144 35.9 +112
+Competence 2154055 26.8+4184 3694257 27.04+034 27.14063 3554201 7344106 35.5 41.29
+SL-CL 21.3 4028 26.24000 31.6+058 3464835 26.74000 32.34259 7484077 35.4418
+WR-CL 19.3 +052 264+4069 35.7+051 2614003 2424126 29.00+073 73.5406 33.5 40.62
+SuperLoss 20.7 4177 29.0425: 35.6+099 26.0+038 23.94083 25.9+4228 72.84003 33.4 41.26
+Concat 21.7 4017 28.1+4085 37.8+4309 26.64033 27.4+4029 33.44120 72.54030 35.4 +0.9
+Data Selection 19.5 +4076 25.7+4028 33.84223 25.9+4065 2264124 3064201 7434028 33.2 + 1.06
+No-CL 20.1 4141 28.1+4085 37.8+4309 2664033 27.4+4029 31.8+4028 72.24+046 34.9 +0.96
+
+Table 6: Balanced accuracy by loss.
+
+
+E_ Index Importance Changes
+
+Index Change Stages Magnitude
+Corrected TTR Medium to late 8.70%
+AN-Pairs Ratio of nx entity grid transitions Medium to late 7.89%
+Semantic Richness Medium to late 7.86%
+Ratio of nx entity grid transitions Medium to late 3.18%
+GED Lexical sophistication Medium to late 2.26%
+Ratio of Coordinating Conjunction to Adjectives | Medium to late 1.84%
+Ratio of Subordinating Conjunction to Adverbs Early to late 1.00%
+SNLI Noun-subject transitions Early to late 0.79%
+Number of topics (Weebit-based) Early to late 0.77%
+Verb sophistication Medium to late 0.98%
+ANLI T-unit length Medium to late 0.96%
+Log tokens over log sentences Early tomedium 0.94%
+Object-noun transitions Medium to late 0.78%
+CoLA TTR Early to late 0.75%
+# Clauses Medium to late 0.75%
+Adverb to adjective ratio Early to late 3.30%
+RTE # T-units Early to late 3.27%
+Mean sentence length Early to late 3.15%
+Noun-subject transitions Early to late 1.76%
+SST-2 Coordinating conjunction per sentence Early to late 1.75%
+Verbs per token Medium to late 1.72%
+
+Table 7 shows indices with maximum change in their ps between any two stages. Only the relative
+differences and ranking of p values are important. Therefore, the table displays relative changes in the
+magnitude of the importance factors. The indices with a large change magnitude indicate that they are
+either influential at an early stage of training and drop in importance at the later stage, or vise versa. See
+
+Table 7: Top three moving linguistic indices.
+
+our analysis on these indices in §3.7.

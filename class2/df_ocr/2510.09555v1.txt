@@ -1,0 +1,2123 @@
+arX1v:2510.09555v1 [cs.CL] 10 Oct 2025
+
+A Comprehensive Evaluation of Multilingual Chain-of-Thought Reasoning:
+Performance, Consistency, and Faithfulness Across Languages
+
+Raoyuan Zhao’, Yihong Liu’, Hinrich Schiitze, and Michael A. Hedderich
+
+Center for Information and Language Processing, LMU Munich
+Munich Center for Machine Learning (MCML)
+{rzhao, yihong, hedderich}@cis.1lmu.de
+
+Abstract
+
+Large reasoning models (LRMs) increasingly
+rely on step-by-step Chain-of-Thought (CoT)
+reasoning to improve task performance, par-
+ticularly in high-resource languages such as
+English. While recent work has examined final-
+answer accuracy in multilingual settings, the
+thinking traces themselves, i.e., the intermedi-
+ate steps that lead to the final answer, remain un-
+derexplored. In this paper, we present the first
+comprehensive study of multilingual CoT rea-
+soning, evaluating three key dimensions: per-
+formance, consistency, and faithfulness. We be-
+gin by measuring language compliance, answer
+accuracy, and answer consistency when LRMs
+are explicitly instructed or prompt-hacked to
+think in a target language, revealing strong lan-
+guage preferences and divergent performance
+across languages. Next, we assess crosslingual
+consistency of thinking traces by interchang-
+ing them between languages. We find that
+the quality and effectiveness of thinking traces
+vary substantially depending on the prompt lan-
+guage. Finally, we adapt perturbation-based
+techniques — i.e., truncation and error injection
+— to probe the faithfulness of thinking traces
+across languages, showing that models rely on
+traces to varying degrees. We release our code
+and data to support future research. !
+
+1 Introduction
+
+CoT prompting has emerged as a widely adopted
+technique for eliciting step-by-step thinking traces
+from LRMs (Wei et al., 2022; Kojima et al., 2022;
+Zhou et al., 2023). These traces have been shown
+to substantially improve model performance on
+complex reasoning tasks, while also offering an in-
+terpretable window for understanding the model’s
+internal decision-making process (Grattafiori et al.,
+2024; OpenAI et al., 2024; Yang et al., 2025;
+DeepSeek-AI et al., 2025; Xu et al., 2025).
+
+“Equal contribution.
+‘https://github.com/mainIp/Multilingual-CoT-Evaluation
+
+While most research on CoT reasoning has fo-
+cused on English, the behavior of thinking traces
+in multilingual settings remains underexplored. A
+very recent line of studies has begun to examine
+LRM performance across languages, including sce-
+narios where models are explicitly instructed or
+“forced” to reason in a specific language (Yong
+et al., 2025; Wang et al., 2025b; Qi et al., 2025).
+However, these efforts largely concentrate on final-
+answer accuracy, leaving open critical questions
+about the reasoning process itself, particularly: (1)
+How consistent are the thinking traces across lan-
+guages when answering semantically equivalent
+questions? and (2) To what extent are thinking
+traces faithful in languages other than English,
+especially the low-resource ones?
+
+To address these gaps, we conduct the first com-
+prehensive evaluation of multilingual CoT reason-
+ing across a diverse set of LRMs. Our study fo-
+cuses on three core dimensions: performance, con-
+sistency, and faithfulness. In §4, we analyze lan-
+guage compliance, final-answer accuracy, and final-
+answer consistency when models are either explic-
+itly instructed or prompt-hacked to think in a lan-
+guage aligned with the input. We find that LRMs
+exhibit strong language preferences during reason-
+ing, and that performance varies substantially de-
+pending on the thinking language. To better un-
+derstand these disparities, §5 introduces a novel
+method for interchanging thinking traces across
+languages. By substituting a thinking trace from
+one language into another, we assess whether rea-
+soning is semantically aligned and transferable.
+Our results show that thinking traces are often in-
+consistent across languages, with quality varying
+largely by language. Surprisingly, we also find
+that final-answer accuracy is influenced not only
+by the thinking trace itself but also by the prompt
+language and thinking language. In §6, we evaluate
+the faithfulness of thinking traces. Extending prior
+monolingual work (Lanham et al., 2023), we apply
+
+
+perturbation-based interventions — such as trunca-
+tion and error injection — and measure how these
+changes impact model predictions. We find that
+models rely on their thinking traces to varying de-
+grees across languages, suggesting that faithfulness
+is not uniformly preserved in multilingual contexts.
+
+Overall, we make the following contributions:
+(i) We present the first comprehensive evaluation
+of multilingual CoT reasoning, covering three core
+dimensions — performance, consistency, and faith-
+fulness. (ii) We propose a novel strategy: crosslin-
+gual thinking trace interchanging, to measure the
+semantic consistency of thinking traces across lan-
+guages. (iii) We find that consistency of thinking
+traces varies across languages, and even with iden-
+tical traces, accuracy is influenced by the language
+of the prompt. (iv) We show that languages other
+than English exhibit greater reliance on thinking
+traces, and that this reliance decreases as model
+scale increases. (v) We will release our code to
+facilitate future research on the evaluation of con-
+sistency and faithfulness in multilingual reasoning.
+
+2 Related Work
+
+Faithfulness in CoT Reasoning CoT prompt-
+ing (Wei et al., 2022) has been shown to substan-
+tially improve the performance of LRMs across a
+variety of complex tasks (OpenAI et al., 2024; Snell
+et al., 2024; Muennighoff et al., 2025; DeepSeek-
+Al et al., 2025). Despite these gains, recent stud-
+ies have raised concerns about the faithfulness
+of the generated thinking traces, i.e., whether
+the model’s stated CoT truly reflects its internal
+decision-making process (Lyu et al., 2023; Turpin
+et al., 2023; Lanham et al., 2023; Tanneru et al.,
+2024; Arcuschin et al., 2025). One line of work
+evaluates faithfulness by introducing biases into the
+prompt, such as reordering multiple-choice options
+or injecting misleading arguments, and examin-
+ing whether the model’s answer changes accord-
+ingly (Turpin et al., 2023; Wang et al., 2024; Chua
+et al., 2025). Another line of work manipulates the
+thinking trace itself, e.g., by truncating it or insert-
+ing errors, and observes how such changes affect
+the model’s prediction (Lanham et al., 2023; Yee
+et al., 2024; Xiong et al., 2025). These studies gen-
+erally reveal that models may produce a thinking
+trace that is disconnected from the actual decision
+path leading to the answer. Our work builds on this
+latter line by extending it to multilingual settings.
+We manipulate thinking traces across languages,
+
+addressing the gap that existing studies evaluate
+faithfulness almost exclusively in English.
+
+Evaluation of Multilingual Reasoning A grow-
+ing body of work has evaluated CoT reasoning
+across languages (Shi et al., 2023a; Huang et al.,
+2023; Qin et al., 2023; Ahuja et al., 2023), showing
+that CoT prompting improves performance on a
+variety of multilingual tasks. More recent studies
+explore how manipulating the thinking trace, such
+as increasing the generation budget at test time or
+enforcing language-specific reasoning, can further
+affect model performance (Yong et al., 2025; Wang
+et al., 2025b; Qi et al., 2025). These works high-
+light that models often benefit from reasoning in
+high-resource languages like English or Chinese, or
+from being given more space to reason. However,
+existing multilingual reasoning evaluation studies
+almost exclusively focus on performance, overlook-
+ing whether models behave consistently across lan-
+guages — that is, whether they produce correct an-
+swers consistently and whether the thinking traces
+themselves are semantically equivalent across lan-
+guages. Such questions are especially important
+as LRMs are increasingly deployed in multilingual
+contexts (Ghosh et al., 2025). Our work moves be-
+yond performance to offer a systematic evaluation
+of multilingual CoT reasoning along two additional
+dimensions: consistency and faithfulness, provid-
+ing a complementary perspective on how reasoning
+behavior generalizes across languages.
+
+3 Experimental Setup
+3.1 Models
+
+We evaluate a wide range of open-source LRMs of
+different model sizes. We consider the distilled
+versions of DeepSeek-R1 (DeepSeek-AI et al.,
+2025): DeepSeek-R1-Distill-Qwen-{1.5B, 7B,
+14B, 32B} whose base models are from
+Qwen2.5 family (Qwen Team et al., 2025)
+and DeepSeek-R1-Distill-Llama-{8B, 7B}
+whose base models are from Llama3 family
+(Grattafiori et al., 2024). Additionally, we con-
+sider two models from Qwen3 family (Yang et al.,
+2025): Qwen3-{8B, 32B}.
+
+3.2 Dataset
+
+MMMLU Multilingual MMLU (Hendrycks
+et al., 2021) is a large-scale benchmark of general
+knowledge across various domains, such as Human-
+ities and STEM, in a multiple-choice-question for-
+mat, covering 15 typologically different languages.
+
+
+MGSM_ Multilingual Grade School Math (Shi
+et al., 2023b) is a benchmark that contains 250
+grade-school math problems from the GSM8K
+(Cobbe et al., 2021) (originally in English) that are
+manually translated into 10 additional languages.
+
+3.3. Controlling Thinking Languages
+
+Our motivation is that the language used for reason-
+ing should match the language of the question, as
+users are very likely to prefer inspecting the reason-
+ing process in the same language they use to pose
+the query. Accordingly, we consider two strategies
+for controlling the thinking language, i.e., the lan-
+guage used in the thinking trace (text generated be-
+tween the special tokens <think> and </think>),
+to ensure it aligns with the prompt language, 1.e.,
+the language used in the original question.
+
+Explicit Instruction The first strategy appends
+an explicit instruction to the prompt, directly ask-
+ing the model to think in a particular language. For
+example, to elicit German reasoning, we insert the
+phrase “Bitte denken Sie immer auf Deutsch.”
+[“Please always think in German.”] into the prompt.
+While intuitive, this approach seems less reliable:
+models may still default to their preferred think-
+ing language, typically English, regardless of the
+instruction (Yong et al., 2025; Wang et al., 2025b).
+
+Prompt Hacking The second strategy uses
+prompt hacking, a more targeted method to steer
+the model’s language use (Schulhoff et al., 2023;
+Benjamin et al., 2024; Qi et al., 2025). Here, a
+short prefix in the desired language (e.g., “Auf
+Anfrage werde ich anfangen, auf Deutsch
+zu denken.” [“By Request, I will begin to think
+in German’’] is inserted directly after the <think>
+token. The model is then expected to generate the
+remainder of the thinking trace, until the </think>
+token. This approach has been shown to be more
+effective than explicit instructions, often leading
+to language-consistent CoT generation that aligns
+with the prefix (Yong et al., 2025; Qi et al., 2025).
+
+4 Language Compliance, Answer
+Accuracy, and Consistency
+
+In this section, we evaluate the multilingual reason-
+ing performance of LRMs under the two language
+control strategies introduced in §3.3. Using the
+metrics defined in §4.1, we assess each model’s
+language compliance, final-answer accuracy, and
+crosslingual answer consistency. These results, pre-
+sented and discussed in §4.2, allow us to examine
+
+the effectiveness of language control mechanisms
+and how the choice of thinking language influences
+model behavior. This multi-dimensional evalua-
+tion provides a foundation for our deeper analyses
+in later sections, particularly regarding reasoning
+consistency and faithfulness across languages.
+
+4.1 Evaluation Metrics
+
+Language Compliance Rate This metric mea-
+sures the proportion of text within the thinking
+trace — i.e., between the special tokens <think>
+and </think> — that is generated in the intended
+target language (the prompt language). To com-
+pute this, we first split each thinking trace into
+individual sentences and then identify the language
+of each sentence using GlotLID (Kargaran et al.,
+2023). We then compute the overall proportion of
+reasoning content generated in the corresponding
+prompt language, following prior work (Yong et al.,
+2025; Wang et al., 2025b; Qi et al., 2025),*
+
+Final Answer Accuracy This metric evaluates
+the correctness of the model’s final prediction:
+ACC(I) = ral yl 1 [(M(q!) = of)| where D is
+the dataset, MM (q!) the model prediction, and o! the
+gold answer for question 7. We compute accuracy
+independently for each language I.
+
+Final Answer Consistency This metric quanti-
+fies the crosslingual consistency of model predic-
+tions. Given the same question posed in two lan-
+guages, we evaluate whether the model produces
+the same and correct answer in both languages:
+
+ot AM(q,2)=0,7]
+0} VM(q,7)=0;?]
+
+SIP! Mg) =
+
+COM ba) = St ats
+
+Consistency is widely used as a metric in knowl-
+edge probing, factual knowledge recall, and cul-
+tural awareness evaluation (Jiang et al., 2020; Wang
+et al., 2025a; Zhao et al., 2025b; Liu et al., 2025;
+Zhao et al., 2025a).
+
+4.2 Results and Discussion
+
+Table | reports the accuracy and language compli-
+ance rates of the evaluated LRMs on MMMLU
+across languages. Figure | illustrates the consis-
+tency across languages for R1-Qwen-32B and R1-
+Llama-70B (see §A.1 for additional results).
+
+"In addition, we report the language usage distributions
+for English and Chinese across prompts in other languages, as
+well as token-level language distributions, in §A.1.
+
+
+Method Model ar bn de en es fr
+
+hi id it ja ko pt sw yo zh
+
+RI-Qwen-1.5B .25(.07) .24(.03) 350.24) 47.95) 32 (89) .35(.43)
+R1-Qwen-7B 24.69) .34(.20) .41(.95)  .58(.97) .42(.96) .42(.91)
+R1-Qwen-14B —.66(.78) .56 (02) .66(.17) .76(.97) .67(.48) 62 (.17)
+R1-Qwen-32B .65(.70) .54(.17) .70(.87) .78(.96) 71.38) .73 (.05)
+Qwen-14B 70.78) .69(.00) .74(.01) .77(.96) .75(.01) 72.01)
+Qwen-32B .63(.70) .51(.00) .76(.01) .81(.95) .63(.01) .68(.01)
+Ri-Llama-8B_ 39.88) 35.01) .50(.29) .69(.96) 49.53) .50 (.80)
+Ri-Llama-70B .76(.83) 51 (01) .78(.05)_.84(.95) 68 (09) _.76 (.10)
+
+Explicit
+Instruction
+
+28 (05)
+31 (.78)
+AT (.04)
+53 (.19)
+.70 (.00)
+58 (.00)
+52 (.02)
+65 (.04)
+
+2120) 30051) 24014) _.32 002) 29-81) 1940) 21 C12) _.37 085)
+52.92) .44(.90) .34(.83) 38.17) 41.97) 21.07) .26(.16) .54(.87)
+67 (17) 68.24) .65(.32) 66 (.05) 71.12) 32.08) 31.09) .67 (.85)
+72.05) .73(.50) 68.37) 70.15) .77(.08) .38(.40) 28.20) .74.(.88)
+.74(.01) .72(.00) .71(.00) .69(.00) .77(.01) .48(.02) .42(.07)_ .71 (67)
+58 (02) .66(.01) .64(.00) .64(.00) .64(.02) .43(.02) .33(.05) .78(.81)
+51(.20) 51.25) 410.57) .55(.06) .58(.60) .20(.21) .30(.15) .54(.92)
+166.12) .72(.02) .66(.29) .74(.03) .74(.04) .63(.06) .40(.09) _.76 (.86)
+
+RI-Qwen-1.5B .08(.75) .14(.97) .23(.82) 40(.97) .30(.90) 25.96)
+R1-Qwen-7B 29.66) .27(.92)_ .37(.95) .58(.97) .48(.96) 48 (.93)
+R1-Qwen-14B 61.73) 34.94) .60(.94) .72(.97) .65(.95) 68 (.97)
+R1-Qwen-32B .66(.78) .49(.91) .71(.97) .80(.96) .74(.96)_ .75 (.97)
+Qwen3-14B 62.73) .52(.91) .64(.89) .71(.96) 68 (.96) 64 (.94)
+Qwen3-32B 62.78) .65 (85) .67(.59) .80(.97) 55.42) .55 (.50)
+Ri-Llama-8B 32.88) .25(.81) .48(.87) .69(.94) .44(.95) .54(.94)
+R1-Llama-70B_ .70(.83) .62(.91) .76(.81) .86(.95)_.79(.78) _.78 (.93)
+
+Prompt
+Hacking
+
+“15 (86)
+29 (.84)
+36 (.77)
+52 (.80)
+54 (.76)
+73 (.67)
+43 (.87)
+75 (.73)
+
+22 (69) 31.94) .24(.56) 1040) .31(.65) .05(.66) .09(.73) .36(.89)
+54(.91) 42.96) 340.74) 230.61) 430.97) .04(.76) .08(.97) .55(.91)
+58 (98) .68(.97) 61.93) .65(.97) .65(.98) .27(.95) 23.75) .65 (.92)
+73.98) .70(.96) .67(.73) .70(.97) .73(.98) .35(.94) .25(.94) .75 (85)
+64.97) .67(.96)  .63(.86) .62(.98) .67(.97) .24(.96) .20(.91) .70(.90)
+70.80) 68.40) .63(.73) .71(.86) .77(.61) .40(.91) 31.91) .74(.88)
+40 (98) 48.95) .33(.89) 42.87) 51.95) .16(.89) .20(.85) 49.78)
+71.94) .74(.88) .70(.85) 74.77) .80(.94) .62(.90) 36 (.94) _.76 (.87)
+
+Table 1: Final-answer accuracy with sentence-level language compliance rates (in parentheses) for different LRMs
+across languages on the MMMLU task under two language-control strategies: explicit instruction and prompt
+hacking. Results for MGSM and token-level compliance rates are provided in §A.1.
+
+R1-Qwen-32B | MMMLU | Explicit Instruction R1-Qwen-32B | MMMLU | Prompt Hacking
+
+¢
+
+Few sg soe
+
+ES KFS EK SV YK OYW ase SELES EKSLD
+
+SSRVESKS
+
+R1-Llama-70B | MMMLU | Explicit Instruction R1-Llama-70B | MMMLU | Prompt Hacking
+
+SSE SS
+
+es
+
+vt ews sor PSV TS oS
+
+Figure 1: Final-answer consistency for R1-Qwen-32B and R1-Llama-70B under explicit instruction and prompt
+hacking. Similar language pairs, such as German and English, show higher consistency. Each cell shows the
+final-answer consistency between the language on the x-axis and the language on the y-axis.
+
+Enforcing target-language reasoning improves
+compliance but may harm performance. When
+models are explicitly instructed to think in the same
+language as the prompt language, many fail to fol-
+low the instruction — especially in lower-resource
+languages such as Bengali (bn) and Yoruba (yo),
+which show low language compliance rates (less
+than 0.2 across all models).* Prompt hacking, by
+contrast, substantially improves language compli-
+ance, leading to very high alignment between the
+prompt and thinking language. However, this im-
+proved compliance often comes at the cost of re-
+duced final-answer accuracy. For instance, while
+all models achieve remarkable compliance when
+forced to reason in Yoruba via prompt hacking,
+their accuracy drops substantially compared to ex-
+plicit instruction. This reveals a trade-off between
+language control and task performance, consistent
+with findings in prior work (Qi et al., 2025).
+
+Answer consistency reflects typological proxim-
+ity across languages. Under both prompt hack-
+ing and explicit instruction setup, we observe that
+models exhibit high answer consistency across ty-
+pologically similar languages. For instance, con-
+sistencies among Indo-European languages, e.g.,
+English (en), German (de), and French (fr), tend
+
+3Models typically default to English reasoning. See §A.1
+for the English proportion in different thinking traces.
+
+to be high. To verify this, we compute average
+consistency for Indo-European language pairs ver-
+sus mixed pairs (i.e., one Indo-European and one
+non—Indo-European), and find that the former is
+significantly higher (cf. Table 4 in §A.1.2). This
+suggests that models reason similarly in these re-
+lated languages. In R1-Llama-70B, though the
+scaling improves the answer accuracy (cf. Table 1),
+the answer consistency is lower than that of its
+counterpart R1-Qwen-32B (cf. Figure 1), possibly
+due to different underlying base models. Neverthe-
+less, the same trend holds: consistency is generally
+high among typologically similar languages.
+
+Performance disparities persist across language
+control strategies, reflecting data exposure dur-
+ing training. Models consistently perform better
+on high-resource languages such as English and
+Chinese, which are overrepresented in pretraining
+and instruction tuning. In contrast, low-resource
+languages like Swahili and Yoruba yield lower ac-
+curacy in both explicit instruction and prompt hack-
+ing setups. These persistent gaps raise one core
+research question: Why do models show different
+performance when the actual thinking languages
+vary, even with semantically equivalent prompts?
+We hypothesize that this effect stems from inconsis-
+tencies in the quality and semantics of the thinking
+traces across languages — which we explore in §5.
+
+
+Summary. Our analysis reveals three key pat-
+terns. First, models do not follow explicit instruc-
+tions well, and while prompt hacking effectively
+enforces target-language reasoning, it often reduces
+accuracy. Second, consistency is high between sim-
+ilar languages. Finally, substantial performance
+gaps persist across languages regardless of control
+strategy, suggesting that inconsistencies in thinking
+trace quality may drive these gaps.
+
+5 Consistency of Thinking Traces
+
+We hypothesize that the disparities in final-answer
+accuracy and consistency observed in §4 stem pri-
+marily from the quality and semantic inconsistency
+of the generated thinking traces across languages.
+To investigate this, we introduce several novel sub-
+stitution methods to evaluate the consistency of
+thinking traces between languages (§5.1). We fur-
+ther propose a new metric, substitution consistency,
+which quantifies how model predictions change be-
+fore and after thinking trace substitution (§5.2). We
+then present and interpret our findings in §5.3.
+
+5.1. Thinking Trace Interchanging
+
+To better understand the disparities in thinking
+traces across languages, we consider three crosslin-
+gual substitution methods, each revealing different
+aspects of multilingual reasoning behavior. For the
+substitution, we reuse the thinking traces obtained
+for different languages in §4 and ask the model
+to directly generate the final answer based on the
+prompts and substituted thinking traces.
+
+BaseSub In this setup, we interchange the think-
+ing traces between languages /; and [2 that are
+generated under explicit instruction. Since mod-
+els often default to high-resource languages, even
+when instructed otherwise, many of these traces
+are in English regardless of the prompt language.
+This method allows us to understand why mod-
+els present different performance even though the
+thinking language remains roughly flexible, but the
+prompt language varies.
+
+HackSub Here, we interchange thinking traces
+generated under the prompt hacking setup. In this
+case, the thinking traces typically align with the
+prompt language due to the strong language control
+enforced by hacking prefixes. By interchanging
+these language-specific thinking traces between
+languages J; and lz, we can examine how consistent
+the thinking traces are.
+
+TransSub We first translate the thinking traces
+obtained under the prompt hacking setup into En-
+glish using the Google Translate API.+ We then
+interchange the translated English traces between
+language pairs 1; and lz. This setup removes the
+confounding variable of thinking language by stan-
+dardizing all thinking traces to English. It provides
+a controlled environment to assess the quality of
+the generated thinking traces, independent of their
+original thinking languages.
+
+5.2 Substitution Consistency
+
+Beyond the final-answer accuracy defined in §4.1,
+we introduce substitution consistency to quantify
+how a model’s predictions in language / change
+after its thinking trace is substituted with one from
+another language I’. Formally, let C; denote the set
+of indices of questions for which the model pro-
+duces a correct prediction in language / under the
+original thinking trace, and let Cj_,; denote the set
+of indices for which the model produces a correct
+prediction in / after the thinking trace from I’ is
+substituted into 1. We compute substitution consis-
+tency as the intersection-over-union (IoU) between
+
+. / — 1OiNCy 11
+these two sets: CO(I’,1) = [oermel
+
+CO(I',1) measures how stable the model’s correct
+predictions in / remain after replacing its thinking
+trace with one from lI’. Note that this metric is
+not symmetric —i.e., CO(I',1) 4 CO(I,l’) — be-
+cause it specifically evaluates how the predictions
+in 1 change when thinking traces from another lan-
+guage are introduced.
+
+. Intuitively,
+
+5.3. Results and Discussion
+
+Figure 2 and Figure 3 show the final-answer accu-
+racy and substitution consistency, respectively, of
+R1-Qwen-14B under the three substitution strate-
+gies introduced in §5.1 for MGSM, where thinking
+traces are interchanged across languages.
+
+Interchanging thinking traces substantially af-
+fects performance, revealing quality disparities
+across languages. We find that substituting think-
+ing traces from one language into another often
+leads to large performance shifts. Low-resource
+languages generally benefit from substitution with
+high-resource thinking traces, while high-resource
+languages tend to suffer performance degradation
+when traces from low-resource languages are in-
+jected. For example, under the HackSub strategy,
+the accuracy of Chinese (zh) drops to 0.40 when
+
+“https: //cloud. google. com/translate
+
+
+R1-Qwen-14B | MGSM | BaseSub
+
+29 .30 .32 .32 .32 .32 33 .26 28 30 34
+«34, 347297 28) 347.37 7.37) 34.32 36736)
+
+Sr se S Ges ve se Sve ee ¥
+
+R1-Qwen-14B | MGSM | HackSub
+
+tS 30 BSsis2 450 431 ese .26 28 5
+
+x
+
+R1-Qwen-14B | MGSM | TransSub
+
+34 .31 .35 .34 .30 .34 .34 .28 .30 .32 .34
+35 .33 .37 .36 .34 .36 .38 .34 .34 .35 37
+
+geese Se S&P KG OS eS HS
+
+Figure 2: Final-answer accuracy of R1l-Qwen-14B model under three thinking trace substitutions: BaseSub,
+HackSub, and TransSub. Each cell shows the accuracy when injecting thinking traces from a language on the y-axis
+into a language on the y-axis. Performance disparities indicate that thinking trace quality varies across languages.
+
+R1-Qwen-14B | MGSM | BaseSub | Consistency
+
+31.26 .26 .27 .26 .28 .25
+
+aoa) 30) 287.29 27 £32) .29
+
+S YE EK Oo S ETS S¥sees
+
+R1-Qwen-148 | MGSM | HackSub | Consistency
+
+soi 26.25.27 (26 2.29) .25,
+
+(357.30 .28 29) 2632.29...
+
+%
+
+R1-Qwen-14B | MGSM | TransSub | Consistency
+
+(oly 27 26 (27 26529) .25
+$23.29 28 28 26 fs 237,
+
+ges se SexF eK Yes ETS
+
+Figure 3: Substitution consistency of R1-Qwen-14B model under three thinking trace substitutions: BaseSub,
+HackSub, and TransSub. Each cell indicates the consistency between the original predictions in the language on the
+x-axis and the predictions after injecting thinking traces from the language on the y-axis. Higher consistency is
+observed when traces are substituted between similar languages.
+
+thinking traces from Telugu (te) are used. Con-
+versely, Telugu’s accuracy rises to 0.87 when using
+traces from Chinese. This pattern is consistent
+across all three substitution strategies, suggesting
+that the quality of thinking traces varies dramati-
+cally across languages.
+
+Substitution consistency is high between
+typologically-similar or resource-rich language
+pairs. We find that interchanging thinking traces
+between typologically-similar languages — such as
+English and German — yields relatively high sub-
+stitution consistency. In contrast, substitution be-
+tween more distant language pairs (e.g., Bengali
+and French) results in lower consistency (e.g., 0.61
+in BaseSub). We further verify this by comparing
+the substitution consistency among different lan-
+guage pairs in Table 10 in §A.2. We also observe
+that language pairs where both languages are high-
+resource — i.e., well-represented in the model’s pre-
+training data — tend to exhibit higher consistency.
+These findings suggest that the semantic consis-
+tency of thinking traces is easier to preserve when
+languages share language/geographic similarity or
+strong pretraining exposure.
+
+Thinking traces alone do not fully determine
+final-answer accuracy. While thinking trace
+
+quality plays a major role in performance, it is
+not the only factor. We observe cases where mod-
+els perform better in high-resource languages even
+when using identical thinking traces from low-
+resource languages. For example, when Swahili
+traces are injected into English prompts, the model
+achieves 0.33 accuracy — higher than Swahili’s own
+original accuracy of 0.26 in HackSub (cf. Figure 2).
+This indicates that the prompt language also influ-
+ences performance.
+
+Models sometimes leverage English thinking
+traces better, even when semantically equiva-
+lent. An interesting pattern emerges when com-
+paring HackSub and TransSub for Swahili accu-
+racy (cf. Figure 2). When Swahili or Telugu think-
+ing traces are first translated into English and then
+injected into other languages, the model usually
+achieves higher accuracy than when using the origi-
+nal Swahili or Telugu traces directly. This suggests
+that models are better at utilizing thinking traces
+expressed in English, even when the underlying
+semantics remain unchanged. This bias toward En-
+glish may stem from both pretraining exposure and
+instruction tuning in English-heavy corpora.
+
+Summary. Our analysis shows that the quality of
+thinking traces is highly uneven across languages,
+
+
+Mean drop across languages
+(First / Middle / Last truncation, R1 only)
+
+wn
+
+o
+
+[2] vV A First-R1-Llama ©) Middle-R1-Llama \W_Last-R1-Llama
+S 0.5 A First-R1-Qwen @ Middle-R1-Qwen W  Last-R1-Qwen
+fo)]
+
+c v
+
+£04 v v
+
+Ww
+
+wn
+
+20.3 v vV
+VU
+
+©
+
+w 0.2
+
+wy
+
+oO
+
+a
+
+20.1
+
+£
+
+2 0.0 pen a a a @ S.
+o «((f
+
+= 8B 70B 1.5B 7B 14B 32B
+
+Figure 4: Mean accuracy drop (percentage) across lan-
+guages for R1 distilled models under truncation of dif-
+ferent parts of the thinking trace: first, middle, or last.
+
+possibly shaped by both resource availability and
+inherent model biases. Semantic consistency of
+thinking traces across languages is also subopti-
+mal, indicating that models do not generate equally
+aligned reasoning in different languages. Lastly,
+our results highlight that final-answer accuracy is
+jointly influenced by the prompt language, thinking
+language, and the thinking trace.
+
+6 Faithfulness of Thinking Traces
+
+In §5, we observed that thinking traces generated
+by LRMs are not consistent and not of the same
+quality across languages. In this section, we go one
+step further to explore the question: Are thinking
+traces faithful across languages? That is, do the
+generated reasoning steps reflect the actual reason-
+ing process by which the model arrives at its final
+answer? Prior monolingual studies have shown
+that traces can be unfaithful (Lanham et al., 2023).
+However, whether this generalizes to other lan-
+guages remains largely unexplored. To address this
+gap, we perturb the thinking traces and measure
+how these changes affect model predictions across
+languages. We describe the perturbation strategies
+in §6.1 and present results and discussion in §6.2.
+
+6.1 Adding Perturbations to Thinking Traces
+
+Following Lanham et al. (2023), we adopt two
+perturbation strategies to evaluate whether the
+model’s final answer depends on its thinking traces.
+The more a model’s predictions are influenced by
+changes to the thinking trace, the more faithfully it
+appears to use those traces during inference.
+
+Trace Truncation In this setting, we truncate the
+thinking trace at different points and observe how
+the final answer changes. If the model’s answer re-
+
+mains unchanged despite the removal of reasoning
+steps, this suggests that the original trace may have
+been post-hoc or ignored during inference. Con-
+cretely, for each generated trace, we segment the
+reasoning steps into three equal parts and perform
+targeted truncations: removing the first part, the
+middle part, or the last part. We then compare the
+model’s predictions under each truncated trace to
+those obtained with the full thinking trace. This
+setup allows us to identify not only whether trunca-
+tion affects predictions but also which part exerts
+the greatest influence across languages.
+
+Error Injection In this setting, we introduce a
+small error into the last sentence of the thinking
+trace — by altering a number involved in the final
+computation step (e.g., changing it to another num-
+ber). This design specifically targets the final stage
+of reasoning, where the model is expected to derive
+or summarize the correct answer. The goal is to
+assess whether the model relies on the correctness
+of the concluding reasoning step. If the model’s
+answer changes in response to this minimal per-
+turbation, it suggests that it is faithfully using its
+own reasoning. On the other hand, if the answer
+remains unchanged, despite the final reasoning step
+being incorrect, this may indicate that the model is
+ignoring its stated trace or relying on earlier steps,
+memorized patterns, or even contamination instead.
+
+6.2 Results and Discussion
+
+Table 2 reports the change in final-answer accuracy
+for each language on the MGSM dataset under two
+perturbation strategies — last-part truncation and
+error injection — in the HackSub setting. Figure 4
+further visualizes the effect of truncating the first,
+middle, and last segments of the thinking trace
+across models in the DeepSeek-R1 distilled series.
+
+Models show varying degrees of faithfulness
+across languages. We observe diverse sensitiv-
+ity to perturbations across languages. For some
+low-resource languages like Swahili and Telugu,
+perturbations have little impact in R1 distilled mod-
+els — largely because original performance is al-
+ready low. In contrast, many languages experience
+substantial accuracy drops, suggesting that models
+do rely on their thinking traces to varying extents.
+This is further supported by our matching ratio re-
+sults in Table 3, which measure how often the final
+predictions are influenced by the incorrect numbers
+injected into the trace. Notably, English consis-
+tently shows lower matching scores (e.g., 0.12 for
+
+
+Operation Model de en es fr ja ru sw th zh bn te
+
+Qwen-14B 68 (.75)  .75(.79)  .69(.79) —-.64.(.77) 69 (.82) 68 (.75) 40.84) .65(.72) .67(.79) 66 (.83) .63 (.87)
+
+Qwen-32B 66 (.83) .76(.86) .55(.81)  .39(.72) —.62 (.87) .60(.81) .56(.89)  .77(.86) .60(.75) 77 (.89) -60 (.88)
+
+R1-Qwen-7B —.28(.45) 43.51) 41. (54) 32.53) —.22.(.42) 36 (.50) 03 (.67) 22.43) .29(.36) ~—.06 (.12) .00 (.00)
+
+Truncation Rl-Qwen-14B  .40(.52) .32(.38)  .29(.36) = .35(.44) 24.31) 39.44) 12.48) 30.37) .24(.27) 24 (.37) .06 (.20)
+(Last) R1-Qwen-32B = .30(.35) —.26(.27) .35(.40) 21. (.26) = .30(.34) -.29(.32)  .20(.43)  .22(.25)  .14(.16) = .20(.25) = -.22 (-1.22)
+
+Rl-Llama-8B 38 (.71) -.59(.70).54(.77) 45.71) 28.61) .48(.72) 01 (.18) 16 (.43) 44.60) 01 (.18) .04 (.38)
+RlI-Llama-70B 36 (.44) = .22(.23) 38 (.42) =.35(.41) 28 (.34)) 39.43) 32.37) 260.31) .29(.33) 11.15) -.09 (-.19)
+
+Qwen-14B .20(.22)  .17(.18)  .15(.17) 14.17) 22.27) 32 (.35) 07 (.15) 20.23) .20(.24) 15 (.19) .16 (.22)
+
+Qwen-32B -10(.12)  .22(.25) .03 (04) -.09(-.16) .08(.12) .10(.13)  .08(.13) 13.14) .18(.23) 17 (.20) .32 (.47)
+
+R1-Qwen-7B_ —-.56 (92) .74(.87) 68 (.89) 54.89) .44.(.83) 66 (.92)  .03 (58) .43(.82) .69(.86) 40 (.85) .09 (.59)
+
+Brior‘tnjere R1-Qwen-14B 61 (.80) .22 (.26)  .66(.80) _.64.(.82) 58 (.77) 56 (.63) .20(.81) 67 (82) .59(.67) 47 (.71) .08 (.30)
+*  R1-Qwen-32B_ 57 (.65) 16 (.16) .60(.68) .60(.73) 62 (.72)__.57 (.63)_--.33.(.73) 67 (.75) 64.71) 56 (.70) __-.01 (-.07)
+
+Rl-Llama-8B —.47(.88) 71 (.84) 62. (.89) —-.55.(.88) = .38 (82) 53 (.80) 03 (.73) .27(.72) 63 (87) _-.02 (-.29) 04 (.35)
+
+RlI-Llama-70B 48 (.59) .41(.44) .61(.68) .56(.65) 41 (.49)  .38(.42)  .59(.70) 65 (.76) .12(.13) 42 (59) .24 (.54)
+
+Table 2: Performance absolute drop after perturbation — /ast-part truncation and error injection — compared to
+original accuracy. Relative drops (in percentage) are shown in parentheses. Higher drops indicate greater sensitivity
+to the thinking trace perturbation, and therefore can be interpreted as stronger faithfulness.
+
+Model de en es fr ja ru sw th zh bn te
+
+Rl-Qwen-1.5B 61 46 51 58 49 53 28 16 69 38 .22
+R1-Qwen-7B 57 56 62 46 62 69 53 59 71 62 SI
+R1-Qwen-14B 50.26 58) 540 638 5359 62545328
+R1-Qwen-32B) 43 12) 51) 4657540 60 15956 AO
+Qwen-14B 06 07 06 04 08 06 10 07 03 05 .06
+Qwen-32B 07 02 06 06 02 05 04 03 02 04 .20
+R1I-Llama-8B 48 52 50 42 65 56 33 44 63 55 .38
+Ri-Llama-70B 26 4.24 «641 «3.340 31) 33) 53) 5607s 38D.
+
+Table 3: Per-language matching ratio for each model,
+indicating the proportion of predictions that match the
+incorrect number injected into the final sentence of the
+thinking trace. Higher values suggest stronger reliance
+on the surface form of the reasoning.
+
+R1-Qwen-32B) compared with other languages.
+
+Truncating the final part is less disruptive than
+error injection, especially for R1 distilled mod-
+els. Across all languages, we find that truncating
+the final segment of the thinking trace has less im-
+pact than injecting an incorrect value, particularly
+for the R1 distilled series.> This suggests that mod-
+els may perform /atent-state reasoning (Zhu et al.,
+2025), where inference continues internally even
+after the visible thinking trace is truncated. How-
+ever, when a plausible but incorrect final value is
+injected, models often copy it directly, revealing
+that their outputs are sensitive to surface-level rea-
+soning conclusions.
+
+Model scale affects faithfulness behavior. As
+shown in Figure 4, model scale influences how dif-
+ferent parts of the thinking trace affect predictions.
+Smaller models are more reliant on the final portion
+of the trace, aligning with their higher matching
+ratios (cf. Table 3), suggesting a higher degree of
+surface-level faithfulness. Larger models, by con-
+trast, become less dependent on the final segments
+
+*Interestingly, the Qwen3 models show the opposite trend.
+We hypothesize that this may be due to data contamination,
+as seen in Table 3, where these models rarely change their
+answers even when the final sentence is corrupted.
+
+and more sensitive to earlier reasoning steps. This
+may indicate either (1) reduced faithfulness due
+to memorization or contamination, or (2) stronger
+latent-state reasoning capabilities that allow the
+model to recover from truncated traces or correct
+surface-level trace errors.
+
+Summary. Our findings reveal that models vary
+in their faithfulness across languages and model
+scales. Languages other than English show stronger
+reliance on thinking traces. Truncating the final
+part of the trace is generally less disruptive than
+injecting incorrect information, especially for R1
+distilled models, possibly suggesting latent-state
+reasoning. Larger models are less dependent on
+surface-level reasoning and more resilient to per-
+turbations, though this may reflect either increased
+reasoning ability or memorization.
+
+7 Conclusion
+
+In this paper, we present the first comprehensive
+evaluation of multilingual CoT reasoning across a
+diverse set of LRMs. We examine three core dimen-
+sions, performance, consistency, and faithfulness,
+to provide a deeper understanding of how LRMs
+reason across languages. We show that LRMs
+exhibit strong language preferences in reasoning
+and that final-answer performance varies substan-
+tially across languages. Through our crosslingual
+thinking trace interchanging method, we show that
+thinking traces are often inconsistent across lan-
+guages, with their quality strongly associated with
+the thinking language. Finally, our perturbation-
+based tests reveal that models rely on the traces to
+varying degrees, suggesting that reasoning faith-
+fulness is uneven across languages. Our findings
+highlight the need for more robust and transparent
+evaluation of multilingual reasoning behavior.
+
+
+Limitations
+
+While our work provides the first comprehensive
+study of multilingual CoT reasoning, we acknowl-
+edge that several limitations remain.
+
+First, although we examine robustness through
+two perturbation strategies and show that robust-
+ness varies across languages, more sophisticated or
+adversarial perturbations (e.g., paraphrasing, dis-
+tractor reasoning) remain unexplored and could be
+incorporated in future work.
+
+Second, while we evaluate and analyze inconsis-
+tencies in multilingual reasoning, we do not pro-
+vide a mechanistic explanation for why these in-
+consistencies arise. Future research could apply
+mechanistic interpretability methods to investigate
+model internals to better understand the sources of
+multilingual inconsistency and faithfulness.
+
+Finally, due to resource constraints, our exper-
+iments are limited in the number of models and
+downstream tasks considered. Future work could
+extend our evaluation framework to a broader set
+of models, languages, and tasks.
+
+Acknowledgments
+
+This research was supported by the Munich Cen-
+ter for Machine Learning (MCML) and German
+Research Foundation (DFG, grant SCHU 2246/14-
+1). We gratefully acknowledge additional support
+from Google DeepMind through a generous re-
+search grant, which enabled our use of the Google
+Translate API services in this project.
+
+Ethical Considerations
+
+Use of AI Assistants The authors acknowledge
+the use of ChatGPT exclusively for grammar cor-
+rection, improving the clarity and coherence of the
+draft, and assisting with code implementation.°
+
+References
+
+Kabir Ahuja, Harshita Diddee, Rishav Hada, Milli-
+cent Ochieng, Krithika Ramesh, Prachi Jain, Ak-
+shay Nambi, Tanuja Ganu, Sameer Segal, Mohamed
+Ahmed, Kalika Bali, and Sunayana Sitaram. 2023.
+MEGA: Multilingual evaluation of generative AI.
+In Proceedings of the 2023 Conference on Empir-
+ical Methods in Natural Language Processing, pages
+4232-4267, Singapore. Association for Computa-
+tional Linguistics.
+
+Ivan Arcuschin, Jett Janiak, Robert Krzyzanowski,
+Senthooran Rajamanoharan, Neel Nanda, and
+
+Shttps://chatgpt.com/
+
+Arthur Conmy. 2025. Chain-of-thought reason-
+ing in the wild is not always faithful. Preprint,
+arXiv:2503.08679.
+
+Victoria Benjamin, Emily Braca, Israel Carter, Hafsa
+Kanchwala, Nava Khojasteh, Charly Landow, Yi Luo,
+Caroline Ma, Anna Magarelli, Rachel Mirin, Av-
+ery Moyer, Kayla Simpson, Amelia Skawinski, and
+Thomas Heverin. 2024. Systematically analyzing
+prompt injection vulnerabilities in diverse Ilm archi-
+tectures. Preprint, arXiv:2410.23308.
+
+James Chua, Edward Rees, Hunar Batra, Samuel R.
+Bowman, Julian Michael, Ethan Perez, and Miles
+Turpin. 2025. Bias-augmented consistency train-
+ing reduces biased reasoning in chain-of-thought.
+Preprint, arXiv:2403.05518.
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,
+Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+Plappert, Jerry Tworek, Jacob Hilton, Reiichiro
+Nakano, Christopher Hesse, and John Schulman.
+2021. Training verifiers to solve math word prob-
+lems. Preprint, arXiv:2110.14168.
+
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang,
+Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, Xiaokang Zhang,
+Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhi-
+hong Shao, Zhuoshu Li, Ziyi Gao, and 181 others.
+2025. Deepseek-r1: Incentivizing reasoning capa-
+bility in Ilms via reinforcement learning. Preprint,
+arXiv:2501.12948.
+
+Akash Ghosh, Debayan Datta, Sriparna Saha, and Chi-
+rag Agarwal. 2025. The multilingual mind : A sur-
+vey of multilingual reasoning in language models.
+Preprint, arXiv:2502.09457.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+tra, Archie Sravankumar, Artem Korenev, Arthur
+Hinsvark, and 542 others. 2024. The llama 3 herd of
+models. Preprint, arXiv:2407.21783.
+
+Dan Hendrycks, Collin Burns, Steven Basart, Andy
+Zou, Mantas Mazeika, Dawn Song, and Jacob Stein-
+hardt. 2021. Measuring massive multitask language
+understanding. In 9th International Conference on
+Learning Representations, ICLR 2021, Virtual Event,
+Austria, May 3-7, 2021. OpenReview.net.
+
+Haoyang Huang, Tianyi Tang, Dongdong Zhang, Xin
+Zhao, Ting Song, Yan Xia, and Furu Wei. 2023. Not
+all languages are created equal in LLMs: Improv-
+ing multilingual capability by cross-lingual-thought
+prompting. In Findings of the Association for Com-
+putational Linguistics: EMNLP 2023, pages 12365-
+12394, Singapore. Association for Computational
+Linguistics.
+
+Zhengbao Jiang, Antonios Anastasopoulos, Jun Araki,
+Haibo Ding, and Graham Neubig. 2020. X-FACTR:
+
+
+Multilingual factual knowledge retrieval from pre-
+trained language models. In Proceedings of the 2020
+Conference on Empirical Methods in Natural Lan-
+guage Processing (EMNLP), pages 5943-5959, On-
+line. Association for Computational Linguistics.
+
+Amir Hossein Kargaran, Ayyoob Imani, Francois Yvon,
+
+and Hinrich Schuetze. 2023. GlotLID: Language
+identification for low-resource languages. In Find-
+ings of the Association for Computational Linguis-
+tics: EMNLP 2023, pages 6155-6218, Singapore.
+Association for Computational Linguistics.
+
+Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yu-
+
+taka Matsuo, and Yusuke Iwasawa. 2022. Large lan-
+guage models are zero-shot reasoners. In Advances
+in Neural Information Processing Systems 35: An-
+nual Conference on Neural Information Processing
+Systems 2022, NeurIPS 2022, New Orleans, LA, USA,
+November 28 - December 9, 2022.
+
+Tamera Lanham, Anna Chen, Ansh Radhakrishnan,
+
+Benoit Steiner, Carson Denison, Danny Hernandez,
+Dustin Li, Esin Durmus, Evan Hubinger, Jackson
+Kernion, Kamilé LukoSiité, Karina Nguyen, Newton
+Cheng, Nicholas Joseph, Nicholas Schiefer, Oliver
+Rausch, Robin Larson, Sam McCandlish, Sandi-
+pan Kundu, and 11 others. 2023. Measuring faith-
+fulness in chain-of-thought reasoning. Preprint,
+arXiv:2307.13702.
+
+Yihong Liu, Mingyang Wang, Amir Hossein Kargaran,
+
+Felicia Korner, Ercong Nie, Barbara Plank, Frangois
+Yvon, and Hinrich Schiitze. 2025. Tracing multi-
+lingual factual knowledge acquisition in pretraining.
+Preprint, arXiv:2505.14824.
+
+Qing Lyu, Shreya Havaldar, Adam Stein, Li Zhang,
+
+Delip Rao, Eric Wong, Marianna Apidianaki, and
+Chris Callison-Burch. 2023. Faithful chain-of-
+thought reasoning. In Proceedings of the 13th In-
+ternational Joint Conference on Natural Language
+Processing and the 3rd Conference of the Asia-Pacific
+Chapter of the Association for Computational Lin-
+guistics (Volume I: Long Papers), pages 305-329,
+Nusa Dua, Bali. Association for Computational Lin-
+guistics.
+
+Niklas Muennighoff, Zitong Yang, Weijia Shi, Xi-
+
+ang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi, Luke
+Zettlemoyer, Percy Liang, Emmanuel Candés, and
+Tatsunori Hashimoto. 2025. sl: Simple test-time
+scaling. Preprint, arXiv:2501.19393.
+
+OpenAI, :, Aaron Jaech, Adam Kalai, Adam Lerer,
+
+Adam Richardson, Ahmed El-Kishky, Aiden Low,
+Alec Helyar, Aleksander Madry, Alex Beutel, Alex
+Carney, Alex Iftimie, Alex Karpenko, Alex Tachard
+Passos, Alexander Neitz, Alexander Prokofiev,
+Alexander Wei, Allison Tam, and 244 others. 2024.
+Openai o1 system card. Preprint, arXiv:2412.16720.
+
+Jirui Qi, Shan Chen, Zidi Xiong, Raquel Fernandez,
+
+Danielle S. Bitterman, and Arianna Bisazza. 2025.
+When models reason in your language: Controlling
+
+thinking trace language comes at the cost of accuracy.
+Preprint, arXiv:2505.22888.
+
+Libo Qin, Qiguang Chen, Fuxuan Wei, Shijue Huang,
+and Wanxiang Che. 2023. Cross-lingual prompt-
+ing: Improving zero-shot chain-of-thought reasoning
+across languages. In Proceedings of the 2023 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 2695-2709, Singapore. Associa-
+tion for Computational Linguistics.
+
+Qwen Team, :, An Yang, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan
+Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan
+Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin
+Yang, Jiaxi Yang, Jingren Zhou, and 25 oth-
+ers. 2025. Qwen2.5 technical report. Preprint,
+arXiv:2412.15115.
+
+Sander Schulhoff, Jeremy Pinto, Anaum Khan, Louis-
+Francois Bouchard, Chenglei Si, Svetlina Anati,
+Valen Tagliabue, Anson Kost, Christopher Carnahan,
+and Jordan Boyd-Graber. 2023. Ignore this title and
+HackAPrompt: Exposing systemic vulnerabilities
+of LLMs through a global prompt hacking compe-
+tition. In Proceedings of the 2023 Conference on
+Empirical Methods in Natural Language Processing,
+pages 4945-4977, Singapore. Association for Com-
+putational Linguistics.
+
+Freda Shi, Mirac Suzgun, Markus Freitag, Xuezhi Wang,
+Suraj Srivats, Soroush Vosoughi, Hyung Won Chung,
+Yi Tay, Sebastian Ruder, Denny Zhou, Dipanjan Das,
+and Jason Wei. 2023a. Language models are multi-
+lingual chain-of-thought reasoners. In The Eleventh
+International Conference on Learning Representa-
+tions, ICLR 2023, Kigali, Rwanda, May 1-5, 2023.
+OpenReview.net.
+
+Freda Shi, Mirac Suzgun, Markus Freitag, Xuezhi Wang,
+Suraj Srivats, Soroush Vosoughi, Hyung Won Chung,
+Yi Tay, Sebastian Ruder, Denny Zhou, Dipanjan Das,
+and Jason Wei. 2023b. Language models are multi-
+lingual chain-of-thought reasoners. In The Eleventh
+International Conference on Learning Representa-
+tions, ICLR 2023, Kigali, Rwanda, May 1-5, 2023.
+OpenReview.net.
+
+Charlie Snell, Jachoon Lee, Kelvin Xu, and Aviral Ku-
+mar. 2024. Scaling Ilm test-time compute optimally
+can be more effective than scaling model parameters.
+Preprint, arXiv:2408.03314.
+
+Sree Harsha Tanneru, Dan Ley, Chirag Agarwal, and
+Himabindu Lakkaraju. 2024. On the hardness of
+faithful chain-of-thought reasoning in large language
+models. Preprint, arXiv:2406.10625.
+
+Miles Turpin, Julian Michael, Ethan Perez, and
+Samuel R. Bowman. 2023. Language models don’t
+always say what they think: Unfaithful explanations
+in chain-of-thought prompting. In Advances in Neu-
+ral Information Processing Systems 36: Annual Con-
+ference on Neural Information Processing Systems
+2023, NeurIPS 2023, New Orleans, LA, USA, Decem-
+ber 10 - 16, 2023.
+
+
+Mingyang Wang, Heike Adel, Lukas Lange, Yihong Liu,
+Ercong Nie, Jannik Strétgen, and Hinrich Schuetze.
+2025a. Lost in multilinguality: Dissecting cross-
+lingual factual inconsistency in transformer language
+models. In Proceedings of the 63rd Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume I: Long Papers), pages 5075-5094, Vienna,
+Austria. Association for Computational Linguistics.
+
+Mingyang Wang, Lukas Lange, Heike Adel, Yunpu
+Ma, Jannik Strotgen, and Hinrich Schiitze. 2025b.
+Language mixing in reasoning language models:
+Patterns, impact, and internal causes. Preprint,
+arXiv:2505.14815.
+
+Xinpeng Wang, Bolei Ma, Chengzhi Hu, Leon Weber-
+Genzel, Paul R6ttger, Frauke Kreuter, Dirk Hovy, and
+Barbara Plank. 2024. “my answer is C”: First-token
+probabilities do not match text answers in instruction-
+tuned language models. In Findings of the Asso-
+ciation for Computational Linguistics: ACL 2024,
+pages 7407-7416, Bangkok, Thailand. Association
+for Computational Linguistics.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le,
+and Denny Zhou. 2022. Chain-of-thought prompting
+elicits reasoning in large language models. In Ad-
+vances in Neural Information Processing Systems 35:
+Annual Conference on Neural Information Process-
+ing Systems 2022, NeurIPS 2022, New Orleans, LA,
+USA, November 28 - December 9, 2022.
+
+Zidi Xiong, Shan Chen, Zhenting Qi, and Himabindu
+Lakkaraju. 2025. Measuring the faithfulness of
+thinking drafts in large reasoning models. Preprint,
+arXiv:2505.13774.
+
+Fengli Xu, Qianyue Hao, Zefang Zong, Jingwei Wang,
+Yunke Zhang, Jingyi Wang, Xiaochong Lan, Jiahui
+Gong, Tianjian Ouyang, Fanjin Meng, Chenyang
+Shao, Yuwei Yan, Qinglong Yang, Yiwen Song, Si-
+jian Ren, Xinyuan Hu, Yu Li, Jie Feng, Chen Gao,
+and Yong Li. 2025. Towards large reasoning models:
+A survey of reinforced reasoning with large language
+models. Preprint, arXiv:2501.09686.
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao,
+Chengen Huang, Chenxu Lv, Chujie Zheng, Day-
+iheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao
+Ge, Haoran Wei, Huan Lin, Jialong Tang, and 41
+others. 2025. Qwen3 technical report. Preprint,
+arXiv:2505.09388.
+
+Evelyn Yee, Alice Li, Chenyu Tang, Yeon Ho Jung,
+Ramamohan Paturi, and Leon Bergen. 2024. Disso-
+ciation of faithful and unfaithful reasoning in Ilms.
+Preprint, arXiv:2405.15092.
+
+Zheng-Xin Yong, M. Farid Adilazuarda, Jonibek
+Mansurov, Ruochen Zhang, Niklas Muennighoff,
+Carsten Eickhoff, Genta Indra Winata, Julia Kreutzer,
+Stephen H. Bach, and Alham Fikri Aji. 2025.
+Crosslingual reasoning through test-time scaling.
+Preprint, arXiv:2505.05408.
+
+Metric Group Mean Value _P-Value
+Without Low Resource Languages
+Final-Answer Indo-European 0.565 0.034
+Consistency Non Indo-European 0.551 :
+With Low Resource Languages
+Final-Answer Indo-European 0.5384 3.880-20
+Consistency Non Indo-European 0.4894 ,
+
+Table 4: Consistency comparison between Indo-
+European and non-Indo-European languages. Reported
+are mean consistency values for Final-Answer consis-
+tency metrics, with corresponding p-values (t-test). We
+also discard low-resouce languages sw and yo to con-
+duct t-test. Indo-European languages generally achieve
+higher consistency, and the differences are statistically
+significant.
+
+Raoyuan Zhao, Beiduo Chen, Barbara Plank, and
+Michael A. Hedderich. 2025a. Makieval: A mul-
+tilingual automatic wikidata-based framework for
+cultural awareness evaluation for lms. Preprint,
+arXiv:2505.21693.
+
+Raoyuan Zhao, Abdullatif Koksal, Ali Modarressi,
+Michael A. Hedderich, and Hinrich Schiitze. 2025b.
+Do we know what Ilms don’t know? a study
+of consistency in knowledge probing. Preprint,
+arXiv:2505.21701.
+
+Denny Zhou, Nathanael Scharli, Le Hou, Jason Wei,
+Nathan Scales, Xuezhi Wang, Dale Schuurmans,
+Claire Cui, Olivier Bousquet, Quoc V. Le, and Ed H.
+Chi. 2023. Least-to-most prompting enables com-
+plex reasoning in large language models. In The
+Eleventh International Conference on Learning Rep-
+resentations, ICLR 2023, Kigali, Rwanda, May 1-5,
+2023. OpenReview.net.
+
+Rui-Jie Zhu, Tianhao Peng, Tianhao Cheng, Xingwei
+Qu, Jinfa Huang, Dawei Zhu, Hao Wang, Kaiwen
+Xue, Xuanliang Zhang, Yong Shan, Tianle Cai, Tay-
+lor Kergan, Assel Kembay, Andrew Smith, Chenghua
+Lin, Binh Nguyen, Yuqi Pan, Yuhong Chou, Zefan
+Cai, and 14 others. 2025. A survey on latent reason-
+ing. Preprint, arXiv:2507.06203.
+
+A. Additional Results
+
+A.1 Complete Results for Language
+Controlling
+
+This section presents the complete compliance re-
+sults for all languages, as well as additional results
+on MGSM, covering accuracy, consistency, and
+compliance.
+
+A.1.1 Accuracy of Final-answer
+
+Table 5 reports the final-answer accuracy of dif-
+ferent LRMs on the MGSM task under explicit
+instruction and prompt hacking. The results con-
+firm our findings: explicit instructions are often
+
+
+es fr ja mu sw th zh bn te
+
+Method Model de en
+Qwen-14B 91 93
+Qwen-32B 89 = .94
+
+R1-Qwen-1.5B 42 .78
+R1-Qwen-7B 69.85
+R1-Qwen-14B .84 .93
+R1-Qwen-32B  .89 .96
+R1-Llama-8B 57 .78
+R1-Llama-70B .88 .96
+
+Qwen-14B 91 95
+Qwen-32B 80 = .88
+R1-Qwen-1.5B .40  .79
+R1-Qwen-7B 62 .85
+R1-Qwen-14B  .76 .84
+R1-Qwen-32B .90 .96
+R1-Llama-8B 56 .78
+R1-Llama-70B .86 .96
+
+Explicit Instruction
+
+Prompt Hacking
+
+91 87) 820 91) 62) 8983 B17
+92 88 86 92 .80 88 87 .84 .79
+50 47) 22) 47 Ol 03 66 13 03
+75 74 56 77 10 51 80 49 26
+89 86 80 93 .29) 85 87 .72 40
+91 87) 6.8606 (93) 44 89 8781S
+65 62 45 66 04 39 63 17 «18
+92 89 85) 93) 85) 89) 8884 CSS
+
+88 84 84 90 48 90 85 .79 72
+68 54 .72 74 63 90 80 .86 .69
+AT AT 26 44 .00 O01 65 .06 .04
+76 61 53 72 05 52 80 47 15
+82.78 .76 88 25) 82 6.88 «6.6728
+90 4.87) «860 93) 49 908783
+64 62 46 66 07 42 62 .24 221
+86 83 80 92 62 90 84 79 47
+
+Table 5: Final-answer accuracy for different LRMs across languages on the MGSM task under two language-control
+
+strategies: explicit instruction and prompt hacking.
+
+not strictly followed, and while prompt hacking im-
+proves language control, it generally comes at the
+cost of accuracy. In particular, accuracy drops are
+most pronounced in low-resource languages (e.g.,
+Swahili, Telugu, Bengali), whereas high-resource
+languages (e.g., English, German, French, Chinese)
+show relatively stable performance across both con-
+trol strategies.
+
+A.1.2 Consistency of Final-answer
+
+Figures 5 and 6 show the consistency results on
+MMMLU and MGSM of LRMs. Across both tasks,
+the scaling trend remains stable: larger models ex-
+hibit higher consistency. However, we also observe
+that applying prompt hacking tends to affect the in-
+ternal language consistency of models, sometimes
+reducing alignment compared to explicit instruc-
+tions.
+
+A.1.3. Language Compliance
+
+Table 6 and Table 7 report sentence-level and
+token-level compliance statistics on MMMLU and
+MGSM. Overall, prompt hacking improves align-
+ment with the target language, with stronger effects
+for low-resource languages. Token-level compli-
+ance is consistently lower than sentence-level com-
+pliance, likely due to the difficulty of identifying
+language from individual tokens and the presence
+of borrowings or quoted words within sentences.
+Table 8 and Table 9 present the proportions
+
+of Chinese and English content in the reasoning
+traces across different models and prompt lan-
+guages. We observe that, under explicit instruction,
+models tend to default to English traces even when
+prompted in another language, with Chinese traces
+also appearing but less frequently. Prompt hack-
+ing can reduce this misalignment by shifting the
+distribution toward the target language.
+
+A.2 Complete Results for Interchanging
+Thinking traces
+
+Figure 7 shows the accuracy of R1-Qwen mod-
+els on MGSM with interchanged reasoning traces.
+Injecting traces from low-resource languages
+into high-resource prompts lowers performance,
+while high-resource traces can boost low-resource
+prompts. This confirms the strong influence of rea-
+soning trace quality on final accuracy. Figure 8
+shows that consistency with original setup after
+substitution is generally higher between similar
+languages. HackSub follows the same trend as
+BaseSub but sometimes lowers cross-language con-
+sistency, especially for low-resource languages.
+
+A.3. Complete Results for Faithfulness
+
+Table 11 reports accuracy changes when truncat-
+ing the first, middle, or last part of the reasoning
+traces. We observe that truncating the middle or
+the beginning generally has smaller impact, while
+
+
+R1-Qwen-1.5B | MGSM | Explicit Instruction
+-17 14 .18 18 16 .19 .03 .08 .03 .
+
+R1-Qwen-1.5B | MGSM | Prompt Hacking
+08 .06 .08 .08 .08 .04 0.00 .10 0.00 .08
+
+R1-Qwen-148 | MGSM | Explicit Instruction
+
+R1-Qwen-14B | MGSM | Prompt Hacking
+
+30 .25 23 .26 .26 .28 .25
+fi 26 25.27.26
+
+.07 .04 .04 .07 .05 .05 0.00 .07 0.00 .02 .01 .01 0.00 .02 .02 0,000.00}
+
+zh}.16 29 (53) 1 04 .05 zh|.08 3s 0.00.04 .01
+
+S¥ se EP OSES Svsesgege
+
+s Ss ee 2
+
+ee g~e sev ye
+
+ee Ka gs ese
+
+R1-Qwen-32B | MGSM | Prompt Hacking
+
+Sf &
+
+R1-Qwen-78 | MGSM | Explicit eth R1-Qwen-7B | MGSM | Prompt Hacking R1-Qwen-328 | MGSM | Explicit Instruction
+
+alr) all ah okey shy) Sle! alah 07 .06 06 .06 .06 .05 .05
+
+b24).19 15 17.17 G27
+
+Sv & ees ese es es Ses EK SY eee
+
+Qwen-32B | MGSM | Explicit Instruction
+
+iS Sev e¢og os es
+
+Qwen-32B | MGSM | Prompt Hacking
+
+e
+
+sf ¥
+
+Qwen-14B | MGSM | Explicit Instruction Qwen-14B | MGSM | ish Hacking
+
+a!
+
+fe ¢ & e
+
+Sv FFF G-OosHE TSE
+
+Ri-Llama-88 | MGSM | Explicit Instruction 7 R1-Liama-88 | MGSM | ge Hacking R1-Liama-708 | MGSM | Explicit Instruction
+bn. .21 18 .23 14 18 .20 .02 14 .25 .20 bn. -10 .07 .08 .07 .07 .05 .08 .10 .07 .08
+
+sees egos esse
+
+R1-Liama-70B | MGSM | Prompt Hacking
+
+se °
+
+Ss
+
+swj.02 .05 .04 .05 .06 03 .05 10 .06 | sw}-08 .05 05 .06 .06 .06 .05
+
+tey.14 .19 .20 .20 .22 19 .21. eure te].10 .10 11 .14 .10 11 .11 .
+
+Sve oe * s SeESEK OOS S¥EeK SPOS ESTE
+
+3s
+
+Figure 5: Final-answer consistency heatmaps on the MGSM dataset across different models under explicit instruction
+and prompt hacking.
+
+Method Model bn de en es fr ja ru sw te th zh
+
+R1-Qwen-1.5B  .01/.00  .89/.29 .89/.38 — .88/.27  .78/.12  .72/.43 92/42 .18/.05  .02/.00 .71/.82  .89/.56
+R1-Qwen-7B -60/.04 .96/.32  .93/.37  .93/.28 97/15 81/56 .97/.47  .23/.07  .34/.03  .47/.34 — .86/.55
+R1-Qwen-14B — .71/.06 .89/.29 .89/.38 — .92/.28  .98/.14  .85/.73 .97/.48 42/12  .02/.00  .84/.50 .90/.63
+R1-Qwen-32B —.78/.05 97/31 .90/.38 = .95/.28 .97/.15 .87/.70  .98/.48  .84/.28  .94/.08 85/52 .92/.58
+Qwen-14B 01/00 .02/.01  .87/.38  .02/.01 .02/.01 .01/.02 .97/.47 .04/.02 .02/.00 .00/.02 .81/.66
+Qwen-32B 01/00 .01/.01 86/38 .01/.01 .02/.00 .01/.02 .96/.47  .02/.01 .78/.07 .01/.01  .76/.63
+Rl-Llama-8B_ —.45/.05. .93/.31  .93/.37 — .93/.28 .97/.15 .85/.63  .97/.48 — .92/.32  .02/.00_ .84/.56 .90/.56
+R1-Llama-70B —.80/.06  .92/.31  .92/.38 — .93/.28 .96/.14  .69/.53 .97/.49  .90/.24  .91/.07 — .82/.52  .81/.67
+
+R1-Qwen-1.5B_ .86/.06  .83/.32 91/39 .82/.28  .87/.13  .65/.13 .94/.42 .41/.03 .90/.08  .97/.58 — .86/.56
+R1-Qwen-7B 92/.07  .96/.36  .94/.39  .87/.30 .97/.15 84/27 .94/.43 .59/.34  .96/.08 .82/.45  .89/.61
+R1-Qwen-14B — .85/.07  .92/.33 95/40 .67/.21  .91/.14  .79/.63  .96/.47  .88/.30  .82/.07 .81/.52  .80/.58
+R1-Qwen-32B —.83/.06  .47/.16  .92/.39  .84/.27  .82/.13 .86/.68 .97/.47  .88/.31  .92/.10  .84/.56  .82/.64
+Qwen-14B -89/.05  .03/.01  .90/.39  .82/.26 .78/.11  .87/.52  .96/.42  .87/.24 .92/.06 .88/.51  .88/.48
+Qwen-32B 81/04 = .35/.20  .89/.38  .33/.14 .31/.06  .58/.35  .92/.43  .80/.23 .78/.07  .70/.47 — .85/.40
+Rl-Llama-8B_ —.75/.12— .90/.33 91/39 .88/.30  .93/.14  .83/.59  .89/.45  .67/.38 .46/.05 .88/.57 — .83/.55
+R1-Llama-70B —.86/.06 .70/.29. 92/39 .71/.26 .80/.13 .90/.59  .96/.49 .86/.26 .94/.07 .84/.53 .85/.61
+
+Explicit Instruction
+
+Prompt Hacking
+
+Table 6: Sentence/Token Compliance Rate on MGSM across 11 languages.
+
+
+R1-Qwen-1.5B | MMMLU | Explicit Instruction
+
+R1-Qwen-1.5B | MMMLU | Prompt Hacking
+
+.19.18.20.16.18.19.15.18.15.23.13.20.16.22|
+
+[22-15.34.33.31.25.22.13.24.28.25.24.14.13
+
+-17.12.09.12.09.19.04.07.10.25.130.0011.09|
+
+.21.20.14.12.16.24.22.09.21.04.07.25|
+|. 24.30.15.20.26.22.11.28.05.11.31]
+
+-13.10.21.28.27.18.14.16.27.21.10
+.0004.04.05.07.01.04.05.08.03.06.05|
+
+09.16 .25.31.23.23.13.19.21.26.10.29.04.10|
+
+SPV SE SLI COS SS OS
+
+ee
+
+SSEVEES
+
+Tee eg see
+Qwen-14B | MMMLU | Explicit Instruction
+
+Figure 6: Final-answer consistency heatmaps on the MMLU dataset across different models under explicit instruction
+
+SSeS ECTS reer
+
+| Prompt Hacking
+
+vee
+
+ee
+
+SEVEES
+
+Qwen-148 | MMMLU | Prompt Hacking
+
+TEV ESOS
+
+SEK SE KS ICES TS OS
+
+R1-Llama-8B | MMMLU | Prompt Hacking
+
+08.21,32.24.28.29.25.26.19.24.32.10.16.26]
+
+.19.17.14.19.18.12.19.09.16.19.12.16.22|
+
+SPREE KGS
+
+SEVSEES
+
+SEREEKSOS
+
+R1-Qwen-14B | MMMLU | Explicit Instruction
+
+Tee es ee
+
+R1-Qwen-32B | MMMLU | Explicit Instruction
+
+ee “
+
+ew ¢
+Qwen-328 | MMMLU | Explicit Instruction
+
+&
+
+see
+
+¥
+
+ewe Fs ¥
+
+R1-Llama-70B | MMMLU | Explicit Instruction
+
+SEVEE KG
+
+SSVEES
+
+SPSREEKSLOS
+
+SEVEOKSS
+
+R1-Qwen-14B | MMMLU | Prompt Hacking
+
+See gs oe
+
+R1-Qwen-32B | MMMLU | Prompt Hacking
+
+So Few say
+
+Qwen-328 | MMMLU | Prompt Hacking
+
+See gee
+
+Ri1-Llama-70B | MMMLU | Prompt Hacking
+
+BS
+
+BS
+
+s
+
+and prompt hacking.
+Method Model ar bn de es fr hi id it ja ko pt sw yo zh en
+R1-Qwen-1.5B_ .07/.05_.03/.01_.24/.08 —.89/.29  .44/.09  .05/.06  .20/.12 .51/.28 .14/.16  .02/.03 .81/.32 40/34 .12/.02  .85/.63 .95/.45
+R1-Qwen-7B 69/38 .20/.04  .95/.37 .96/.30 .91/.16  .78/.36 92/32 .89/.44  .83/.26 16/10 .97/.38  .07/.03 .16/.03 .87/.67 .97/.46
+R1-Qwen-14B —.02/.01_ .02/.01_ .17/.07 — .48/.18  .17/.03 .04/.14 17/05 .24/.12  .32/.39 .05/.04 .12/.05  .08/.02  .09/.02 .85/.69  .97/.46
+Explicit Instruction R1-Qwen-32B_ —.19/.13..17/.05_—.87/.38 38/15 .05/.01  .19/.27 .05/.01 .50/.26 37/37 15/11 .08/.04 .40/.17  .20/.04  .88/.68  .96/.45
+Qwen-14B .00/.00  .00/.00 .01/.01 .01/.01 .01/.00  .00/.00 .01/.00  .00/.01 .00/.00 .00/.01_ .01/.01 .02/.01.07/.02_.67/.65 .96/.46
+Qwen-32B .00/.00  .00/.00 .01/.01 .01/.01 .01/.00 .00/.00 .02/.01  .01/.01 .00/.00 .00/.01 .02/.01 .02/.01 .05/.01_ .82/.69 .95/.46
+Rl-Llama-8B —.52/.33).01/.00.29/.12 .53/.20  .80/.14 .02/.03 .20/.06  .25/.15  .57/.50  .06/.06  .60/.27 .21/.08 .15/.02 .92/.69  .96/.46
+Rl-Llama-70B_ —.44/.27. .01/.01_— .05/.02.09/.04 .10/.02 .04/.11  .12/.03 .02/.02 .29/.20 .03/.02 .05/.02 .06/.01 .09/.01  .86/.68 — .95/.46
+R1-Qwen-1.5B — .75/.38 —.97/.07_—.82/.34 —.90/.29  .96/.16  .86/.35  .69/.33. .94/.47 .56/.31  .40/.35  .65/.38 = .66/.58 .73/.11  .89/.56  .97/.47
+R1-Qwen-7B 66/.37  .92/.07  .95/.39 .96/.32 .93/.16  .84/.36 91/32 .96/.48  .74/.25 61/32 .97/.41  .76/.56 .97/.10  .91/.61  .97/.47
+R1-Qwen-14B —.73/.43.94/.08 94/40 .95/.32 97/17 .77/.35 .98/.33. 971.49 .93/.74 .97/.86  .98/.41  .95/.36  .75/.16  .92/.62  .97/.47
+Prompt Hacking R1-Qwen-32B —_.78/.44. .91/.07 97/40 .96/.32  .97/.17  .80/.35 .98/.32 .96/.49.73/.68  .97/.85  .98/.42 94/40 .94/.26 .85/.62  .96/.46
+Qwen-14B 78/52 .90/.08  .89/.38  .96/.31  .93/.16  .76/.34 97/32 .96/.49  .86/.71  .98/.90 .97/.41  .96/.35. .91/.18  .90/.50  .96/.46
+Qwen-32B 70/49 85/06 .59/.34  .42/.18  .50/.10  .67/.34 —.80/.27  .40/.25 .73/.61  .86/.80 .61/.34  .91/.33 .91/.19  .88/.58  .97/.48
+Rl-Llama-8B —.88/.55.81/.11 87/40 .95/.32 .94/.16  .87/.35  .98/.32 .95/.48  .89/.65 — .87/.80  .95/.42  .89/.38  .85/.18  .78/.58  .94/.46
+R1-Llama-70B —.83/.55  .91/.07 .81/.38 .78/.28  .92/.17  .73/.35 .95/.28  .88/.46 .85/.61 .77/.69 .94/.43 90/33 .94/.18  .87/.59  .95/.47
+
+Table 7: Compliance rates (sentence/token) for MMMLWU, across 15 languages.
+
+
+“Suryoey ydwo1g
+‘SA UOTION.SUL WOK “AQ TIAIAIA UO ([2A2]-Udyo}-asouryD / [OAI[-doUdJU9s-asoUTY_ | [OAd]-Udyo}-YsT[su_ / [OAd]-ddUd]U9s-YsI[suq) soye1 souvTduio0s ssourysD pur ysIsuq :6 BqQVI
+
+L8'/6S 00°/00'1 10710" 10°00" 100/10" 00/00" 1 00°/E0" 9T'/ET" 100°/00"Z0'/S0" 1 00°/10"  00'/10" | 0'/E0".00'/00" 1 00°/Z0" 00°00" 100/00" .00'/00" | Z0'/60" 20/20" 101/90" 00°00" 1S6/Lb" 90/20 1 €0'/90" 00/00" 100'/00° 20/201 ZO'/ZO_ BuURPeH = AOL-PwWRYT-1a
+987/89 00°/00'1687/¢b =—00'/00°106/9¢% =00700°| c6/Sh 10/20 | P6'/9F' —-IS'/8h' 1 LO'/E0" 00°00" 1 $6'/9F — 00'/00° 1 98'/Er 00/00" | P6/EE" 00/00" | L8'/Ev —-00°/00" 1 68°/Zh" 00°00" 1 $6'/9F" 00/00" | C6'/rh 00/00 196'/rr 0/90 1 Sr/cc WONGXA  AOL-PweYT- Teh
+8L/8S 00/00" 1 £1780" 10/00" 1007/10° 007/00" 1 007/E0" 10/10" 1 Z0'/20"- ZO'/P0" 1 10710" 00°00" 10'/Z0"__:00'/00" 1 00/20" 00°00" 1007/00" _:00'/00" | £0760" 00°00 1007/20" -:00'/00' 1 76'/9%" 00°00 1 20/50" 00/00 101/00 00/TO' 1 TO/IO’ SuRpeEH = qg-eweTT-Te
+76/69 00/00 1 187/cr 00/00 19L'/8E" 00/001 8E°/61°  PO'/L0'1 88°/0F' = 90°/80°10€'/60" 00/00 1 ZL /re’ 00/001 6L'/0F 70/0 1 67IF 007001 8T/rT  00°/00° | rr'/07 =—-00°/00'196'/9b" -:00'/00' 1 89°/re" 00/001 L6/9F 10/0 10K /6T  WOHGXA = gg-ewleyT-T a
+
+88/85 00/00 100710" 10/001 10/20 00/001 IZ/IT  ZO'/ZO' 1 PO'/V0' 10/20" 191/90" 00/00" 10S/EZ 00/00" 1 €0'7/F0" 70'/00' 1 807/10" TOTO 10K 07 10°/10' | Th'/0Z" 00/00" 1 L6/8r" 00°/00° 1 9T/TT’  00/00'170'/10° 20/201 80/70" SuPPSeH ATE-UOMO
+78/69 ~=007/00'1767/9F = 00/00 1e67/LP 007/001 S67/9F 00/00 1967/Lr 00°/00° 1 967/LF 007/00 1967/9F 007/001 S6/9b 00/001 L67/Lr 007/001 P6/Sh 007/00 1967/Sh 007/001 S6/9F 007/00°1S6/S~r' 00/00 I LO/LE 00/00 1 867/LP  HONIXA AzE-uoMd
+0670S 00'/00' 1007/00" 00'/00° 100/00" 00°00" 1.00/20" _.00'/00" 10000" 10/20" 100/10" 00'/00" 120/20" 00°/00' | 10/20" 00'/00" 100°00°_ 00°/00' 1 $060" 00'/00" | 00/20" 00/00" 1 96'/9%" 00/00" | 60°/60' 00°00" 100/00" 10/20" 1 0T'/r0" BUETSRH Ap[-womd
+LISI 00/00 16871 00/00 | P6/rr 007/001 S6/Sr 007001 96/Sr° 007/001 S6/9% 00700°1967/Sr' 007/00'1 S6/9% 00700°1967/Sr' 00/00'1 S6/S~ 00'/00'1 S67/Sb’ 001/00" 1967/9F 00/00'1 S6/rr' 00/001 LE/Sr’ 007/001 967/Sp°  WoHd xg dp1-wond
+
+687/29 00'/00°100710' 00'/00'100/10° 00'/00'100'/Z0" _Z0'/E0" 100/00" €1'/Z0" 1 00'/10" 00°00" 100'/10"  00'/00" 100/20" 00'/00' 100/00" 00'/00" 1 00'/80"_00°/00" 1 00'/Z0" 00°00" 196'/9r" 00°00" 1 00'/S0" _ 00'/00' 00°00" €0'/S0' 1 SO'/EO"  SUEVORH  AZE-UOMO-TY
+887/89 OO/0O 1EL/IE OOOO ILS/LZ 00/00 168/EF ODIO IZ8/IP TE/PV SPIEL 00/00 ILE /ZZ —00/00° 1 26h’ 00/00 SLIT’ 00/00" 1 €6'/rr' — 00°/00° 1 09°/LZ’ 00°00" 196'/SP"  00'/00" 1 60'/60" 00°00 1087ST’  OO/IO'ISL/9E WoHdx| = q@ZE-UOMO-Ta
+76/79 00/001 LI/0L’ 00'/00°1 10/10" 00°00" 1.00/20": 10/20" 100/00" 10/10" 1. 00°00" 00'/00" 100/10" 00°/00' 1.00/20" _-00'/00" 1 10°00" 00/00" 1.00/80" 00'/00" 1. 00°/Z0" 00°00" | L6'/LP" 00/00" | Z0'/90° 00/00 10000" 60'/60" | PO'/EO  BUEPLH — AhI-UoMO- 1
+$869 00/00 I1S8/Ir 00/00 106/rr 00710 198/IF 007/00 1 Z6/Sh  ZO'/SO'1 E907 00/00 IZL/SE 00/001 Z8'/0F 00/10" 126/87 00/00" 1 18'/6E'  00°/00" | 0S'/EZ’ 00°00" 1 L6'/9F" —-00'/00° 1 08'/0r' 00°00 196/%r 001/001 S6/9F = WoHdx| = q@pI-UEMO-1a
+16719° 00/00 1007/00° —10'/00' 1007/10" 00/001 00°/E0"—_10°/Z0" 161/87 10'/S0" 1 91/67’ 00°00" 100/20": 00'/00' 1 00°/Z0"-_:00°/00' 100/00" 00°00" 1 10780" 00°00" 1 00'7E0" 00/00" | LO‘/Lr’ —00°/00' | Z0'/90" 00°00" 10000" 10/201 81/2 SurpeH AL-UOMO- TY
+L8'/L9° 00'/00°16L'/0b' 00'/00'|1L9'/0r' 00/00" 1 00'/E0" 10/20" 169'/9E"_ Z0'/Z0" 1 SO'/SE" 00°00" | PO'/E0" _00'/00" 1 90'/S0" _ 00'/00' 1 €0'/00"_00'/00" 1 90°/T T° 00/00" 1 00°90" 00°00" 1 L6'/9b* 00/00" 1 10/80 00/00 19L/9T  1O/ZOILI/Z1 Wondxg AL-UOMO-1Y
+6879S 00'7/00°100710' 00'/00'100'00° 00700'100/€0° 10'00°1$Z'/6Z"_ SO'/E0" 1 ZE/TZ 00°00" 1 10/20": 00'/00" 100/20": 00'/00" 1007/00": 00'/00" 1 00°60" 00°00" 1 10°70" 00°00" | L/L’ 00/00" 1 10'/S0° 00'00' 100/00" COTO LIT /ZT SurpeH  gST-UOMO-Ta
+Ss/e9 00/00 178 /0P OOO ILP/6I OO/OO'IST/ZI 00/00 1 PO/LE OL/ZI1897L7 00/00 1Er'/07 00/001 8E/ZE 00/101 1678E 00/001 8E/SZ 00/001 LO'/SO" 00/00" 1S6'/Sh° 007001 ZL/9E 007/00 1€67/Ir 007/00 106/th  HOHdxg = ag 1-U9MO-Ta
+yz of MS aid oy vf W pr Ty y so ua op uq Rid Sumes [oPoWL
+
+‘Suryoey ydwolg
+“SA UONONSUT WOIAX| ASHI UO ([ade]-Usyo}-asoulyD / [2Ad]-9ou9}Uas-9soUTY.D | [PA]-USYO}-YsT[su_ / [OAo[-souJUas-YsI[suq) soy souvl[duioo ssouryD pur ysi[suq : sqvy,
+
+19'7/S8°100700° 00°/10° | 10/00" 00°/00" 100°/10" 00°/10° 1 10°00" 00/00" 1 00°00" 20/10" 1 Z0'/00" 00/00 | 80'/IT’  €0'/SO"ISO'/IT’ 00/001 6€/%6' LO/ET'1S07S0° 00/00 100/10" SuEpPeEH gqOL-eweTT-1e
+L9'/18° 100'/00° 10'/Z0" 1007/00" 00°/00" 100/20" _.00'/00"100°/00"_-00'/00" 100/00" 9T/ST" 100/00" 00'/00" 190/20" 00'/00" 1 Z0'/00° 00°00" | 8E'/Z6"' 0000" 1 S0'/S0" 00/00 1007/10" woHdxA =gOL-eWeTT-Te
+$S7€8' 100'/00' 00'/00° 100/00" 00/00" |ET'/LE’ _00'/10°1 10°/10" 00/00" 1 10/00" 40/20" 1 10°/T0" 00°00" 190/20": 00'/00" 1 Z0'/Z0"-:00'/00" 1 6€'/T6' 0000" 1 $0'7E0" 00°00 1 10/90" SUEpPeH = q@g-eWeTT-1e
+95706 1007/00° 10°/Z0" 1007/10" 00°/00°16€'/06' 00'/00° 1 10710" 00/00" | 10/10" 70'/E0" 100/10" 00'/00" 1 $000" 00'/00" 1 Z0'/Z0"-:00'/00" | LE/E6’ 00'/00'1 70/20" 00'/00 190'/0E = WoHdX| = q@g-ewWeTT-1e
+
+OF/S8°1 10710 00°00 | SOVLI’ 00°00" 1 €0'/ZT' 00/00" 1 70'/90' 00°00" 1 Z0'/ZO" «TOTO I ST'/6Z—- LO/TO' 1 EZ/SS° 00°00" 107/TS" 00/00" 1 8€'/68" 00°00" 81'/Zr -00°/00" | 10'/00" SuPPeH d7E-uaMmd
+€9'7/9L' 100'/00' 00'/00'| LE/98° 00°/00° |€0°/ZT" 00°/00" 1 LE'7/98" 00/00" 1 007/10" 00°/00" | LE/L8" 00°00" 1 9€'/78" _00'/00° 1 9€/98" 00°00" 1 8E'/98" 00/00" 1 9E7S8" 00/00 I LE/98° — Woudxg dze-uamd
+8¢7/88' 100'/00' 00'/00°! 107/10" 00°/00" | 10°/10°  00°/00" 1 10°00" 00/00" | 10/00" Z0"/Z0" 1 €0'/00" 00°00" 10T'/ST’  00'/00° 1 €0'/E0" 00/00" 1 6£€'/06" 00°00" | 8€'/68"  00'/00° 1 10°00" SuEjoeH dp] -uamd
+997/18°100700° 00°/00° | LE/88" 00'/00"'19€7S8" 00'/00° | LE/S8° 00/00" 100/00" 00°00" | 8E'/L8" 00'/00" 1 9€/98" 00'/00" 19€/98" 00/00" 1 8E7L8° 00'/00° 1 9E798°  OD'/00 ILE/L8 Hod pl -uamd
+79/78 1007/00° 00°/10° 100/10" 00°/00" 100/00" 00°/00° 1 10°00": 00/00" 100/00" Z0'/10" | 10/10" LO'/LO' 1 S070" ZO'/ZO"IZO'VEO’ 00/001 6E/26'  TE/PE1S0790° 00/00 1007/10" SUEPeH = ATE-UOMO-1A
+8$7/Z6' 100'/00° 00'/00° 1007/10" 00°/00" 100°/00" 00'/00" 1 10°/10"_ 00'/00" 100/00" 10°/00" 1 00°00" 00°00" 1 $0700" 00'/00" 1 10°00" 00°00" | 8€'/06' 00°00" 1 70'/00"_:00'/00° 00°00" WUdX| = ATE-MOMO-TA
+8$7/08' 100'/00' 00'/00° 1007/00" 10/10" | 10'/E0" 00°00" 100/10" 00/00" 10000" 10/10" | SO/ZI" ZO'/ZO' 1 S000" LI'/IZ 110/10" 00°00" 10/56" 00'00'1 70/10" 00'/00° 00°00" SUEPeH = API -UOMO-1A
+€9'7/06' 100/00" 00'/00° 100/00" 00°/00" 1 9€/S8"  10°/10° 10Z'/rr* —-00'/00° 100/00" 10°/00" | 10°/S0" 00°00" 1 0°00" 00'/00" 1 10°00" 00°00" | 8E'/68" .00'00'1 L0'780° 00/00 1 ZO'/8T  WOUdXA = ApT-UOMO-1A
+19/68" | 10/00" 10°/00" 1 Z0'/E0" 00°00" 100/00" 00°/10" 1 70/20" -:00'/00" 1 10'/10" 10'/10" | ZE/L0"_.00°/00" 1 $0'/00" 00/00" 1 Z0'/10" 00°00" 1 6€'/76" —-00'/00° 1 $000" 00°00" 1007/00" SuRPPeH AL-UOMO-1TY
+6$7/98'100'7/00° LOV/LO'IIT/9€ 00/00" 107/rS" 00°00" 1 8Z'/8S" 00/00" | Z0'/Z0"—-10°/10" | 0'/S0" 00°00" 1 $0'/00"_ 00'/00° 1 Z0'/00° 00/00" | LE/E6" 00°00" 1 $0'/00" 00/00 | PO'/0T = Woudx A L-UOMO-1TY
+95798° 100700° 00°/00°1 10/10" 00°/00" 100/10" 00/00" 80°/Er 00/00" | €0'/40"  10'/S0" |0P'/FT’ 00°/00° 19000" 00'/00" 1 €0'/10" 00°00" 1 6€'/16" 00'/00°1 $0710" 00/00" 100/60" SUEPLH AS T-UOMO-1A
+95768 100700° 00°/r0" 1 €0'/0Z 00°/00" 1 8E/L8" 00/00" | SE7/EL’ 00/00" 1 40/20" $0'/90"' 1 90/20". 00'/00" 1 60°/IT’  00'/00" 1 Z0'/00° 00°00" | 8€'/68" .00'/00' 1 907E0" 00°00 | LE/98  WoUdX| = AS T-UOMO-TA
+
+yz tn ay AS nu ef Ra so uo ap uq Sumes [Po
+
+
+R1-Qwen-1.5B | MGSM | BaseSub R1-Qwen-1.5B | MGSM | HackSub
+
+1.0
+bn} .20 ee: ae: 23 22 .20 .20 .20 20 20 aaa bn .05 .06 .09 08 07 .07 .07 04 06 .06 10
+de; .36 38 38 36 36 at 34 33 36 34 38 de} .39 40 40 ee) 40 a 38 36 41 37 40
+
+0.8
+en en
+es| 43 43 46 44 42 434189448 es} 47 46 50 47 45 48 42 440464650
+fr] 42.440 464444942 06 fr) 47 47 49 48 4847424 B45
+
+=
+
+ja 22 24 28 24 24 24 24 20 24 22 26 ja 25, 27 26 27 25 25, 25, 24 26 24 26
+
+en
+
+sw 03 06 08 07 03 04 04 02 02 03 06 sw 03 04 07 05 06, 02 04 O1 02 02 08
+
+te] .04 07 ae 06 07 08 06 04 04 05 10 te; .05 06 07 06 08 06 04 04 06 05 .07
+0.2
+
+thy .07 .08 14 2 08 08 10 05 06 05 ae th; .03 06 04 05 04 03 04 02 02 .03 .06
+
+%
+%
+
+S ¥ &€ &€ © FT & F YS SF ¥ S € € &€ © FS © SF #
+
+R1-Qwen-7B | MGSM | BaseSub 6 R1-Qwen-7B | MGSM | HackSub 46
+
+bn} 47.440 5084? bn] 48 48 50 484648474550
+08
+0.6
+04
+0.2
+0.0
+
+S ¥€ & &@ LS ey © gs © SF *& S € SF @ 6 yy © gs &S SF
+R1-Qwen-32B | MGSM | BaseSub a0 R1-Qwen-32B | MGSM | HackSub 16
+
+bn
+
+0.8 08
+0.6 06
+0.4 04
+: J 0.2 0.2
+0.0 0.0
+
+S ¥ F€ & © BG © F YS F *& S FF FS & © YB © SF GS F *&
+
+Figure 7: Final-answer accuracy of LRMs under two thinking trace substitutions: BaseSub, HackSub. Each cell
+shows the accuracy when injecting thinking traces from a language on the y-axis into a language on the y-axis.
+Performance disparities indicate that thinking trace quality varies across languages.
+
+
+R1-Qwen-1.5B | MGSM | BaseSub | Consistency
+
+R1-Qwen-1.5B | MGSM | HackSub | Consistency
+
+1.0 10
+16 13 16 PH & .14 16 .05 .10 ek: .08 .06 08 .07 .08 .05 16 .04 .00 .08
+de 36 de SS 07 07 .09
+0.8 08
+en| .24 31 en, .09 31 07 09 05
+es} .25 36 es} .07 30 07 08 02
+fr{ .25 06 fry at 34 02 0.6
+ja, -23 ja} .07 eda
+ru ieee 0.4 ruy .o7 =| 0.4
+sw 7.02 sw7 00 00
+04.04 0406 04
+0.2
+01.01 =O 2S 00st 01
+Bes * | - =
+0.0
+we & 2 «& ye © 3s ee se xs
+R1-Qwen-7B | MGSM | HackSub | Consistency is
+08
+0.6
+0.4
+0.2
+0.0
+er fF & S e © FS SC TF er fF & © -~ © gs YS YF ¥
+R1-Qwen-32B | MGSM | BaseSub | Consistency R1-Qwen-32B | MGSM | HackSub | Consistency 26
+08
+0.6
+0.4
+02
+0.0
+
+Ss &¢ © ~~ © gs SC YS *#
+
+& e < a o $s e~
+
+s
+
+Figure 8: Substitution consistency of LRMs under two thinking trace substitutions: BaseSub, HackSub. Each cell
+indicates the consistency between the original predictions in the language on the x-axis and the predictions after
+
+injecting thinking traces from the language on the y-axis. Higher consistency is observed when traces are substituted
+between similar languages.
+
+
+Metric Group Mean Value_P-Value
+Without Low Resource Languages
+Trace- Substitution Indo-European 0.7208 9.05e-03
+Consistency Non Indo-European 0.7108
+With Low Resource Languages
+Trace- Substitution Indo-European 0.7108 1.99e-52
+Consistency Non Indo-European 0.5452 ,
+
+Table 10: Consistency comparison between Indo-
+European and non-Indo-European languages. Reported
+are mean consistency values for Consistency of Trace-
+Substitution metrics, with corresponding p-values (t-
+test). We also discard low-resouce languages sw and te
+to conduct t-test. Indo-European languages generally
+achieve higher consistency, and the differences are sta-
+tistically significant.
+
+removing the final part leads to larger performance
+drops, highlighting the importance of the conclud-
+ing reasoning steps.
+
+B Details of Datasets
+
+B.1 Language Coverage
+
+Table 12 summarizes the language coverage of the
+two datasets used in our experiments: MMMLU
+and MGSM.
+
+B.2 Test Instances
+
+To reduce computational costs, we limit each
+dataset to a maximum of 250 test instances per
+language. For MMMLU, we randomly sample 250
+examples from the full 14K test set. This sampling
+is applied consistently across all parallel language
+versions to ensure comparability. For MGSM, we
+use the official test set, which consists of 250 par-
+allel examples available across all supported lan-
+guages.
+
+B.3. Prompt Templates
+
+Table 9 provides an overview of the prompts de-
+signed for model instruction. However, we ob-
+served that, even when explicit prompts were pro-
+vided, the model frequently conducted its inter-
+mediate reasoning in a language different from
+that of the input prompt. To mitigate this incon-
+sistency, we appended the language-specific in-
+structions listed in Table 13 after the query and
+the <think> tag. This strategy effectively enforces
+the model to align its reasoning language with the
+prompt language. To avoid redundancy, we present
+prompt templates for the MGSM task in Table 9
+only, while templates for MMMLU share the same
+structural format and are available in the released
+code.
+
+C_ Experimental Environment and
+Hyperparameters
+
+We set the maximum generation length to 8192
+tokens for all models. We use the recommended
+configurations provided on HuggingFace for all
+models. Specifically, we set the temperature to 0.6
+and top-p to 0.95 for distilled versions of DeepSeek
+R1. For Qwen3 models, we set the temperature to
+0.6, top-p to 0.95, and top-k to 20.
+
+Experiments are primarily conducted on
+NVIDIA A100 GPUs. For larger models, such
+as DeepSeek-R1-Distill-Llama-70B, we use
+NVIDIA H200 GPUs for inference.
+
+To evaluate final-answer correctness, we adopt
+an exact matching strategy. Following prior
+work (Qi et al., 2025), we prompt the model to
+wrap its final answer in \boxed{}, and extract the
+boxed content for comparison against the gold an-
+swet.
+
+
+Lang
+
+ar
+
+bn
+
+de
+
+en
+
+es
+
+fr
+
+id
+
+it
+ja
+ko
+
+pt
+
+ru
+
+SW
+
+te
+
+yo
+
+zh
+
+Instruction
+
+35 lagls Some sly Je 5 Si we Al sel soSl So Slo! dobe BobeU Gol Ay ctiso OP Le
+<think>...</think>.|j,céig ae se gPodJ 3 seslogJ Jéls \boxed{}.
+
+OYAR SCA ADH TA Slga | acy act Picoa AS WIT! WA FeeT | <think>...</think> 4
+Ofer erga Gee POTS Ba \boxed{}4 fea |
+
+Bitte denken Sie immer auf Deutsch. Lésen Sie das folgende Mathematikproblem
+Schritt fiir Schritt. Schreiben Sie Ihre Begriindung in <think>...</think>. Geben Sie
+schlief$lich das Ergebnis in \boxed{} an.
+
+Always think in English. Solve the following math problem step by step. Write your
+reasoning in <think>...</think>. Finally, provide the final result enclosed in \boxed{}.
+Piense siempre en espafiol. Resuelva el siguiente problema de matematicas paso a
+paso. Escriba su razonamiento en <think>...</think> y encierre el resultado final en
+\boxed{}.
+
+Veuillez toujours réfléchir en frangais. Résolvez le probleme mathématique suivant
+étape par étape. Ecrivez le raisonnement dans <think>...</think>. Enfin, encadrez le
+résultat final dans \boxed{}.
+
+pum saan fect F att Are far ay afora wet St aeorag alla S Ee Hel Ah <think>...</think> #
+fer” siz sifes afore \boxed{}# 1
+
+Selalu berpikir dalam bahasa Indonesia. Selesaikan soal matematika berikut
+langkah demi langkah. Tulis penalaran di <think>...</think> dan berikan hasil akhir
+dalam \boxed{}.
+
+Pensa sempre in italiano. Risolvi il seguente problema matematico passo dopo passo.
+Scrivi il ragionamento in <think>...</think>. Infine racchiudi il risultato in \boxed{}.
+MICHRGCHATCR SY. JA FORCARPACRPRAIICMUY TK HES, | Hata
+<think>...</think> (C#czbL, MBAR \boxed{(FICMUTC RSV.
+
+od tele Aei2. Gs +e BAS GIS Sosg2. FES
+<think>...</think>o] 27. 3S AzysS AAlsH 2.
+
+A pedido, pense sempre em portugués. Resolva o problema de matematica a seguir
+paso a paso. Escreva 0 raciocinio em <think>...</think> e coloque o resultado final
+em \boxed{}.
+
+Bcerya paccyKyjal 0-pyccKH. Peal cieyyrollyo MaTeMaTHUeCKy!0 3ayauy War
+3a IaroM. IMM paccy2keHHua BHYTpH <think>...</think>. B koHlje MoMecTH HTOT
+BHYTPpH \boxed{}.
+
+Tafadhali kila mara fikiria kwa Kiswahili. Tatua tatizo lifuatalo la hisabati hatua kwa
+hatua. Andika hoja kwenye <think>...</think> na weka matokeo ya mwisho ndani
+ya \boxed{}.
+
+BAHSH AQ Ger Sor" sH*Dosod. S08 te3S Nxoidgvo Soarrr S63, Sos08. Do SoD)
+<think>...</think> &° srdhod. ASSrr eh SOBA \boxed{}S* adgod.
+Wsataiumwyiinuana ustywadiadolWiuuuiudumoy Geumanaltty
+<think>...</think> uazlanadwéqariulu \boxed{}.
+
+Jow6 maa ro ni Yoruba. Se isoro isird yii ni igbésé-nipéya. Ko irdnu sint
+<think>...</think> ki o si fi esi ikehin sini \boxed{}.
+
+WAP SES, RRA PRS ie, AR HERES Zé <think>...</think> .
+Ida, WeRtRERZAR ICE \boxed{}#,
+
+Figure 9: Prompts for MGSM task in different languages.
+
+
+Operation Model de en es fr ja ru sw th zh bn te
+
+Qwen-14B A6(.51) 54 (.57) 40 (.46) 32 (.39)  .46(.55) 32. (36) ~—_—.28 (.60) -25 (.28) 56 (.67) — 51 (.64) -36 (.49)
+
+Qwen-32B 53 (.66) 62 (.71) 43 (.64) 31(.58) 46 (64) -.37(.50) 51. (.80) -60 (.67) 38 (.48) 46 (.53) .26 (.38)
+
+R1-Qwen-1.5B 05 (.13) 08 (.11) 04 (.08) — -.00(-.01) 03.12) 02 (05) -.00 (NaN) -.02 (-2.00) 03 (.04) — -.02 (-.29) _-.02 (-.56)
+
+Truncation R1-Qwen-7B  .08(.12) —_.06 (.07) .06 (.07) .06 (09) 03 (.05) 05 (.07) —-.02 (-.50) .09 (.18) 08 (.10) — .00 (.00) -.12 (-.78)
+(First) R1-Qwen-14B = .08(.10) —-.02 (-.02)__-.02 (-.02) 06 (.07) ~—.03 (.04) = .02(.02) ~—.00 (.02) .04 (.05) 02 (.02) —.04 (.06) -.08 (-.30)
+R1-Qwen-32B 11. (.12) 02 (.03) O1(.01)  -.01(-.01)  .02(.02) .01 (01) ~—.00 (.01) -01 (.01) O1(.01) = .01(.01) —-.36 (-1.98)
+Rl-Llama-8B = .10(.20) _~—_—.13 (16) -11 (15) -16(.26) .04(.09) .04(.06) -.02(-.55) —-.02 (-.05) 04.05) -.01 (-.18) —-.10 (-.92)
+R1-Llama-70B = .08(.10) —_—.03 (.03) .07 (.08) 07 (.08) = .06(.07) —-.06.(.07) _—.04 (.04) -03 (.04) -17(.19)  -.02 (-.02) — -.32 (-.72)
+
+Qwen-14B 46(.51) 56 (.58) 46 (.52) 39(.47)  .42(.51) 300.34) —.29 (.61) .33 (.37) 52(.61) 56 (.71) -38 (.53)
+
+Qwen-32B 54 (.67) 64 (.73) 44 (.65) 31(.58) 48 (.67) 36.48) ~—-.50 (.78) -61 (.68) .39(.49) 53 (.62) .36 (.53)
+
+R1-Qwen-1.5B 03.07) ~—.09 (.11) .04 (.08) -02 (03) 02 (.08) ~—-.03 (07) -.00 (NaN) -.01 (-1.50) 01 (02) -.01 (-.21) —_-.02 (-.56)
+
+Truncation R1-Qwen-7B = .09(.15) 06 (.07) .06 (.08) 08 (.13) 02 (.04) 06 (.08) —--.01 (-.17) .07 (.13) 07 (09)  -.00(-.01) —-.12 (-.78)
+(Middle) R1-Qwen-14B 08 (.11) = .00(.00) ~—-.02 (-.02) 05.06) ~=— 04 (.05)_—.02 (.03) _—-.02 (-.06) .04 (.04) 02 (.02) —.04 (.06) -.08 (-.30)
+R1-Qwen-32B 10 (.12) _—.04 (.04) 02 (.03) = -.02 (-.03) 02 (.03) ~—.02.(.02) _-.01 (-.03) .01 (.01) O1(.01) = .02(.02) —-.36 (-1.93)
+R1-Llama-8B = .09(.17) 13. (.15) -13 (.18) -15(.24) 04.08) 04.05) -.02 (-.36) —--.03 (-.09) 03 (.04) —--.02 (-.24) __-.09 (-.85)
+Rl-Llama-70B_ 10 (.12) —_.02 (.02) .09 (.10) 08 (10) 06 (.07) 07 (08) ~—.04 (.05) -03 (.04) -13(.15)  -.04 (-.06) — -.33 (-.73)
+
+Qwen-14B 68 (.75) 75 (.79) .69 (.79) 64(.77) — .69(.82) 68 (.75) —_—.40.(.84) -65 (.72) .67(.79) — .66 (.83) -63 (.87)
+
+Qwen-32B .66 (.83) — .76 (.86) -55 (.81) 39(.72) 62 (.87) 60.81) 56 (.89) -T7 (.86) .60(.75) —.77 (.89) -60 (.88)
+
+R1-Qwen-1.5B  .22(.55) 51. (.65) 31 (.67) 23 (50) 14 (56) 28 (.64) -.01 (NaN) -.02 (-2.50) .26(.40) ~—-.01 (.14) -.01 (-.22)
+
+Truncation R1-Qwen-7B — .28(.45) — 43 (.51) Al (.54) 32(.53)  .22 (42) 36 (.50) _—.03 (.67) .22 (.43) .29 (.36) — .06 (.12) -00 (.00)
+
+(Last) R1-Qwen-14B 40 (.52) 32 (.38) -29 (.36) 35(.44)  .24(.31) 39.44) 12. (.48) .30 (.37) 24(.27) — .24 (.37) .06 (.20)
+R1-Qwen-32B —.30(.35) —.26 (.27) .35 (.40) -21(.26) = .30(.34) = .29(.32) ~—.20 (.43) 22 (25) -14(.16) — .20(.25) = -.22 (-1.22)
+
+Rl-Llama-8B_ 38 (.71) 59 (.70) 54 (.77) A5(.71)  .28(.61)  .48(.72) 01 (.18) -16 (.43) 44(.60) — .01 (.18) .04 (.38)
+Rl-Llama-70B —.36(.44) —.22 (.23) -38 (.42) 35 (41) .28(.34) 39.43) 32. (.37) .26 (.31) .29 (.33) 11. (.15) -.09 (-.19)
+
+Table 11: Absolute drop and relative drop rate compared to baseline (First, Middle and Last truncation).
+
+Dataset Languages
+
+MMMLU Arabic, Bengali, German, Spanish,
+
+French, Hindi, Indonesian, Italian,
+Japanese, Korean, Portuguese, Swahili,
+Yoruba, Chinese
+
+MGSM Bengali, Chinese, French, German,
+
+Japanese, Russian, Spanish, Swahili,
+Telugu, Thai
+
+Table 12: Languages covered in MMMLU and MGSM.
+
+Lang Hacking Prefix
+ar Bae GE PI BIT 53 yg BoE IIIS Bove
+bn RCAC, SUA ATT (OSI a WI SA.
+de Auf Anfrage werde ich anfangen, auf Deutsch zu denken.
+en By request, I will start thinking in English.
+es Por solicitud, comenzaré a pensar en espafiol.
+fr Ala demande, je vais commencer a penser en francais.
+hi orate oe, A feat A Sha YS HET
+id | Atas permintaan, saya akan mulai berpikir dalam bahasa Indonesia.
+it Su richiesta, inizierd a pensare in italiano.
+ja YPTAPRIIOUT. ARBCEAMOET.
+ko LAO He} ASE YZs}7] lz Su.
+pt A pedido, comegarei a pensar em portugués.
+ru Ilo npocn6e a HauHy paccy2KaTb I0-pyccku.
+sw Kwa ombi, nitaanza kufikiri kwa Kiswahili.
+te BGS DEH, Sxv Sentes® aS Dorscéo BPSoMAPAD.
+th maa dua:SuAaiumurtng
+yo Lori ibééré, maa béré si rd ni édé Yoruba.
+zh WOR, BOA PSC.
+
+Table 13: Language-specific answer instructions.

@@ -1,0 +1,954 @@
+arXiv:2510.11598vl1 [cs.CL] 13 Oct 2025
+
+META-LORA: DATA-EFFICIENT MULTI-TASK FINE-TUNING
+FOR LARGE LANGUAGE MODELS
+
+Bo Cheng* Xu Wang*
+School of Artificial Intelligence, Jilin University School of Artificial Intelligence, Jilin University
+chengbo9691@gmail.com xwang22@mails.jlu.edu.cn
+Jinda Liu
+
+School of Artificial Intelligence, Jilin University
+1iujd9922@mails.jlu.edu.cn
+
+Yi Chang
+School of Artificial Intelligence, Jilin University
+Engineering Research Center of Knowledge-Driven Human-Machine Intelligence, MOE, China
+International Center of Future Science, Jilin University
+yichang@jlu.edu.cn
+
+Yuan Wu'
+School of Artificial Intelligence, Jilin University
+yuanwu@jlu.edu.cn
+
+ABSTRACT
+
+Low-Rank Adaptation (LoORA) has emerged as one of the most widely used parameter-efficient
+fine-tuning (PEFT) methods for adapting large language models (LLMs) to downstream tasks. While
+highly effective in single-task settings, it struggles to efficiently leverage inter-task knowledge in
+complex multi-task learning scenarios, often requiring substantial task-specific data to achieve optimal
+performance. To address this limitation, we introduce META-LORA, a two-stage optimization
+framework that significantly improves data efficiency in multi-task adaptation. In the first stage,
+task-specific LoRA adapters are learned using only a few samples from each involved dataset,
+enabling rapid adaptation without large-scale supervision. In the second stage, the shared LORA
+adapter is updated by aggregating gradients from multiple tasks to promote knowledge transfer across
+tasks, further reducing data usage by leveraging common patterns. In both multi-task learning and
+multilingual learning scenarios, our method matches or surpasses the performance of traditional
+full-data LoRA fine-tuning approaches, while using significantly less task-specific data.
+
+1 Introduction
+
+Large language models (LLMs) have transformed natural language processing by achieving state-of-the-art results
+on tasks from text generation to complex reasoning [3]. However, the sheer scale of these models, which often
+encompass billions of parameters, renders full-parameter fine-tuning prohibitively expensive in both computational
+and memory requirements, especially when adapting to multiple tasks simultaneously [4]. As real-world applications
+increasingly demand multi-task capabilities, methods that reduce resource overhead while preserving performance have
+become critical. Parameter-efficient fine-tuning (PEFT) techniques [5] {6} [7] [8], which add only lightweight adaptation
+modules to a frozen base model, offer a promising solution by slashing trainable parameters from hundreds of millions
+
+*Equal contribution
+t Corresponding author
+
+
+to mere thousands dramatically cutting GPU memory footprint and speeding up training without sacrificing modularity
+across tasks.
+
+While PEFT approaches like LoRA and its multi-task extensions (e.g., R-LoRA [9], HydraloRA [10]) deliver
+substantial efficiency gains in single-task scenarios, they still rely on large volumes of labeled data when scaled to many
+tasks resulting in poor data efficiency. For example, HydraLoRA reports that fine-tuning on just 43 tasks required over
+320,000 in-domain examples to achieve satisfactory performance on downstream tasks [10]. This heavy data demand
+undermines the very efficiency gains PEFT seeks to provide in multi-task settings and highlights the pressing need for
+methods that balance both parameter- and data-efficiency in large-scale multi-task adaptation.
+
+Data-efficient techniques like coreset selection or data pruning excel at trimming down data for a single
+task by homing in on the “most informative” examples, but in a multi-task LLM scenario, this narrow focus comes at
+the expense of broader generalization across many objectives. By optimizing for task-specific highlights, these methods
+tend to under-represent the shared structures and cross-task patterns that are essential for robust performance on unseen
+
+or less frequent tasks [14] [15].
+
+Inspired by the principles of Meta-Learning, which emphasizes enabling models to “learn how to learn” [16], we
+propose a novel framework called META-LORA, specifically designed to address the data efficiency challenge in the
+fine-tuning process of LLMs within multi-task learning scenarios. To achieve this, we frame the fine-tuning process
+as an iterative optimization procedure consisting of two key stages: task-specific adaptation and meta-knowledge
+update. The task-specific adaptation stage allows for rapid per-task learning using only a small amount of data from
+the support set, enabling efficient adaptation to each task without requiring large datasets. Meanwhile, the meta-
+knowledge update stage aggregates insights from multiple tasks through a shared LoRA adapter, promoting the transfer
+of knowledge across tasks while minimizing data usage. Together, these two stages optimize the learning process,
+significantly enhancing data efficiency while preserving model performance. We demonstrate that META-LORA
+achieves competitive performance in both multi-task learning and multilingual learning scenarios while requiring
+significantly less task-specific data, showcasing its adaptability across a variety of tasks. Extensive ablation studies and
+analyses further demonstrate the necessity of the two-stage optimization framework.
+
+In summary, the major contributions of this paper are outlined below.
+
+¢ We propose META-LORA, a novel framework designed to enhance data efficiency for multi-task LoRA
+adaptation while preserving model performance.
+
+¢ Comprehensive experimental evaluations validate the effectiveness of META-LORA in both multi-task
+learning and multilingual learning scenarios.
+
+¢ Extensive ablation experiments and analyses demonstrate the necessity of the two-stage optimization frame-
+work.
+
+2 Related Work
+
+Parameter-Efficient Fine-tuning As LLMs grow more powerful, fine-tuning them remains computationally intensive.
+This challenge has motivated the development of parameter-efficient fine-tuning (PEFT) methods, which aim to lower
+memory and storage demands during model adaptation. One representative approach is adapter tuning [17] [18] {19} [20],
+which introduces trainable layers into the existing model while keeping the original parameters frozen. Another line
+of PEFT research focuses on directly manipulating model activations through learnable vectors, with methods such
+as concatenation [22], multiplication, and addition. Additionally, prompt-based tuning methods like prefix
+tuning and continuous prompt tuning [7] replace discrete prompt engineering with trainable embeddings.
+Beyond injecting new parameters, researchers have also explored sparse updates and low-rank adaptation
+(LoRA) [5] as alternatives that modify only a small subset of the model’s parameters or its computational graph.
+
+Lora Architecture on Multi-Task Learning Multi-LoRA Architectures have emerged as a promising solution for
+adapting LLMs, such as LLaMA, in resource-constrained settings [26]. To further leverage the potential of LoRA,
+researchers have proposed multi-LoRA approaches that employ multiple low-rank adapters simultaneously. For
+instance, LORAHub trains multiple adapters and dynamically selects suitable combinations based on the domain at
+inference time, while MultiLoRA improves scalability by decomposing LoRA modules and introducing learnable
+scaling factors. To reduce resource usage, LoRAFit refines module structure, and LARAMoE incorporates a
+Mixture-of-Experts framework to protect pre-trained knowledge during instruction tuning.
+
+Data-efficient strategies on LLM  Fine-tuning LLMs is computationally demanding, which has motivated the
+development of data-efficient strategies to reduce resource consumption without sacrificing performance 32].
+
+
+Among these, two prominent approaches are coreset selection and data pruning [35] [36]. These techniques
+highlight the promise of intelligent data selection for alleviating the computational burden of LLM fine-tuning, thereby
+improving accessibility in resource-constrained settings. Specifically, coreset selection focuses on identifying a
+representative subset of training data that can approximate the performance achieved with the full dataset (33) [34] [12],
+while data pruning aims to eliminate less informative or redundant samples to streamline training [35] [36].
+
+3 META-LORA
+
+In this section, we introduce META-LORA, a data-efficient LoRA-based architecture for fine-tuning, as illustrated in
+Figure[I] The detailed fine-tuning procedure is provided in Algorithm|I]
+
+3.1 Problem Formulation
+
+Given a model f with pre-trained weights Wo and a set of
+tasks T = {71, 72,.--,; Tw}, current LORA-based methods
+for multi-task adaptation optimize:
+
+N
+min) UW (a,y)~Ti L( fw +A0(), y)] (1)
+
+where 0 = { A, B} denotes the shared LoRA adapter param-
+eters across all N tasks, and AO = BA approximates the
+accumulated gradient updates AW. 7; denotes the data dis-
+tribution of the 2-th task. Different from the above paradigm,
+we propose a two-stage optimization framework that main-
+tains multiple local LoRA adapters during the task-specific
+adaptation stage, alongside a global LoRA adapter updated in
+the meta-knowledge update stage, enabling the model to effi-
+ciently adapt to multiple tasks while minimizing the amount
+of data required for each task.
+
+3.2 Fine-tuning
+
+Je Phase Le Task Specie Adaptation Figure 1: Architecture of META-LORA. During fine-
+
+In each iteration, we randomly sample n tasks 6 = tuning, META-LORA adopts a two-stage optimiza-
+{T,, T2,---;Tn} from T with each task following the tion framework comprising a task-specific adaptation
+episodic formulation: stage and a meta-knowledge update stage. Starting
+from the initial shared LoRA parameters 6, task-specific
+
+Ti = (Si, Q:) (2) adapters are rapidly adapted using support set of each
+
+oo. task, enabling efficient task-level specialization. In
+where S; and Q; are disjoint subsets randomly selected from the second stage, the updated task-specific parameters
+
+task 7;, traditionally referred to as the support set and the 4g 1,05,...,4n are used to compute gradients from the
+th of q ‘ . :
+query set [16] with sizes nj and n;, respectively. corresponding query sets, which are then aggregated
+
+For each task 7; € B, the task-specific adapter parameters to update the shared LoRA adapter, enabling effective
+0; are first initialized with the shared adapter parameters 9 Toss-task knowledge transfer. By iteratively alternating
+(i.e., 0; < 9). Subsequently, the model performs the gradient between these two stages, META-LORA enhances data
+descent on 0; for k steps based on its corresponding support fficiency in multi-task adaptation of LLMs.
+
+set, simulating the model’s rapid adaptation to a new task. One gradient update of task-specific (local) LoRA adapter
+parameters 6; can be formulated as:
+
+6; — 0; — aVo,Ls,(0:) (3)
+
+where a is the learning rate of the adaptation stage, and the task-specific adaptation loss Ls, (6;) is:
+
+1
+£s(6:)= = DL fwo+a0,(a),9) (4)
+(x,y)~Si
+
+SH
+
+
+Algorithm 1 META-LORA using the First-Order Approximation
+
+1: Require: Task set 7 = {71, 72,..., 7}, model f with frozen pre-trained parameters Wo, learning rate of the
+adaptation stage a, learning rate of the meta-update stage 3, number of adaptation steps k, number of selected tasks
+in each iteration n
+
+2: Randomly initialize the shared LoRA adapter parameters
+
+3: for each iteration do
+
+4 Stage I: Task-Specific Adaptation
+
+5 Randomly select n tasks B C T
+
+6 for each task 7; © Bdo
+
+Z Sample support set S; and query set QO;
+
+8 Create a temporary copy of parameters for adaptation: 0; <— @
+
+9: Obtain task-specific adapted parameters 0; by performing Eq. B]for k; steps
+10: end for
+11: Stage II: Meta-Knowledge Update
+12: Compute the generalization loss for each selected task 7; using Eq. [6]
+
+13: Average the generalization gradients to update the shared LoRA parameters 6 using Eq.[5]
+14: end for
+15: Output: Fine-tuned LoRA parameters
+
+3.2.2 Phase II: Meta-Knowledge Update
+
+After obtaining the adapted parameters 0; for each task 7;, the meta-update is performed on the shared (global) LoRA
+parameters #. To maintain computationally tractable with large models, we employ the first-order approximation of
+MAML, a common simplification that retains meta-learning signals while avoiding the prohibitive computational
+overhead of Hessian-vector products. In practice, this is implemented by detaching the computational graph of the
+task-specific adaptation, which prevents backpropagation through the task-specific update steps. The approximate
+meta-update rule, which averages the gradients from a batch of n sampled tasks, is therefore formulated as:
+
+0 0- B~ $2 Vo,L£a, (Gi) (5)
+
+i=1
+
+where ( is the learning rate in the meta-stage, and the generalization loss Lg, (@;) with respect to task J; is computed
+on the corresponding query set using the adapted LoRA parameters 6;:
+
+1
+* (@y)~Qi
+
+3.3 Inference
+
+After fine-tuning, we obtain a single shared adapter that captures multi-task knowledge. It is worth emphasizing that the
+task-specific adapters are merely intermediate artifacts generated during the fine-tuning process. In the inference stage,
+the parameters of the shared adapter 6 are seamlessly merged into the frozen pre-trained weights Wo, eliminating the
+need to activate or switch among task-specific adapters.
+
+4 Experiments
+
+In this section, we present a series of experiments to evaluate the effectiveness of META-LORA in both multi-task and
+multilingual learning scenarios. Additionally, we conduct ablation studies to examine the necessity of the proposed
+two-stage optimization framework, as well as the adaptability of META-LORA under more challenging multi-task
+configuration. Finally, we perform a sensitivity analysis to investigate the impact of the amount of fine-tuning data on
+overall performance.
+
+
+Table 1: Performance of different methods on BBH (3-shot) with LLaMA2-7B and LLaMA2-13B fine-tuned on the
+subset of the Flanv2 dataset. META-LORA uses only 100 examples sampled from each task for fine-tuning, whereas
+the other methods except Base utilize the full dataset. * indicates results from [10].
+
+Model Size Base LoRA LoRAHub* LoRA MoE* HydraLoRA* META-LORA
+7B 31.6 37.2 39.7 40.3 41.8 38.52
+13B 38.4 40.9 41.9 43.7 44.7 46.32
+
+Table 2: Performance comparison on the proposed five-task dataset. The base models are fine-tuned by META-LORA
+with only 50 examples randomly sampled from each task, and LoRA and HydraLoRA represent the full-data tuning
+schemes.
+
+Method MMLU MMLU-math BBH AVG
+LLaMA2-7B
+
+LoRA 29.43 26.42 30.24 28.70
+
+HydraLoRA 46.61 30.00 37.49 38.03
+
+META-LORA 46.34 31.12 39.53 39.00
+LLaMA2-13B
+
+LoRA 39.99 26.08 44.84 36.97
+
+HydraLoRA 54.24 30.88 44.67 43.26
+
+META-LORA 54.18 30.97 46.12 43.76
+
+4.1 Experiment Setting
+4.1.1 Multi-task Learning
+
+In multi-task learning scenario, we consider two task configurations. First, we adopt the same experimental setting
+described in HydraLoRA [LO]. Additionally, we develop a five-task dataset comprising semantically and structurally
+diverse samples, to further evaluate the model’s capacity to handle varied tasks.
+
+Flanv2 Setting
+
+Dataset. We fine-tune the model using a subset of the Flanv2 dataset that includes 43 tasks from both Natural
+Language Understanding (NLU) and Natural Language Generation (NLG), grouped into 10 distinct task clusters. The
+model’s performance is evaluated using the Big-Bench Hard (BBH) benchmark. More details of the dataset can be
+
+found in Appendix
+
+Baselines. We evaluate MeTA-LoRA against other LoRA-based methods designed for multi-task learning across
+multiple datasets: (1) Lorahub [27], which utilizes black-box optimization to learn weights for 20 randomly selected
+LoRAs for new tasks, applying weighted averaging without the need for gradient calculations; (2) LORA MoE [39],
+which combines lightweight experts (LoRA) with a Mixture of Experts (MoE) architecture for high efficiency, enabling
+generalization to new tasks without prior knowledge; (3) HydraLoRA [10], which employs Multi-Head structure in
+conjunction with MoE to achieve a balance between parameter efficiency and training effectiveness.
+
+Five-task Setting
+
+Dataset. We build a five-task dataset encompassing GSM8K for arithmetic reasoning, QQP and Cos-
+mosQA for NLU, SiQA and PiQA for commonsense reasoning. Then, we use the MMLU (Massive
+Multitask Language Understanding) benchmark to measure the world knowledge acquired during fine-tuning and
+problem solving ability of models. In addition, we include the BBH benchmark. Following common practice, we
+conduct 5-shot evaluation on MMLU and 3-shot evaluation on BBH.
+
+Baselines. Following prior studies [10] [46], we adopt LLaMA2-7B and LLaMA2-13B as the backbone models. For
+comparison, we evaluate META-LORA against two representative baselines: (1) LoRA, a widely used approach for
+parameter-efficient fine-tuning; (2) HydraLoRA, a state-of-the-art method tailored for multi-task learning.
+
+
+4.1.2 Multilingual Learning
+
+In multilingual learning scenario, we fine-tune the LLaMA2-7B and LLaMA2-13B using Bactrian-X [47], a compre-
+hensive multilingual parallel dataset comprising 3.4 million instruction—response pairs across 52 languages. Bactrian-X
+is automatically constructed by translating instructions from Alpaca and Dolly via the Google Translate API.2.
+In our evaluation, we compare META-LORA against two baselines: (1) the corresponding vanilla models; (2) the
+multilingual Bactrian models (BX), which are fine-tuned on the full Bactrian-X dataset. To probe the zero-shot language
+understanding capability of the different models and how much knowledge of they encode, we evaluate on the following
+four benchmarks:
+
+¢ XCOPA [50]: a multilingual resource designed for causal commonsense reasoning, encompassing 11 languages
+from 11 families and several areas around the globe. The task requires selecting the correct subsequent sentence
+from two given options, based on cause and effect question types.
+
+XStoryCloze [51]: the professionally translated version of the English StoryCloze dataset into 10 non-
+English languages. The task involves selecting one sentence as a plausible ending (closure) from two options,
+given a four-sentence story as the premise.
+
+XWinoGrad [53}(54]: a multilingual assessment dataset for commonsense reasoning, made up of Winograd
+Schema Challenge problems in six languages. The objective is to select the most plausible sentence from
+options that differ slightly.
+
+EXAMS [55]: A multilingual multiple-choice question-answering dataset constructed from high school exam
+questions in 16 languages, covering a wide range of subjects including natural sciences (e.g., physics), social
+sciences (e.g., history), and humanities (e.g., philosophy).
+
+4.1.3 Hyper-parameter Settings
+
+For both multi-task learning and multilingual Tabje 3: Statistics of different settings with respect to the number of
+
+learning scenarios, we run META-LORA for tasks and the amount of samples used by the baselines and the proposed
+1,000 iterations. In each iteration, we ran- \pTA-LORA.
+
+domly select 2 tasks (i.e. n = 2) for adapta-
+
+tion. For each task 2, the size of the support Settings Tasks Baselines Ours
+set n and the query set n? are both set to
+
+8. We perform 3 steps of gradient descent on BE lanv2 43 325,783 4,300
+the support set to obtain task-specific LORA F ive-task 5 439,950 250
+adapters, using a learning rate of 5 x 10~°. Multilingual - 52 3,400,000 2,600
+During the meta-knowledge update phase, we Five-task variant 5 487,075 250
+
+employ AdamW optimizer with a learning
+rate of 2 x 10~°. A comprehensive comparison of the number of fine-tuning samples used by the baselines and our
+method under these settings is presented in Table [3] and additional details regarding the hyper-parameter settings can be
+
+found in Appendix
+
+4.2 Performance
+4.2.1 Performance on Multi-task Learning
+
+Table [I]and Table 2|present the performance of various fine-tuned models evaluated on the different benchmarks, using
+a subset of the Flanv2 dataset and the proposed five-task dataset, respectively. We make several observations in more
+detail, and discuss them below.
+
+¢ As shown in Table[i] META-LORA consistently improves performance over both the base models and the
+models fine-tuned with standard LoRA. Notably, based on the LLaMA2-13B model, META-LORA achieves
+the highest BBH score of 46.32 among all LoRA-based baselines, despite involving only 100 examples per
+task into the fine-tuning process. The improvements highlight the effectiveness and data efficiency of the
+META-LORA framework.
+
+¢ When a more diverse set of tasks is used for fine-tuning, as shown in Table [2| META-LORA consistently
+outperforms both standard LoRA and HydraLoRA on LLaMA2-7B and LLaMA2-13B, even with only 50
+examples per task. Overall, META-LORA surpasses HydraLoRA and LoRA by 0.97% and 10.3% on
+LLaMA2-7B, and by 0.50% and 6.79% on LLaMA2-13B, respectively, indicating that it can effectively
+capture task-specific knowledge and thereby enhances generalization across a broad range of tasks.
+
+
+Table 4: Averaged zero-shot accuracy for XCOPA, XStoryCloze, XWinograd, and EXAMS under different tuning
+schemes. META-LORA fine-tunes the base models with only 50 examples randomly sampled from each language, and
+BXr1ama represents LoRA tuning on the full Bactrian-X dataset. * indicates results from [47].
+
+Model XCOPA XStoryCloze XWinograd EXAMS AVG
+LLaMA* (7B) 50.22 57.03 57.96 28.20 48.35
+BXtiama* (7B) 51.76 58.91 60.16 29.14 49.99
+META-LORA (7B) 57.02 58.46 79.12 23.84 54.61
+LLaMA* (13B) 51.04 57.88 52.97 30.41 48.08
+BXtiama* (13B) 53.27 62.12 63.65 35.71 53.69
+META-LORA (13B) 57.87 59.58 82.18 23.84 55.87
+
+Table 5: Performance comparison on the more challenging five-task dataset, where PiQA is replaced by WinoGrande.
+META-LORA fine-tunes LLaMA2-7B and LLaMA2-13B using 50 examples per task, while LORA and HydraLoRA
+correspond to fine-tuning on the entire datatset.
+
+Method MMLU MMLU-math BBH AVG
+LLaMA2-7B
+
+LoRA 39.03 29.16 32.01 33.40
+
+HydraLoRA 47.19 30.98 36.34 38.17
+
+META-LORA 46.50 32.15 39.07 39.24
+LLaMA2-13B
+
+LoRA 39.17 28.06 43.44 36.89
+
+HydraLoRA 54.12 30.41 44.28 42.94
+
+META-LORA 54.18 30.51 46.02 43.57
+
+4.2.2 Performance on Multilingual Learning
+
+The average performance across all languages for XCOPA, XStoryCloze, XWinograd, and EXAMS is reported in
+Table [4] Notably, even with only 50 randomly sampled examples per language, META-LORA achieves competitive or
+superior performance compared to the BX models, particularly on XCOPA and XWinograd. Moreover, it significantly
+outperforms the vanilla LLaMA2 models without multilingual adaptation on three out of four benchmarks. This
+substantial improvement in language understanding can be attributed to the META-LORA mechanism, which enables
+rapid adaptation across diverse languages using only a limited amount of data. By leveraging its two-stage optimization
+framework, META-LORA effectively captures both shared multilingual knowledge and language-specific patterns,
+thereby achieving strong data efficiency in multilingual adaptation.
+
+4.3 Ablation Studies
+
+RQ1: Do more challenging datasets better reveal the generation ability of models?
+
+To further assess the effectiveness of META-LORA in more challenging multi-task learning scenarios, we construct a
+new five-task configuration by replacing PiQA with WinoGrande [56]. Compared to PiQA, WinoGrande is a larger
+and more difficult commonsense reasoning dataset. It features cloze-style questions in which the model is required to
+select the correct option from two candidates to complete a given sentence. We adopt LLaMA2-7B and LLaMA2-13B
+as base models. LoRA and HydraLoRA serve as the baselines by fine-tuning the base models on the full dataset,
+while META-LORA uses only 50 examples per task. The evaluation results on MMLU, MMLU-math, and BBH are
+summarized in Table[5]
+
+It can be observed that, compared to the standard five-task configuration (as shown in Table[2}, fine-tuning LLaMA2-7B
+on the more challenging task sets using LoORA, HydraLoRA or META-LORA leads to a moderate improvement in
+the reasoning ability of the model. Specifically, LORA, HydraLoRA and META-LORA achieve average performance
+gains of 4.70%, 0.14% and 0.24%, respectively. For LLaMA2-13B, although overall performance tends to saturate
+due to the strong inherent generalization of the model, META-LORA continues to substantially outperform LoRA
+
+
+ui
+
+oO
+u
+oO
+
+-_ -_
+x 46.34 -STA x 46.14 46.20 -STA
+— —
+oP 43.45 lm META-LoRA o* lll META-LoRA 7
+U v
+5 39.35 39.53 5
+© 40+ : ; 00 4 39.14 4
+£ “0 373 £ 40 38.87 38.71 38.72
+6 3
+© 35} en a |
+o o
+a 30.99 31.12 a 30.86 31.09
+
+30 — 30 ay
+
+MMLU MMLU-math BBH AVG MMLU MMLU-math BBH AVG
+(a) LLaMA2-7B, 50 examples per task. (b) LLaMA2-7B, 100 examples per task.
+
+60.0 60.0
+-_ -_
+xs 54.1554.18 -STA xs 54.6954.67 -STA
+o 52.5¢ META-LoRA © 52.5 META-LoRA +
+2 46.0446.12 Pd 46.62.46.43
+45.0} 43.6943.76 J & 45.0 44.0844.13 |
+£ £
+3 3
+© 37.5+ © 37.5 |
+oO Oo
+a 30.89 30.97 a 30,9331.29
+
+30.0 30.0
+
+MMLU MMLU-math BBH AVG MMLU MMLU-math BBH AVG
+(c) LLaMA2-13B, 50 examples per task. (d) LLaMA2-13B, 100 examples per task.
+
+Figure 2: Ablation results on LLaMA2-7B and LLaMA2-13B under the five-task learning setting. -STA refers to the
+variant without the task-specific adaptation stage, highlighting its contribution to overall performance.
+
+and HydraLoRA across configurations, highlighting the robustness of META-LORA under more challenging task
+distributions and its scalability to larger models.
+
+RQ2: Is the two-stage optimization framework necessary for the fine-tuning process?
+
+To further understand the contribution of the task-specific adaptation stage in META-LORA, we conduct an ablation
+study, with the results presented in Figure 2] Specifically, we investigate a variant, denoted as -STA, in which the
+task-specific adaptation stage is removed. In this variant, only the gradients computed from the query sets of multiple
+selected tasks are aggregated to update the shared LoRA adapters in each iteration. Experiments are performed using
+two backbone models, LLaMA2-7B and LLaMA2-13B, under the proposed five-task learning configuration. For each
+task, either 50 or 100 examples are randomly selected for fine-tuning. In addition, both -STA and META-LORA are
+evaluated on three benchmarks: MMLU, the mathematics tasks of MMLU and BBH.
+
+As shown in Figure [2] the task-specific adaptation stage contributes positively to model performance across both
+model scales and data regimes, illustrating the necessity and effectiveness of the two-stage design. Notably, the
+performance gains introduced by the task-specific adaptation stage are more pronounced when using the smaller model
+(LLaMA2-7B) and the more limited amount of fine-tuning data (SO examples per task). In this case, META-LORA
+improves the average score by 1.07%, demonstrating its ability to capture more task-specific knowledge prior to
+meta-aggregation. Moreover, while the larger LLaMA2-13B model already exhibits strong generalization capabilities
+even with a simplified optimization process, the two-stage structure continues to deliver consistent performance benefits,
+confirming its robustness and scalability across model sizes.
+
+4.4 Parameter Analysis
+
+RQ3: Does scaling the fine-tuning data always improve performance in multi-task learning?
+
+As shown in Table [6] we analyze how the scale of fine-tuning data impacts model performance under the standard
+five-task learning setting. Specifically, we fine-tune LLaMA2-7B and LLaMA2-13B using LoRA, HydraLoRA and
+META-LORA with either 50 or 100 examples per task. Subsequently, we evaluate the overall performance on MMLU,
+MMLU-math and BBH. Additional results on the more challenging variant of this setting are reported in Table[9]of
+
+Appendix
+
+
+Table 6: Comparison of LORA and META-LORA on the standard five-task learning scenario with varying amounts of
+fine-tuning data per task.
+
+# Data / task Method MMLU MMLU-math BBH AVG
+LLaMA2-7B
+
+LoRA 46.60 32.60 31.06 36.75
+
+50 HydraLoRA 46.21 29.42 37.30 37.64
+
+META-LORA 46.34 31.12 39.53 39.00
+
+LoRA 46.49 27.32 37.17 36.99
+
+100 HydraLoRA 46.72 29.78 37.44 37.98
+
+META-LORA 46.20 31.09 38.87 38.72
+LLaMA2-13B
+
+LoRA 54.17 30.47 45.89 43.51
+
+50 HydraLoRA 52.82 31.22 34.80 39.61
+
+META-LORA 54.18 30.97 46.12 43.76
+
+LoRA 55.12 31.11 45.96 44.06
+
+100 HydraLoRA 54.11 31.30 40.50 41.97
+
+META-LORA 54.67 31.29 46.43 44.13
+
+Several insights can be drawn from the results. Overall, increasing the number of fine-tuning examples per task generally
+improves performance. Moreover, META-LORA consistently achieves higher average scores across model sizes and
+data regimes compared to both LoRA and HydraLoRA. For example, under the standard five-task setting with only 50
+examples per task, META-LORA surpasses LoRA and HydraLoRA on LLaMA2-7B by 2.25% and 1.36% in average
+score, respectively. This advantage stems from its novel two-stage optimization framework, which enables strong gains
+in low-resource settings by extracting task-specific knowledge from only a few examples, while also maintaining stable
+improvements at larger data scales by mitigating task conflicts.
+
+Interestingly, LoRA sometimes performs better with only 50 or 100 examples per task than with the full dataset. This
+counter-intuitive result arises from architectural limitations in multi-task learning. LoRA uses a single shared low-rank
+adapter that struggles to capture the heterogeneous requirements of diverse tasks. As the data scale grows, task-specific
+signals interfere with one another, leading to degraded performance. HydraLoRA alleviates this issue to some extent
+with its asymmetric design.
+
+5 Conclusion
+
+In this work, we introduce META-LORA, a simple yet effective two-stage optimization framework designed to enhance
+data efficiency in multi-task adaptation of LLMs. By explicitly decoupling task-specific adaptation and meta-knowledge
+aggregation, META-LORA is able to quickly adapt to individual tasks using only a few examples, while simultaneously
+promoting cross-task generalization through shared parameter updates. Comprehensive experiments across both
+multi-task and multilingual learning settings demonstrate META-LORA consistently matches or outperforms standard
+full-data LoRA fine-tuning, despite using significantly less task-specific supervision. These results highlight the
+potential of META-LORA as a practical and scalable solution for efficient fine-tuning in real-world low-resource and
+multi-task scenarios.
+
+References
+
+[1] Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind Nee-
+lakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models are few-shot learners. Advances
+in neural information processing systems, 33:1877-1901, 2020.
+
+[2] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of deep bidirectional
+transformers for language understanding. In Proceedings of the 2019 conference of the North American chapter of
+the association for computational linguistics: human language technologies, volume I (long and short papers),
+
+pages 4171-4186, 2019.
+
+[3] Yupeng Chang, Xu Wang, Jindong Wang, Yuan Wu, Linyi Yang, Kaijie Zhu, Hao Chen, Xiaoyuan Yi, Cunxiang
+Wang, Yidong Wang, et al. A survey on evaluation of large language models. ACM transactions on intelligent
+systems and technology, 15(3):1-45, 2024.
+
+
+[4] Zeyu Han, Chao Gao, Jinyang Liu, Jeff Zhang, and Sai Qian Zhang. Parameter-efficient fine-tuning for large
+models: A comprehensive survey. arXiv preprint arXiv:2403.14608, 2024.
+
+[5] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen,
+et al. Lora: Low-rank adaptation of large language models. JCLR, 1(2):3, 2022.
+
+[6] Sylvestre-Alvise Rebuffi, Hakan Bilen, and Andrea Vedaldi. Learning multiple visual domains with residual
+adapters. Advances in neural information processing systems, 30, 2017.
+
+[7] Xiang Lisa Li and Percy Liang. Prefix-tuning: Optimizing continuous prompts for generation. arXiv preprint
+arXiv:2101.00190, 2021.
+
+[8] Yupeng Chang, Yi Chang, and Yuan Wu. Ba-lora: Bias-alleviating low-rank adaptation to mitigate catastrophic
+inheritance in large language models. arXiv preprint arXiv:2408.04556, 2024.
+
+[9] Jinda Liu, Yi Chang, and Yuan Wu. R-lora: Random initialization of multi-head lora for multi-task learning. arXiv
+preprint arXiv:2502. 15455, 2025.
+
+[10] Chunlin Tian, Zhan Shi, Zhijiang Guo, Li Li, and Cheng-Zhong Xu. Hydralora: An asymmetric lora architecture
+for efficient fine-tuning. Advances in Neural Information Processing Systems, 37:9565—9584, 2024.
+
+[11] Wei Liu, Weihao Zeng, Keqing He, Yong Jiang, and Junxian He. What makes good data for alignment? a
+comprehensive study of automatic data selection in instruction tuning. arXiv preprint arXiv:2312.15685, 2023.
+
+[12] Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. Less: Selecting influential
+data for targeted instruction tuning. arXiv preprint arXiv:2402.04333, 2024.
+
+[13] Abdul Hameed Azeemi, Ihsan Qazi, and Agha Ali Raza. Data pruning for efficient model pruning in neural
+machine translation. In Findings of the Association for Computational Linguistics: EMNLP 2023, pages 236-246,
+2023.
+
+[14] Xinyu Lin, Wenjie Wang, Yongqi Li, Shuo Yang, Fuli Feng, Yinwei Wei, and Tat-Seng Chua. Data-efficient
+fine-tuning for llm-based recommendation. In Proceedings of the 47th international ACM SIGIR conference on
+research and development in information retrieval, pages 365-374, 2024.
+
+[15] Dingshuo Chen, Zhixun Li, Yuyan Ni, Guibin Zhang, Ding Wang, Qiang Liu, Shu Wu, Jeffrey Yu, and Liang
+Wang. Beyond efficiency: Molecular data pruning for enhanced generalization. Advances in Neural Information
+Processing Systems, 37:18036—18061, 2024.
+
+[16] Chelsea Finn, Pieter Abbeel, and Sergey Levine. Model-agnostic meta-learning for fast adaptation of deep
+networks. In International conference on machine learning, pages 1126-1135. PMLR, 2017.
+
+[17
+
+a
+
+Sylvestre-Alvise Rebuffi, Hakan Bilen, and Andrea Vedaldi. Learning multiple visual domains with residual
+adapters. Advances in neural information processing systems, 30, 2017.
+
+[18
+
+“4
+
+Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski, Bruna Morrone, Quentin De Laroussilhe, Andrea Gesmundo,
+Mona Attariyan, and Sylvain Gelly. Parameter-efficient transfer learning for nlp. In International conference on
+machine learning, pages 2790-2799. PMLR, 2019.
+
+[19] Yi-Lin Sung, Jaemin Cho, and Mohit Bansal. Vl-adapter: Parameter-efficient transfer learning for vision-and-
+language tasks. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pages
+5227-5237, 2022.
+
+[20] Asa Cooper Stickland and Iain Murray. Bert and pals: Projected attention layers for efficient adaptation in
+multi-task learning. In International Conference on Machine Learning, pages 5986-5995. PMLR, 2019.
+
+[21] Xiao Liu, Yanan Zheng, Zhengxiao Du, Ming Ding, Yujie Qian, Zhilin Yang, and Jie Tang. Gpt understands, too.
+AI Open, 5:208-215, 2024.
+
+[22] Brian Lester, Rami Al-Rfou, and Noah Constant. The power of scale for parameter-efficient prompt tuning. arXiv
+preprint arXiv:2104.08691, 2021.
+
+[23] Xiao Liu, Kaixuan Ji, Yicheng Fu, Weng Lam Tam, Zhengxiao Du, Zhilin Yang, and Jie Tang. P-tuning v2: Prompt
+tuning can be comparable to fine-tuning universally across scales and tasks. arXiv preprint arXiv:2110.07602,
+2021.
+
+[24] Yi-Lin Sung, Varun Nair, and Colin A Raffel. Training neural networks with fixed sparse masks. Advances in
+Neural Information Processing Systems, 34:24193—24205, 2021.
+
+[25] Nolan Dey, Shane Bergsma, and Joel Hestness. Sparse maximal update parameterization: A holistic approach to
+sparse training dynamics. arXiv preprint arXiv:2405.15743, 2024.
+
+10
+
+
+[26] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal Azhar, et al. Llama: Open and efficient foundation language
+models. arXiv preprint arXiv:2302.13971, 2023.
+
+[27] Chengsong Huang, Qian Liu, Bill Yuchen Lin, Tianyu Pang, Chao Du, and Min Lin. Lorahub: Efficient cross-task
+generalization via dynamic lora composition. arXiv preprint arXiv:2307.13269, 2023.
+
+[28] Yiming Wang, Yu Lin, Xiaodong Zeng, and Guannan Zhang. Multilora: Democratizing lora for better multi-task
+learning. arXiv preprint arXiv:2311.11501, 2023.
+
+[29] Ted Zadouri, Ahmet Ustiin, Arash Ahmadian, Beyza Ermis, Acyr Locatelli, and Sara Hooker. Pushing mixture of
+experts to the limit: Extremely parameter efficient moe for instruction tuning. arXiv preprint arXiv:2309.05444,
+2023.
+
+[30] Shihan Dou, Enyu Zhou, Yan Liu, Songyang Gao, Jun Zhao, Wei Shen, Yuhao Zhou, Zhiheng Xi, Xiao Wang,
+Xiaoran Fan, et al. Loramoe: Revolutionizing mixture of experts for maintaining world knowledge in language
+model alignment. arXiv preprint arXiv:2312.09979, 4(7), 2023.
+
+[31] Tianyu Ding, Tianyi Chen, Haidong Zhu, Jiachen Jiang, Yiqi Zhong, Jinxin Zhou, Guangzhi Wang, Zhihui Zhu,
+Ilya Zharkov, and Luming Liang. The efficiency spectrum of large language models: An algorithmic survey. arXiv
+preprint arXiv:2312.00678, 2023.
+
+[32] Mengwei Xu, Wangsong Yin, Dongqi Cai, Rongjie Yi, Daliang Xu, Qipeng Wang, Bingyang Wu, Yihao Zhao,
+Chen Yang, Shihe Wang, et al. A survey of resource-efficient IIm and multimodal foundation models. arXiv
+preprint arXiv:2401.08092, 2024.
+
+[33] Xinyu Lin, Wenjie Wang, Yongqi Li, Shuo Yang, Fuli Feng, Yinwei Wei, and Tat-Seng Chua. Data-efficient
+fine-tuning for llm-based recommendation. In Proceedings of the 47th international ACM SIGIR conference on
+research and development in information retrieval, pages 365-374, 2024.
+
+[34] Xiaobo Xia, Jiale Liu, Jun Yu, Xu Shen, Bo Han, and Tongliang Liu. Moderate coreset: A universal method of
+data selection for real-world data-efficient deep learning. In The Eleventh International Conference on Learning
+Representations, 2022.
+
+[35] Max Marion, Ahmet Ustiin, Luiza Pozzobon, Alex Wang, Marzieh Fadaee, and Sara Hooker. When less is more:
+Investigating data pruning for pretraining Ilms at scale. arXiv preprint arXiv:2309.04564, 2023.
+
+[36] Ben Sorscher, Robert Geirhos, Shashank Shekhar, Surya Ganguli, and Ari Morcos. Beyond neural scaling laws:
+beating power law scaling via data pruning. Advances in Neural Information Processing Systems, 35:19523-19536,
+2022.
+
+[37] Jason Wei, Maarten Bosma, Vincent Y Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du, Andrew M Dai,
+and Quoc V Le. Finetuned language models are zero-shot learners. arXiv preprint arXiv:2109.01652, 2021.
+
+[38] Mirac Suzgun, Nathan Scales, Nathanael Scharli, Sebastian Gehrmann, Yi Tay, Hyung Won Chung, Aakanksha
+Chowdhery, Quoc V Le, Ed H Chi, Denny Zhou, et al. Challenging big-bench tasks and whether chain-of-thought
+can solve them. arXiv preprint arXiv:2210.09261, 2022.
+
+[39] Qidong Liu, Xian Wu, Xiangyu Zhao, Yuanshao Zhu, Derong Xu, Feng Tian, and Yefeng Zheng. When moe meets
+lms: Parameter efficient fine-tuning for multi-task medical applications. In Proceedings of the 47th International
+ACM SIGIR Conference on Research and Development in Information Retrieval, pages 1104-1114, 2024.
+
+[40] Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert,
+Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve math word problems. arXiv
+preprint arXiv:2110.14168, 2021.
+
+[41] Zhiguo Wang, Wael Hamza, and Radu Florian. Bilateral multi-perspective matching for natural language sentences.
+arXiv preprint arXiv: 1702.03814, 2017.
+
+[42] Lifu Huang, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Cosmos qa: Machine reading comprehension
+with contextual commonsense reasoning. arXiv preprint arXiv: 1909.00277, 2019.
+
+[43] Maarten Sap, Hannah Rashkin, Derek Chen, Ronan LeBras, and Yejin Choi. Socialiga: Commonsense reasoning
+about social interactions. arXiv preprint arXiv: 1904.09728, 2019.
+
+[44] Yonatan Bisk, Rowan Zellers, Jianfeng Gao, Yejin Choi, et al. Piqa: Reasoning about physical commonsense in
+natural language. In Proceedings of the AAAI conference on artificial intelligence, volume 34, pages 7432-7439,
+2020.
+
+[45] Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt.
+Measuring massive multitask language understanding. arXiv preprint arXiv:2009.03300, 2020.
+
+11
+
+
+[46] Xujia Wang, Haiyan Zhao, Shuo Wang, Hanging Wang, and Zhiyuan Liu. MALoRA: Mixture of asymmetric
+low-rank adaptation for enhanced multi-task learning. In Luis Chiruzzo, Alan Ritter, and Lu Wang, editors,
+Findings of the Association for Computational Linguistics: NAACL 2025, pages 5609-5626, Albuquerque, New
+Mexico, April 2025. Association for Computational Linguistics.
+
+[47] Haonan Li, Fajri Koto, Minghao Wu, Alham Fikri Aji, and Timothy Baldwin. Bactrian-x: Multilingual replicable
+instruction-following models with low-rank adaptation. arXiv preprint arXiv:2305.15011, 2023.
+
+[48] Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and
+Tatsunori B Hashimoto. Stanford alpaca: An instruction-following lama model, 2023.
+
+[49] Mike Conover, Matt Hayes, Ankit Mathur, Jianwei Xie, Jun Wan, Sam Shah, Ali Ghodsi, Patrick Wendell, Matei
+Zaharia, and Reynold Xin. Free dolly: Introducing the world’s first truly open instruction-tuned Im, 2023.
+
+[50] Edoardo Maria Ponti, Goran GlavaS, Olga Majewska, Qianchu Liu, Ivan Vuli¢, and Anna Korhonen. Xcopa: A
+multilingual dataset for causal commonsense reasoning. arXiv preprint arXiv:2005.00333, 2020.
+
+[51] Xi Victoria Lin, Todor Mihaylov, Mikel Artetxe, Tianlu Wang, Shuohui Chen, Daniel Simig, Myle Ott, Naman
+Goyal, Shruti Bhosale, Jingfei Du, et al. Few-shot learning with multilingual generative language models. In
+
+Proceedings of the 2022 conference on empirical methods in natural language processing, pages 9019-9052,
+2022.
+
+Nasrin Mostafazadeh, Nathanael Chambers, Xiaodong He, Devi Parikh, Dhruv Batra, Lucy Vanderwende,
+Pushmeet Kohli, and James Allen. A corpus and cloze evaluation for deeper understanding of commonsense
+stories. In Proceedings of the 2016 Conference of the North American Chapter of the Association for Computational
+Linguistics: Human Language Technologies, pages 839-849, 2016.
+
+[52
+
+“4
+
+[53
+
+“4
+
+Alexey Tikhonov and Max Ryabinin. It’s all in the heads: Using attention heads as a baseline for cross-lingual
+
+transfer in commonsense reasoning. arXiv preprint arXiv:2106.12066, 2021.
+
+[54] Niklas Muennighoff, Thomas Wang, Lintang Sutawika, Adam Roberts, Stella Biderman, Teven Le Scao, M Saiful
+Bari, Sheng Shen, Zheng-Xin Yong, Hailey Schoelkopf, et al. Crosslingual generalization through multitask
+finetuning. arXiv preprint arXiv:2211.01786, 2022.
+
+[55] Momchil Hardalov, Todor Mihaylov, Dimitrina Zlatkova, Yoan Dinkov, Ivan Koychev, and Preslav Nakov. Exams:
+
+A multi-subject high school examinations dataset for cross-lingual and multilingual question answering. arXiv
+
+preprint arXiv:201 1.03080, 2020.
+
+[56] Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An adversarial winograd
+schema challenge at scale. Communications of the ACM, 64(9):99-106, 2021.
+
+A Appendix
+
+A.1 Datasets and Hyper-parameters
+A.1.1 Details for Flanv2 Setting
+
+Following [10J, we select a portion of the Flanv2 datasets covering Natural Language Understanding (NLU) and
+Natural Language Generation (NLG), which can be grouped into 10 distinct task clusters. Then we evaluate it with the
+Big-Bench Hard (BBH) benchmark.
+
+We summarize the details of the used datasets as follows:
+
+1. Struct-to-Text Conversion: This task evaluates the capability to generate natural language descriptions from
+structured data inputs. We use the following datasets: (1) CommonGen; (2) DART; (3) EZENLG; (4) WebNLG
+
+2. Translation: Translation involves converting text from one language to another, maintaining the original
+meaning and nuances. We use the following datasets: (1) En-Fr from WMT? 14; (2) En-De, En-Tr, En-Ru,
+En-Fi, En-Ro from WMT’ 16; (3) En-Es from Paracrawl.
+
+3. Commonsense Reasoning: This involves assessing the ability to apply physical or scientific principles
+alongside common sense in reasoning tasks. We use the following datasets: (1) COPA; (2) HellaSwag; (3)
+PiQA; (4) StoryCloze.
+
+4. Sentiment Analysis: A fundamental task in natural language processing (NLP) that determines the sentiment
+polarity (positive or negative) of a given text. We use the following datasets: (1) IMDB; (2) Sentiment140; (3)
+SST-2; (4) Yelp.
+
+12
+
+
+Table 7: Comparison of running time across fine-tuning schemes. LoORA and HydraLoRA fine-tune the base models on
+the more challenging dataset for one epoch, while META-LORA performs 1,000 iterations using 100 samples from
+each task.
+
+Model Size | LoRA HydraLoRA META-LORA
+
+7B 17h 37h 3h
+13B 29h 57h 5h
+
+5. Paraphrase Detection: This task requires models to ascertain whether two sentences convey the same
+meaning, indicating semantic equivalence. We use the following datasets: (1) MRPC; (2) QQP; (3) Paws Wiki.
+
+6. Coreference Resolution: Involves identifying instances within a text that refer to the same entity, demonstrat-
+ing an understanding of textual context. We use the following datasets: (1) DPR; (2) WSC273.
+
+7. Reading Comprehension: Assesses the capability to derive answers to questions from a provided text
+containing relevant information. We use the following datasets: (1) BoolQ; (2) DROP; (3) MultiRC; (4)
+OBQA; (5) SQuADv1; (6) SQUADv2.
+
+8. Reading Comprehension with Commonsense: Merges traditional reading comprehension skills with com-
+monsense reasoning, requiring understanding beyond the explicit text. We use the following datasets: (1)
+CosmosQA; (2) ReCoRD.
+
+9. Natural Language Inference: Focuses on deducing the relationship between two sentences, determining
+if the second sentence logically follows from, contradicts, or is unrelated to the first sentence. We use the
+following datasets: (1) ANLI; (2) CB; (3) MNLI; (4) QNLE; (5) SNLI; (6) WNLI; (7) RTE.
+
+10. Closed-Book Question Answering: This task challenges models to answer questions about general knowledge
+without direct access to external information sources. We use the following datasets: (1) ARC; (2) NQ; (3)
+TriviaQA.
+
+A.1.2. Hyper-parameter Settings
+
+Details on hyperparameters used for META-LORA, LoRA and HydraLoRA are provided below.
+
+META-LORA: For all experiments, we integrate adapter modules into every dense layer of the multi-head attention
+(namely Q, K, V, and O) in the selected LLMs. Also, we set the low-rank parameter r to 16.
+
+LoRA: In all experiments, adapter modules are inserted into every dense layer of the multi-head attention components
+(namely Q, K, V, and O) in the selected LLMs, with the rank r set to 16. In addition, the learning rate is set to 2 x 10-4
+and the batch size is set to 8. For experiments on the full datasets, results are reported after a single epoch of fine-tuning.
+For parameter analysis with respect to the amount of fine-tuning data, LoRA fine-tunes the base models for 5 epochs
+when using 50 examples per task, and for 10 epochs when using 100 examples per task. Finally, we report the best
+results obtained on the benchmarks.
+
+HydraLoRA: For experiments not covered in the original paper [10], we adopt the default configurations suggested by
+HydraLoRA and adjust the number of B matrices (lora_nums) to match the number of tasks. Consistent with LoRA,
+full-dataset fine-tuning is performed for a single epoch. Under limited-data settings, the base models are fine-tuned for
+5 epochs with 50 examples per task and for 10 epochs with 100 examples per task. Finally, we report the best results
+obtained in each setting.
+
+A.2 Training Efficiency
+To further assess the efficiency of the proposed method, we measure the running time of different fine-tuning schemes
+
+under identical experimental environments. As presented in Table[7| META-LORA substantially reduces training time
+compared to standard LoRA and advanced HydraLoRA, while maintaining competitive performance.
+
+13
+
+
+Table 8: Performance comparison on the standard five-task setting with respect to a and £.
+
+Combination a B BBH
+Chase(OUTS) 5x10-& 2x10-& 39.53
+C1 2x107§ 5x107® 39.39
+C2 5x 107-5 2x10-5 37.90
+C3 5x 10-7 2x10-7 38.96
+
+Table 9: Comparative analysis of LORA, HydraLoRA and META-LORA on the more challenging five-task learning
+scenario with varying amounts of fine-tuning data per task.
+
+# Data / task Method MMLU MMLU-math BBH AVG
+LLaMA2-7B
+
+LoRA 47.04 31.32 34.90 37.75
+
+50 HydraLoRA 46.30 30.17 36.64 37.70
+
+META-LORA 46.50 32.15 39.07 39.24
+
+LoRA 45.68 25.94 33.75 35.12
+
+100 HydraLoRA 46.44 30.51 36.75 37.90
+
+META-LORA 46.55 31.59 39.45 39.20
+LLaMA2-13B
+
+LoRA 54.14 31.69 46.18 44.00
+
+50 HydraLoRA 53.18 31.83 36.25 40.42
+
+META-LORA 54.18 30.51 46.02 43.57
+
+LoRA 54.36 29.22 46.17 43.25
+
+100 HydraLoRA 53.43 30.90 38.35 40.89
+
+META-LORA 54.23 31.21 46.78 44.07
+
+A.3 Parameter Analysis
+A.3.1 Impact of learning rates
+
+To investigate the impact of learning rates, we fine-tuned LLaMA2-7B under the standard five-task learning setting
+using various (a, 3) configurations. As presented in Table|8| Cg with higher learning rates and c3 with lower learning
+rates both degrade overall performance, suggesting optimization instability and insufficient adaptation.
+
+A.3.2. Impact of the fine-tuning data
+
+As shown in Table [9] we also analyze how the scale of fine-tuning data impacts model performance under the more
+challenging variant of the standard five-task setting. Specifically, we fine-tune LLaMA2-7B and LLaMA2-13B using
+LoRA, HydraLoRA and META-LORA with either 50 or 100 examples per task. Subsequently, we evaluate the overall
+performance on MMLU, MMLU-math, and BBH.
+
+Consistent with the findings under the standard five-task setting, LoRA achieves better performance with limited data
+than with full-data, reflecting its inherent architectural limitations. When the difficulty of tasks increases, HydraLoRA
+struggles to capture task-specific knowledge in such low-resource regimes. In contrast, our method built upon a
+two-stage optimization framework can rapidly adapt in diverse multi-task scenarios, which further demonstrates its
+robustness and establishes its superiority over existing approaches.
+
+14

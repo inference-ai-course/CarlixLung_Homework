@@ -1,0 +1,1995 @@
+arX1v:2510.10280v1 [cs.CL] 11 Oct 2025
+
+On the Entity-Level Alignment in Crosslingual Consistency
+
+Yihong Liu'?", Mingyang Wang!", Francois Yvon*", and Hinrich Schiitze!?'
+
+‘Center for Information and Language Processing, LMU Munich
+*Munich Center for Machine Learning (MCML)
+3Sorbonne Université, CNRS, ISIR, France
+{yihong, mingyang}@cis.lmu.de
+
+Abstract
+
+Multilingual large language models (LLMs)
+are expected to recall factual knowledge
+consistently across languages. However, the
+factors that give rise to such crosslingual
+consistency — and its frequent failure — re-
+main poorly understood. In this work, we
+hypothesize that these inconsistencies may
+arise from failures in entity alignment, the
+process of mapping subject and object en-
+tities into a shared conceptual space across
+languages. ‘To test this, we assess align-
+ment through entity-level (subject and ob-
+ject) translation tasks, and find that consis-
+tency is strongly correlated with alignment
+across all studied models, with misalign-
+ment of subjects or objects frequently re-
+sulting in inconsistencies. Building on this
+insight, we propose SUBSUB and SUBINJ,
+two effective methods that integrate English
+translations of subjects into prompts across
+languages, leading to substantial gains in
+both factual recall accuracy and consistency.
+Finally, our mechanistic analysis reveals
+that these interventions reinforce the en-
+tity representation alignment in the concep-
+tual space through model’s internal pivot-
+language processing, offering effective and
+practical strategies for improving multilin-
+gual factual prediction.
+
+1 Introduction
+
+LLMs have demonstrated remarkable capabilities
+in multilingual tasks, including translation, ques-
+tion answering, and factual recall (Petroni et al.,
+2019; Jiang et al., 2020; NLLB Team, 2024; En-
+glander et al., 2024). Among these, crosslingual
+consistency — the ability to recall the same fact
+correctly across different languages — has emerged
+as a desirable property for evaluating multilingual
+
+“Equal contribution.
+Equal advising.
+
+Transition stage | Processing stage Transition stage II
+early layers intermediate layers final layers
+
+Task: Factual Recall
+What is the capital of France? | wy
+
+PIVAOBBIEL
+YET?
+
+rke
+
+France ——— Paris
+
+PFYR Task: Translation } Opanuuis
+
+France i Bi Se eA France
+enema? | _——
+y | _— nam
+Paris —E Paris
+Mapinx Sy ay
+
+Figure 1: Analogy between consistent factual re-
+call and entity translation. Both tasks may re-
+quire mapping language-specific inputs into a
+shared conceptual space and projecting language-
+agnostic representations back into surface forms.
+This motivates our central hypothesis: entity
+alignment is important and facilitates consistent
+factual recall across languages.
+
+factual grounding (Heinzerling and Inui, 2021;
+Fierro and Sggaard, 2022; Qi et al., 2023). Yet,
+LLMs frequently exhibit inconsistencies, particu-
+larly when the involved languages differ in script
+or linguistic structure (Xing et al., 2024; Wang
+et al., 2025; Liu et al., 2025b). Despite growing
+interest in this phenomenon, the underlying mech-
+anisms that support or limit crosslingual consis-
+tency remain poorly understood.
+
+A natural intuition suggests that consistent fac-
+tual recall across languages requires a shared
+representation of the entities involved, beyond
+surface-level token overlap. Humans, for instance,
+recognize that both “7 7 2’ A” (Japanese) and
+“@Dpaunuia”’ (Ukrainian) refer to the same entity —
+France — and then retrieve the relevant knowledge
+and express it correctly in either language. This
+requires a form of mental entity alignment across
+languages. We hypothesize that a similar mecha-
+nism often underpins crosslingual consistency in
+LLMs: consistent factual recall is facilitated when
+entities (subject and object) are aligned across lan-
+
+
+guages in the model’s internal shared language-
+agnostic conceptual space (see illustration of the
+conceptual model in Figure 1).
+
+Such alignment facilitates the two crucial tran-
+sition stages that occur in multilingual factual re-
+call according to the conceptual model: (1) map-
+ping language-specific inputs into a shared con-
+ceptual space, and (2) projecting the shared la-
+tent representation back into the correct surface
+realization in the target languages. Inconsistent
+factual recall across two languages may arise if
+entity alignment fails at either of these transi-
+tion stages.! This hypothesis aligns with re-
+cent work suggesting that multilingual LLMs, es-
+pecially those trained predominantly on English,
+often operate in an English-centric latent space
+(Wendler et al., 2024; Schut et al., 2025; Dumas
+et al., 2025). During multilingual factual recall,
+the model implicitly translates input from a non-
+English language into English-like conceptual rep-
+resentations, processes information in this pivot-
+language conceptual space, and then generates
+output in the desired target language (Wang et al.,
+2025; Lu et al., 2025). Such a pipeline inherently
+relies on robust crosslingual alignment, particu-
+larly for subject and object entities that serve as
+anchors for factual retrieval.
+
+To operationalize this hypothesis, we introduce
+an entity-level translation task designed to probe
+how well models align subject and object enti-
+ties between language pairs. This task instantiates
+the same transition stages posited by the concep-
+tual model (cf. Figure 1), offering a concrete lens
+through which to assess the model’s crosslingual
+entity-level alignment capabilities. We then evalu-
+ate the factual recall and entity-level alignment of
+a spectrum of LLMs from several model families
+across multiple sizes, using KLAR (Wang et al.,
+2025), a multilingual factual knowledge dataset
+covering 17 languages.
+
+Our key contributions are as follows:
+
+(i) We provide the first systematic analysis
+of the relationship between crosslingual consis-
+tency and entity-level alignment, using a dedi-
+cated entity translation probing task to measure
+entity alignment quality. (ii) In §4, we show
+that consistency is strongly correlated with en-
+tity alignment, and that consistent factual recall
+
+‘Inconsistency can also stem from failure in the process-
+ing stage — i.e., the model lacks the factual knowledge so
+it cannot retrieve the correct object in the conceptual space,
+which is beyond the scope of discussion in this paper.
+
+rarely occurs without correctly aligning either the
+subject or the object entities between two lan-
+guages. (ili) In §5, we introduce two prompting-
+based remedies, SUBSUB and SUBINJ, which
+incorporate English translation of subjects into
+prompts. These methods consistently and sub-
+stantially enhance recall and consistency, partic-
+ularly in English-centric models. (iv) Finally, in
+§6, we analyze SUBSUB and SUBINI through the
+lens of mechanistic interpretability, showing that
+these interventions enhance entity representation
+alignment through pivot-language processing and
+thereby facilitate consistent factual recall.
+
+2 Related Work
+
+2.1 Crosslingual Alignment
+
+Prior work on crosslingual alignment has largely
+focused on representational alignment, where
+semantically similar units across languages are
+mapped to nearby vectors in embedding space
+(Artetxe and Schwenk, 2019; Reimers and
+Gurevych, 2020). This alignment is typically eval-
+uated via retrieval tasks such as sentence align-
+ment or word-level correspondence, which op-
+erationalize the notion of weak alignment (Roy
+et al., 2020; Haémmerl et al., 2024; Liu et al.,
+2025a). However, these embedding-based evalu-
+ations remain indirect and often correlate loosely
+with performance on downstream tasks, particu-
+larly in generation settings (Kargaran et al., 2025),
+where alignment must manifest at the level of sur-
+face forms. To address this gap, we evaluate align-
+ment explicitly through input-output behavior, us-
+ing translation accuracy as a proxy. This surface-
+level alignment provides a more functional view
+of whether subject and object entities are correctly
+realized across languages, and we show it to be
+strongly correlated with crosslingual consistency.
+
+2.2 Factual Recall and Consistency
+
+Pretrained language models have been shown to
+function as knowledge bases, as first proposed by
+Petroni et al. (2019). Following this idea, a series
+of studies have explored the factual knowledge
+stored in these models using knowledge probing
+techniques, focusing either on English (Roberts
+et al., 2020; Peng et al., 2022) or on multilin-
+gual factual knowledge (Jiang et al., 2020; Kass-
+ner et al., 2021; Yin et al., 2022; Fierro et al.,
+2025). Building on multilingual probing, recent
+work examines crosslingual consistency, the ex-
+
+
+tent to which models return consistent answers
+to equivalent queries in different languages. Qi
+et al. (2023) show that LLMs often produce di-
+vergent answers across languages, highlighting in-
+consistencies in multilingual factual recall. Wang
+et al. (2025) and Lu et al. (2025) further investigate
+how internal representations lead to these incon-
+sistencies, while other work traces how crosslin-
+gual consistency emerges and evolves during pre-
+training (Liu et al., 2025b).
+
+In this work, we extend this line of research by
+identifying entity alignment — the model’s abil-
+ity to represent subject and object entities con-
+sistently across languages — as a key factor un-
+derlying crosslingual consistency. We show a
+strong correlation between entity alignment and
+crosslingual consistency, and consistent factual re-
+call hardly occurs when the model fails to align
+entities. Building on this insight, we propose two
+prompting-based interventions, which enhance en-
+tity alignment and thereby facilitate crosslingual
+factual consistency. Finally, we perform a mech-
+anistic interpretability analysis to explain the suc-
+cess of these interventions, offering both theoreti-
+cal insights and practical strategies for improving
+multilingual factual prediction in LLMs.
+
+3 Methodology
+
+3.1 Languages, Models, and Dataset
+
+Languages. We consider 17 languages that
+span 8 language families and use 8 different
+scripts: Arabic (ara_Arab), Catalan (cat_Latn),
+Chinese (zho_Hans), Dutch (nld_Latn), En-
+glish (eng_Latn), French (fra_Latn), Greek
+(ell_Grek), Hebrew (heb_Hebr), Hungarian
+(hun_Latn), Japanese (jpn_Jpan), Korean
+(kor_Kore), Persian (fas_Arab), Russian
+(rus_Cyrl), Spanish (spa_Latn), Turkish
+(tur_Latn), Ukrainian (ukr_Cyrl), and Viet-
+namese (vie_Latn).
+
+Models. We evaluate a diverse suite of 12
+decoder-only language models spanning 4 major
+model families: LLaMA (Grattafiori et al., 2024),
+Qwen (Yang et al., 2025), Gemma (Gemma Team
+et al., 2025), and OLMo (Team OLMo et al.,
+2025). The first three are trained on highly multi-
+lingual corpora, while OLMo is primarily trained
+on English data. From the LLaMA family, we
+consider Llama-3.2-1B, Llama-3.2-3B,
+and Llama-3.1-8B. From the Qwen fam-
+ily, we consider Qwen3-1.7B-Base,
+
+and Qwen3-8B-Base.
+
+family, we consider
+gemma-3-1b-pt, gemma-3-4b-pt, and
+gemma-—3-12b-pt. Finally, we consider
+OLMo-2-0425-1B, OLMo-2-1124-7B, and
+OLMo-2-1124-13B from the OLMo series.
+This selection allows us to systematically study
+model behavior across size and family.
+
+Qwen3-4B-Base,
+From the Gemma
+
+Multilingual Factual Dataset. We conduct our
+investigation using KLAR (Wang et al., 2025), a
+multilingual factual knowledge probing dataset.
+Our evaluation covers 2,619 language-agnostic
+facts spanning 20 distinct relation types (cf. Ta-
+ble 3 in 8A). Each fact is represented as a triple
+(s;,7;,0;), Where s; and 0; are the subject and
+object entities, and r; is the relation. We denote
+the full language-agnostic set of facts as F =
+{(8;,17;, 0;)}®_,. For each fact (s;,7;,0;) € F and
+each language 1, KLAR provides corresponding
+language-specific realizations (s!,1r;, 0:), where s!
+and ol are the subject and object translated into
+language /. Thus, for any two languages / and
+I', the instances (s!,r;, 04) and (s!’,r;, 0!) repre-
+sent aligned expressions of the same underlying
+fact in the two languages. KLAR also provides a
+set of language-specific prompt templates for each
+relation, which we use to construct factual recall
+queries in different languages (cf. $3.3).
+
+3.2 Entity-Level Alignment Evaluation
+
+Task Formulation. To evaluate crosslingual
+entity-level alignment, we formulate a multilin-
+gual entity translation task over the language-
+agnostic fact set F = {(s;,r;,0;)_,. For each
+language pair (l,/2) and each fact (s;,7;,0;) €
+F, we construct two translation sub-tasks: (1)
+translating the subject entity sit > s?, and (2)
+translating the object entity o} > ol. The model
+is prompted in the source language /; and is ex-
+pected to generate the corresponding entity in the
+target language Jz. Each prompt includes a 3-shot
+demonstration consisting of aligned entity pairs
+drawn from other facts in the dataset. An exam-
+ple of a subject translation prompt from Japanese
+to English is displayed below:
+
+HANG: 7 FY XZ - English: France
+H ANGE: vl e 7 - English: Serbia
+HAN: 4 7) 7 - English: Italy
+
+H ANaE: 4 26) A - English:
+
+
+
+The model is expected to complete the last trans-
+lation with the correct entity name in the target
+language (“United Kingdom” in this case). Met-
+rics. For each direction (J; — lz) and each fact
+(s:,1i, 01) € F, we evaluate whether the model’s
+generated output contains the correct target entity.
+Specifically, we define:
+Subject translation accuracy:
+
+FI
+
+rap DH ls? S M(si)]
+
+Object translation accuracy:
+
+sub
+ACC, =
+|F|
+
+Fe ee [oP CM(o})|
+
+Joint translation accuracy:
+
+acces
+
+kols =
+
+IF
+both l l
+Aceh, = Lt is! 2c M(s!1)
+
+A o? s M(o'?)
+
+where M(x) denotes the model’s full generated
+output when prompted with x, and 1[-] is the indi-
+cator function. Our evaluation differs from prior
+work that only checks the first generated token
+(Geva et al., 2023; Qi et al., 2023; Hernandez
+et al., 2024), ensuring correctness at the string
+level, especially for multi-token entities. To assess
+alignment between /; and /2, we average the trans-
+lation accuracies in both directions. Specifically:
+
+AC csub of AC Csub
+
+Align” (11, lz) _~ ly la 5 loli
+obj obj
+Align®*i(I, fy) = ACCr > 15 - ACG,
+ACCboeth +4 AC Cbeth
+Align? (1,, lz) ~ ly lg ; losly
+
+The alignment scores are computed across all
+(7) = 136 unique language pairs, yielding a com-
+prehensive view of entity-level alignment.
+
+3.3. Factual Recall Evaluation
+
+Task Formulation. Given the multilingual fact
+set F = {(s;,7;,0;)}$,, KLAR provides a
+language-specific prompt template for each rela-
+tion r; in every language |. Each fact can be instan-
+tiated in language / as a query-answer pair (q}, 04),
+where ¢ is the prompt formed using st and r;, and
+
+ol is the language-specific realization of the object
+o;. For example, the fact (France, capital, Paris)
+may be rendered in English as “Where is France’s
+capital located? The answer is:” with the ex-
+pected answer “Paris”. This setup ensures that for
+each fact, we can construct 17 language-specific
+queries, one per language. The queries gy and qe?
+for languages |, and lz share the same underlying
+fact and differ only in surface realization. To fa-
+cilitate factual recall, we apply a 3-shot prompting
+strategy analogous to that used in the entity trans-
+lation task (cf. §3.2). Each prompt is preceded by
+three example question-answer pairs in the same
+language and relation type, selected from other
+facts in the dataset. This few-shot design provides
+a contextual signal for relation-specific generation
+while preserving the language setting.
+
+Metrics. We use accuracy and crosslingual
+consistency to evaluate model performance. The
+per-language factual recall accuracy is defined as:
+
+|F |
+
+ACC(2) =7> » 1 fol c M(q))|
+
+where M (gq!) denotes the model’s complete gen-
+eration for prompt di, and correctness is judged
+by string inclusion as described in $3.2. To assess
+crosslingual consistency of a language pair (1, /2),
+we compute the Jaccard index:
+|F ty f1) 512 2
+CO(I1, l2) = = 17 are eine
+
+We compute CO(I;,/2) for all 07). = 136 lan-
+guage pairs to obtain a comprehensive map of
+crosslingual factual consistency.
+
+4 Relationship Between Crosslingual
+Consistency and Entity Alignment
+
+4.1 Consistency Correlated with Alignment
+
+We examine whether alignment is correlated
+with consistency across language pairs in prac-
+tice. Specifically, we perform a correlation
+analysis between consistency CO(I;,l2) and
+each of the alignment metrics: Align’”? (1, lo),
+Align®?s (11,12), and Align>°t*(1,, 12). For each
+model, we compute Pearson correlation coeffi-
+cients over the 136 language pairs (cf. Figure 2).
+
+>We adopt the definition of consistency used in prior work
+(Jiang et al., 2020; Wang et al., 2025), which is stricter than
+mere agreement: it requires that the model’s predictions be
+both identical and correct across the two languages.
+
+
+Figure 2: Correlation between entity-level alignment and crosslingual consistency. Each subplot
+displays the relationship between one alignment metric, ie., Align? (/),/2), Align? (/),/s), or
+Align?®'(/,,/5), and crosslingual consistency CO(l,l2) for a given model. Each point represents a
+language pair. The gray dashed line (the diagonal y = x) separates the region into one half where con-
+sistency is higher (above the line) and one half where alignment is higher (below the line). Strong and
+statistically significant correlations are observed across models, supporting our hypothesis that alignment
+
+is highly associated with consistency.
+
+We observe strong and statistically signif-
+icant correlations between consistency and
+alignment across models. This result supports
+our hypothesis that crosslingual consistency is
+tightly linked to the model’s ability to align en-
+tities across languages. In all cases, the Pearson
+correlation is quite high, exceeding 0.7 for sub-
+ject/both alignment and 0.5 for object alignment,
+significant at p < 0.001. Notably, while high
+alignment does not always guarantee high consis-
+tency — particularly in the case of object alignment
+(e.g., LLaMA (1B)) — we rarely observe the oppo-
+site: high consistency with low alignment score.
+This asymmetry suggests that alignment is closely
+associated with, and may be a prerequisite for,
+crosslingual consistency, though it is not by itself
+sufficient — a pattern we examine further in §4.2.
+
+Among the three alignment metrics, subject
+and joint alignment correlate more strongly
+with consistency than object alignment. This
+asymmetry may reflect the task structure of factual
+recall: the subject entity is always present in the
+prompt and serves as the anchor for factual pre-
+diction. If the model fails to align the subject of
+a fact across two languages in the first place, it
+is less likely to consistently recall facts contain-
+ing the subject. Therefore, subject alignment may
+play an important role in facilitating consistency.
+
+Based on this insight, we present two simple reme-
+dies for improving the factual recall in §5.
+
+OLMo exhibits weaker correlation, partic-
+ularly with object-level alignment. Although
+OLMo still shows statistically significant corre-
+lations, they are generally weaker than those of
+multilingual models like Qwen or LLaMA. A
+likely cause is its limited exposure to factual con-
+tent in non-English languages during pretraining
+(Liu et al., 2025b), which impairs both factual re-
+call and entity alignment. Additionally, English-
+centric models often rely on English as a pivot
+language (Wendler et al., 2024) in the language-
+agnostic conceptual space, but the prompts do not
+provide any explicit English signal, weakening the
+model’s ability to bridge language-specific inputs
+and correct concepts. As shown in 85, inject-
+ing English subjects into prompts can mitigate this
+limitation and substantially improve factual recall.
+
+Consistency is bounded by object alignment.
+We observe (Figure 2) that crosslingual consis-
+tency is almost always lower than object align-
+ment scores across language pairs. This is made
+explicit in Figure 3, which overlays consistency
+against object alignment scores for all language
+pairs across models. The vast majority of points
+lie below the diagonal, indicating that a model
+may not consistently recall a fact across two lan-
+
+
+10 LLaMA (8B) 7
+LLaMA (1B) 7
+LLaMA (3B) 7
+OLMo (1B) ¢
+OLMo (13B)
+OLMo (7B)
+Qwen (1.7B)
+Qwen (4B)
+Qwen (8B)
+Gemma (12B)
+Gemma (1B)
+» Gemma (4B)
+
+0.8
+
+eooaeeeee
+
+0.6
+
+0.4
+
+Crosslingual Consistency: CO(/;, /2)
+
+0.0 Zs
+
+0.0 0.2 0.4 0.6 0.8 1.0
+Object Alignment Score: Align®!(/, /2)
+
+Figure 3: The boundedness relationship between
+consistency CO(I,, /2) and object alignment score
+Align (1,2). Each point indicates a language
+pair, while different colors indicate different mod-
+els. CO(I1, lz) is almost always upper-bounded by
+Align®i (1,12) except for OLMo (1B).
+
+guages if it fails to align the object entity. This pat-
+tern likely arises because both consistent factual
+recall and entity translation require the model to
+generate the correct object across languages. The
+only exception is OLMo (1B), possibly due to its
+English-centric training data and weaker multilin-
+gual grounding, as discussed earlier.
+
+Overall, these findings reinforce our core claim
+that good entity (subject and object) alignment fa-
+cilitates crosslingual consistency.
+
+4.2 Consistent Facts Are Entity-Aligned
+
+We have shown that entity alignment and crosslin-
+gual consistency are strongly correlated at the ag-
+gregate level. In this section, we aim to deepen our
+understanding of their relationship by analyzing
+individual fact instances. Specifically, we ask two
+questions: (1) To what extent does entity align-
+ment support crosslingual consistency?, and (2)
+Can non-aligned facts still be consistently recalled
+across languages? ‘To answer these questions,
+we examine each fact and determine whether it is
+crosslingually consistent or entity-aligned.* This
+fine-grained analysis allows us to characterize the
+role of entity alignment in enabling consistency,
+and to assess how often consistency emerges even
+in the absence of entity alignment.
+
+We say that a fact f; is crosslingually consistent
+for languages 1; and [2 if the model generates out-
+puts that contain the expected answers in both lan-
+
+*Throughout this section, for simplicity, a fact refers to
+({l1, lo}, fi), ie., a fact with respect to a given language pair.
+
+Aligned
+[= Non-Aligned
+
+% Consistent Facts
+
+|
+
+|
+5 = :
+200
+9 Inconsistent
+eo
+éo
+“0
+2
+|
+ol
+> > > > > > >
+2 ea & oe & 3
+ee $ * ss S$ ss 3
+s & Y RS Y 8 8
+
+% of Non-aligned Facts
+
+=r
+S
+
+Se G
+t <
+s s
+
+<
+SS & of
+
+©
+Ra
+*
+sé iS
+
+=
+| Consistent
+2 e
+“ of
+s
+&
+
+Figure 4: Entity alignment and consistency analy-
+sis across models. Most consistent facts are entity-
+aligned, and misalignment leads to inconsistency.
+
+guages. Formally, this mirrors the definition used
+in our consistency metric (cf. §3.3):
+
+Caste) = {fi
+
+of C M(qi') A of? CM(qi?)}
+
+Similarly, we define crosslingually inconsistent
+facts for language 1; and lz as the complement of
+C(l1, lz), which is referred to as Z(11, lz).
+
+We further categorize each fact f; based on
+whether its subject or object entities are aligned
+between two languages, i.e., whether the entities
+can be correctly translated between J; and Jo. We
+define the set of aligned facts as:
+
+A(li, l2) = {fil (8? © M(s;1) V 5 © M(s?))
+V (0? © M(o;') V oj € M(o?))}
+
+That is, a fact is considered aligned if at least
+one of the four translation tasks succeeds.* This
+relaxed formulation reflects two intuitions: (1)
+correct alignment of either the subject or object
+may already provide a strong conceptual anchor
+to access the underlying fact and (2) asymmetric
+translations (e.g., correct for 1; — lz but not for
+lg — 1,) are common, especially when involving
+low-resource languages. The set of non-aligned
+facts V (1, lz) is then the complement of A(J1, 2).
+
+We report the proportion of consistent facts
+C(I1, lz), inconsistent facts Z(11, lz), aligned facts
+A(l,, lz), and non-aligned facts NV (11, /2) for each
+
+“Here we use alignment at the instance level, i.e., whether
+the subject or object entity of a given fact can be correctly
+translated between J; and lz. This differs from the usage in
+§4.1, where alignment refers to aggregated alignment scores
+over translation performance across all facts.
+
+
+Gemma (1B) Gemma (4B) Gemma (12B) LLaMA (1B) LLaMA (3B) LLaMA (8B) OLMo (1B) OLMo (7B) OLMo (13B) Qwen (1.7B) Qwen (4B) Qwen (8B)
+
+C(li,l2) 124K (0.35) 194K (0.54) 229K (0.64) 134K (0.38) 188K (0.53) 215K (0.60) 42K (0.12) 72K (0.20) 87K (0.24) 113K (0.32) 159K (0.45) 186K (0.52)
+T(h,l2) 231K (0.65) 162K (0.46) 127K (0.36) 222K (0.62) 169K (0.47) 142K (0.40) 314K (0.88) 284K (0.80) 269K (0.76) 243K (0.68) 197K (0.55) 171K (0.48)
+A(li,l2) 335K (0.94) 353K (0.99) 355K (1.00) 335K (0.94) 350K (0.98) 354K (0.99) 211K (0.59) 293K (0.82) 315K (0.88) 323K (0.91) 344K (0.97) 350K (0.98)
+N(li,l2) 21K (0.06) 3K (0.01) 1K (0.00) 22K (0.06) 6K (0.02) 2K (0.01) 145K (0.41) 64K (0.18) 41K (0.12) 33K (0.09) 12K (0.03) 6K (0.02)
+
+Table 1: Proportion of consistent (C(l1, /2)), inconsistent (Z(l1, /2)), aligned (A(l1, /2)), and non-aligned
+crosslingual facts (N(1,,/2)) for each model. Each fact in 2,619 factual queries is evaluated over all
+(3) = 136 language pairs, resulting in a total of 2619 x 136 = 356,184 evaluated facts per model.
+
+model in Table 1. Figure 4 provides a more de-
+tailed breakdown: (1) among all consistent facts
+C(1,, 12), what fraction are aligned (A(I;, /2)) vs.
+non-aligned (NV (11, /2)), and (2) among all non-
+aligned facts N’(11, 12), what proportion are con-
+sistent (C(11,l2)) vs. inconsistent (Z(l,,/2)). To-
+gether, they illustrate how much consistency can
+be attributed to entity alignment, and whether
+models can still achieve consistency without it.
+
+Models exhibit stronger entity alignment
+than crosslingual consistency. As shown in Ta-
+ble 1, nearly all models achieve high rates of en-
+tity alignment across language pairs, often align-
+ing over 95% of facts. For example, Gemma
+(12B) and LLaMA (8B) align more than 99% of
+all evaluated crosslingual facts. In contrast, their
+consistency rates remain notably lower (64% and
+60%, respectively). This discrepancy suggests that
+entity alignment is a foundational skill models
+acquire more easily during pretraining, whereas
+achieving consistency demands additional capa-
+bilities such as relation representation and knowl-
+edge retrieval (required in the processing stage
+in Figure 1). With a larger model size, such
+capabilities are enhanced; therefore, the consis-
+tency is substantially improved (e.g., from 0.35 to
+0.64 when comparing Gemma (1B) and Gemma
+(12B)). The OLMo family, in particular, shows
+weak alignment and consistency, likely due to its
+English-centric pretraining data.
+
+Crosslingual consistency is tightly condi-
+tioned on entity alignment. Figure 4 shows that
+the vast majority of consistent facts are entity-
+aligned, particularly for highly multilingual mod-
+els like Gemma and Qwen, where over 99% of
+consistent facts involve successful entity align-
+ment (either the subject, object, or both). In con-
+trast, consistent recall among non-aligned facts
+is rare: fewer than 10% of such cases achieve
+crosslingual consistency, regardless of model fam-
+ily or size.» This asymmetry suggests that con-
+
+>These non-aligned but consistent facts may be a form
+of “memorization”, where the model directly memorizes the
+
+sistency across languages does not arise from
+chance or superficial pattern matching, but in-
+stead critically depends on the model’s ability
+to semantically align entities. Entity alignment,
+therefore, acts as a prerequisite or bottleneck for
+achieving consistency. These findings underscore
+the importance of entity-level alignment and im-
+ply that enhancing alignment — particularly for
+low-resource languages — may directly improve
+a model’s ability to maintain consistent factual
+knowledge across linguistic boundaries.
+
+5 Remedies: SUBSUB and SUBINJ
+
+In §4, we show that crosslingual consistency is
+closely tied to a model’s ability to align entities
+across languages. However, many LLMs, par-
+ticularly English-centric ones, struggle with this
+alignment, reflecting weaknesses in the transition
+from language-specific surface forms to language-
+agnostic conceptual representations. This obser-
+vation motivates a simple yet effective idea: if
+a model fails to map the subject into a shared
+conceptual space, why not provide it with a re-
+liable lexical anchor? Since most LLMs are ex-
+tensively trained on English and often use English
+as an implicit pivot language in the conceptual
+space (Wendler et al., 2024; Wang et al., 2025),
+integrating English subject information can help
+the model bypass the subject mapping step and
+thereby improve factual recall across languages.
+
+5.1. Prompt Formulation
+
+We propose two prompting-based remedies to im-
+plement this idea. SUBSUB replaces the subject
+in the original-language prompt with its English
+equivalent, enforcing direct entity alignment. This
+idea is similar to the substitution method proposed
+by Yang et al. (2024) to facilitate the multi-hop
+reasoning in factual recall. For example, we re-
+place “7 9 Y A” with “France” and the final
+
+fact as a whole in the respective language instead of transfer-
+ring the knowledge across languages through a shared con-
+ceptual space, as shown by Liu et al. (2025b).
+
+
+Model Recall (ACC) Consistency (CO)
+
+Base SUBSUB SUBINJ ‘sussus (%) tsusin: (%)| Base SUBSUB SUBINJ Tsussus (%) Tsusins (%)
+Gemma (1B) 0.51 0.56 0.58 9.0 13.7) 0.51 0.56 0.60 10.7 Li
+Gemma (4B) 0.66 0.71 0.72 6.5 8.3 | 0.70 0.75 0.77 8.0 10.6
+Gemma (12B) 0.73 0.75 0.76 2.8 4.1) 0.78 0.81 0.83 44 6.2
+LLaMA (1B) 0.53 0.60 0.61 11.7 14.9) 0.54 0.61 0.63 13.2 17.8
+LLaMA (3B) 0.65 0.71 0.72 8.6 10.7) 0.68 0.75 0.77 11.1 14.3
+LLaMA (8B) 0.71 0.75 0.76 5.6 7.2| 0.74 0.80 0.82 77 10.0
+OLMo (1B) 0.27 0.28 0.31 2.4 11.2) 0.27 0.24 0.28 -8.7 4.8
+OLMo (7B) 0.38 0.45 0.47 19.5 25.1} 0.35 0.43 0.46 23.3 31.6
+OLMo (13B) 0.43 0.54 0.56 25.9 31.6) 0.39 0.52 0.55 35.3 43.9
+Qwen (1.7B) 0.48 0.51 0.54 6.3 11.7) 0.49 0.52 0.56 73 14.5
+Qwen (4B) 0.59 0.63 0.64 5.9 8.4} 0.60 0.66 0.68 8.7 12.4
+Qwen (8B) 0.65 0.68 0.69 4.0 6.3 | 0.67 0.71 0.73 6.0 9.2
+
+Table 2: Performance of SUBSUB and SUBINJ compared to Base. Both methods outperform the baseline
+in terms of factual recall (ACC) and crosslingual consistency (CO). SUBINI yields stronger improve-
+ments than SUBSUB across all models. Percentages indicate relative improvements over the baseline.
+
+prompt in Japanese would then be “FranceD § ih
+Ite CICK”) KTH? S2AIz :” (translation:
+Where is France’s capital located? The answer
+is:). SUBINJ appends the English subject along-
+side the native-language form, preserving natural
+phrasing while encouraging the model to align the
+entities (e.g., “7 7 A (France) MH ABIX &
+FIChHY) KF? AAIL 2”). The two pro-
+posed remedies align with recent ideas of lever-
+aging code-switching for better comprehension of
+the original text (Mohamed et al., 2025).
+
+These remedies are conceptually related to the
+vector interventions of Lu et al. (2025), who show
+that factual inconsistencies often arise because
+models fail to sufficiently engage their reliable
+English-centric factual recall pipeline. By inject-
+ing carefully constructed vectors into intermedi-
+ate layers, they steer models to re-activate these
+latent pathways, thereby improving factual recall
+across languages. Our approach can be seen as
+a prompting-level analogue: instead of modifying
+hidden states directly, we inject an explicit English
+signal into the input. This encourages the model to
+follow a similar trajectory as vector interventions
+— activating English-centric recall mechanisms —
+while remaining lightweight and training-free.
+
+5.2 Results and Discussion
+
+Table 2 summarizes the recall and consistency
+gains of both methods across models. Addition-
+ally, Figure 5 presents a fine-grained analysis by
+language family and script.
+
+Both SUBSUB and SUBINJ yield consistent
+improvements in factual recall and consistency.
+As shown in Table 2, both strategies lead to perfor-
+mance gains across all model families and sizes.
+
+SUBINJ consistently outperforms SUBSUB, albeit
+by a modest margin, indicating that appending the
+English subject preserves the information of the
+original prompt while providing a strong align-
+ment cue. For multilingual LLMs, the improve-
+ments are most pronounced in smaller models. For
+example, gemma-—3-1b-pt shows an improve-
+ment of 13.7% in ACC and 17.3% in CO under
+SUBINJ. However, the gains become small as the
+size increases, suggesting that larger models al-
+ready possess stronger internal alignment capabil-
+ities. This aligns with recent findings from Lim
+et al. (2025) that larger models are more capable
+of retrieving knowledge embedded across typolog-
+ically different languages.°
+
+English-centric models benefit substantially
+from the remedies, especially for larger mod-
+els. Unlike multilingual models, where gains drop
+with increasing model size, English-centric mod-
+els, i.e., OLMo, exhibit the opposite trend: per-
+formance improvements from SUBINJ and SUB-
+SUB become more pronounced as the model scales
+up. For instance, OLMo-—2-1124-13B shows
+a remarkable increase of over 30% in ACC and
+over 40% in CO. This reverse pattern reflects a
+key difference in how multilingual and English-
+centric models process crosslingual input. While
+multilingual models already maintain robust entity
+alignment across languages, English-centric mod-
+els lack such alignment and rely heavily on En-
+glish as a pivot language in their latent conceptual
+
+Lim et al. (2025) found that while larger models have
+stronger multilingual capabilities, e.g., crosslingual language
+understanding, hidden states of different languages are more
+likely to dissociate from the shared conceptual space com-
+pared to smaller models.
+
+
+— orig == Subsub =~ Subinj — orig = Subsub ~~ Subinj — orig = subsub-—~ Subin
+
+— orig = Subsub = Subinj — orig = Subsub ~~ Subin} — orig == Subsub_ =~ Subin
+
+Figure 5: Radar plots comparing Baseline (Orig), SUBSUB, and SUBINJ factual recall performance
+(ACC) across language families and script groups. SUBINJ consistently improves recall across all cate-
+gories, especially in English-centric models (i.e., OLMo model families) and in non-Latin scripts.
+
+space. The primary challenge thus lies in tran-
+sitioning from language-specific inputs into this
+shared latent space. This transition depends criti-
+cally on both strong entity alignment and sufficient
+model capacity, explaining why the effectiveness
+of both methods grows with model size.
+
+SUBSUB and SUBINJ consistently improve
+factual recall across language families and
+scripts. As illustrated in Figure 5, both methods
+yield consistent gains across all language families
+and script groups. Improvements are particularly
+pronounced for non-Latin scripts such as Cyrillic,
+Arabic, and Chinese (Hans), likely because these
+languages lack surface-level token overlap with
+English. This makes crosslingual entity align-
+ment, especially subject alignment, more chal-
+lenging. Our approach, by explicitly leveraging
+English subjects, encourages direct entity align-
+ment and thereby facilitates consistency, likely by
+addressing cases where subject alignment is miss-
+ing or suboptimal. Substantial gains are also ob-
+served in typologically diverse language families
+such as Semitic and Slavic, showing the robust-
+ness of our methods across linguistic boundaries.
+Notably, English-centric models benefit the most,
+with marked improvements in nearly all non-Latin
+scripts and language families. This underscores
+the effectiveness of integrating English subjects as
+
+a way to facilitate entity alignment, which further
+reinforces the role of English as a conceptual pivot
+language in multilingual factual recall.
+
+6 Mechanistic Interpretability
+
+To better understand why SUBSUB and SUBINJ
+improve crosslingual factual recall, we perform a
+mechanistic analysis of how these interventions
+affect internal model representations. Specifically,
+we apply Logit Lens (Nostalgebraist, 2020) to
+project intermediate hidden states at each layer
+onto the output vocabulary and track the rank of
+the target object token across layers. A lower rank
+indicates that the correct answer is more readily
+accessible from that representation, thus reflecting
+stronger factual grounding.
+
+We analyze how the concept of the target ob-
+ject entity is represented and decoded across lan-
+guages by plotting its rank curves in the model’s
+intermediate layers. For each prompt in a given
+input language, we track the rank of (i) the correct
+object token in that language, and (ii) its equiva-
+lents in six other languages: English (en), French
+(fr), Spanish (es), Chinese (zh), Japanese (ja), and
+Korean (ko). This allows us to examine how well
+the model encodes a language-agnostic represen-
+tation of the object entity. Figure 6 displays the
+
+
+=) rank
+103 4 ---: rank_en
+rank fr
+
+x rank_es
+5 102 | ---: rank zh
+a rank ja
+~ rank_ko
+1 | — rank (sub_inj)
+10°) rank_en (sub_inj
+— rank fr (sub_inj)
+rank_es (sub_inj
+0 | — rank zh (sub_inj
+10 rank ja (sub_inj)
+04 — rank _ko (sub_inj
+
+ONY DON & ODPM IME MHP AOR MODY
+Layer
+
+)
+)
+)
+)
+
+(a) LLaMA (8B): Left — with SUBSUB; Right — with SUBINIJ.
+
+10° aoe ES
+104
+~~. rank
+1034 ---: rank_en
+rank fr
+ra rank_es
+& 102 | ---: rank zh
+a rank ja
+== rank_ko
+1 | — rank (sub_sub)
+10°) rank_en (sub_sub)
+— rank fr (sub_sub)
+rank_es (sub_sub)
+0 | — rank zh (sub_sub)
+10 rank ja (sub_sub)
+0} — rank ko (sub_sub)
+QNVYRHOVS OSS ASSN PEPE POY >
+Layer
+105
+104
+~~. rank
+1034} -—— ranken
+rank fr
+w rank_es
+5 102] --- rankzh
+[ag rank ja
+
+rank_ko
+1 | — rank (sub_sub)
+10°) = rank_en (sub_sub)
+— rank fr (sub_sub)
+rank_es (sub_sub)
+0 | — rank zh (sub_sub)
+10 rank ja (sub_sub)
+0} — rank ko (sub_sub)
+
+SSV9 HS ON GALAAR RIANA POPP ALO
+
+Layer
+
+10°
+
+===) rank
+103 | -—— ranken
+rank fr
+x rank es
+5 102] --- rank zh
+[ag rank ja
+~ rank _ko
+1 | — rank (sub_in)
+10°) rank_en (sub_inj)
+— rank fr (sub_inj)
+rank_es (sub_in))
+10 | — rank zh (sub_inj)
+10 rank ja (sub_inj)
+0 | — rank ko (sub_inj)
+
+ON 56 GB QKIARAR RADDA PDIP PPPOE
+
+Layer
+
+(b) OLMo (13B): Left — with SUBSUB; Right — with SUBINJ.
+
+Figure 6: Logit Lens analysis of object token ranks across model layers. We plot the rank of the target
+object token (lower is better) in its input language, along with its equivalents in six other languages, using
+lines of different colors. Dashed lines represent the original prompts, while solid lines correspond to
+prompts modified with SUBSUB and SUBINJ. Both interventions consistently result in lower ranks across
+languages compared to the original prompts, indicating that entity representations are more aligned in
+the common conceptual space, resulting in more consistent crosslingual factual prediction.
+
+results for LLaMA (8B) and OLMo (13B), with
+additional models included in Appendix §C.
+
+As we observe in Figure 6, the solid lines
+representing SUBSUB and SUBINJ consistently
+yield lower ranks across layers compared to the
+dashed lines from the original prompts. This
+trend is especially noticeable in later layers, where
+factual decoding typically occurs. These obser-
+vations indicate that both prompting strategies
+strengthen entity representation alignment across
+languages. The improved alignment of objects
+suggests that subject alignment — achieved through
+input prompts with substitutions/injections — en-
+gages reliable pivot-language processing in the
+shared conceptual space and then propagates to
+better object alignment, reducing inconsistencies
+that possibly arise from misaligned subjects.
+
+Overall, these results confirm that SUBSUB
+and SUBINJ enhance crosslingual entity alignment
+at the representation level, therefore facilitating
+more accurate and consistent factual recall.
+
+7 Conclusion
+
+In this work, we report a set of converging obser-
+vations that support the hypothesis that crosslin-
+gual factual consistency in multilingual LLMs is
+highly associated with entity-level alignment — the
+model’s ability to map subject and object entities
+into a shared conceptual space across languages.
+In our experiments, we observe that when en-
+tity alignment fails, consistency rarely emerges,
+revealing alignment as a key factor for consis-
+tent multilingual factual recall. To address the
+inconsistency problem, we introduce two simple
+prompting strategies SUBSUB and SUBINI that
+integrate English-translated subjects into queries,
+yielding substantial improvements in both fac-
+tual recall accuracy and crosslingual consistency.
+Finally, our mechanistic analysis suggests that
+these prompt-based interventions help models bet-
+ter align entities within a shared conceptual space
+biased toward high-resource languages, e.g., En-
+glish, thereby facilitating consistent factual recall.
+
+
+References
+
+Mikel Artetxe and Holger Schwenk. 2019. Mas-
+sively multilingual sentence embeddings for
+zero-shot cross-lingual transfer and beyond.
+Transactions of the Association for Computa-
+tional Linguistics, 7:597-610.
+
+Clément Dumas, Chris Wendler, Veniamin
+Veselovsky, Giovanni Monea, and Robert
+West. 2025. Separating tongue from thought:
+Activation patching reveals language-agnostic
+concept representations in transformers. arxiv
+preprint.
+
+Leon Englander, Hannah Sterz, Clifton A Poth,
+Jonas Pfeiffer, Ilia Kuznetsov, and Iryna
+Gurevych. 2024. M2QA: Multi-domain mul-
+tilingual question answering. In Findings
+of the Association for Computational Linguis-
+tics: EMNLP 2024, pages 6283-6305, Miami,
+Florida, USA. Association for Computational
+Linguistics.
+
+Constanza Fierro, Negar Foroutan, Desmond El-
+liott, and Anders Sggaard. 2025. How do mul-
+tilingual language models remember facts? In
+Findings of the Association for Computational
+Linguistics: ACL 2025, pages 16052-16106,
+Vienna, Austria. Association for Computational
+Linguistics.
+
+Constanza Fierro and Anders Sggaard. 2022. Fac-
+tual consistency of multilingual pretrained lan-
+guage models. In Findings of the Associa-
+tion for Computational Linguistics: ACL 2022,
+pages 3046-3052, Dublin, Ireland. Association
+for Computational Linguistics.
+
+Gemma Team, Aishwarya Kamath, Johan Ferret,
+Shreya Pathak, Nino Vieillard, Ramona Merhej,
+Sarah Perrin, Tatiana Matejovicova, Alexan-
+dre Ramé, Morgane Riviére, Louis Rouil-
+lard, Thomas Mesnard, Geoffrey Cideron, Jean
+bastien Grill, Sabela Ramos, Edouard Yvinec,
+Michelle Casbon, Etienne Pot, Ivo Penchev,
+Gaél Liu, Francesco Visin, Kathleen Ke-
+nealy, Lucas Beyer, Xiaohai Zhai, Anton Tsit-
+sulin, Robert Busa-Fekete, Alex Feng, Noveen
+Sachdeva, Benjamin Coleman, Yi Gao, Basil
+Mustafa, Iain Barr, Emilio Parisotto, David
+Tian, Matan Eyal, Colin Cherry, Jan-Thorsten
+Peter, Danila Sinopalnikov, Surya Bhupati-
+raju, Rishabh Agarwal, Mehran Kazemi, Dan
+
+Malkin, Ravin Kumar, and Others. 2025.
+Gemma 3 technical report.
+
+Mor Geva, Jasmijn Bastings, Katja Filippova, and
+
+Amir Globerson. 2023. Dissecting recall of
+factual associations in auto-regressive language
+models. In Proceedings of the 2023 Confer-
+ence on Empirical Methods in Natural Lan-
+guage Processing, pages 12216-12235, Singa-
+pore. Association for Computational Linguis-
+tics.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav
+
+Jauhri, Abhinav Pandey, Abhishek Kadian, Ah-
+mad Al-Dahle, Aiesha Letman, Akhil Mathur,
+Alan Schelten, Alex Vaughan, Amy Yang, An-
+gela Fan, Anirudh Goyal, Anthony Hartshorn,
+Aobo Yang, Archi Mitra, Archie Sravanku-
+mar, Artem Korenev, Arthur Hinsvark, Arun
+Rao, Aston Zhang, Aurelien Rodriguez, Austen
+Gregerson, Ava Spataru, Baptiste Roziere,
+Bethany Biron, Binh Tang, Bobbie Chern,
+Charlotte Caucheteux, Chaya Nayak, Chloe
+Bi, Chris Marra, Chris McConnell, Christian
+Keller, and Others. 2024. The Llama 3 herd of
+models.
+
+Katharina Hammerl, Jindfich Libovicky, and
+
+Alexander Fraser. 2024. Understanding cross-
+lingual Alignment—A survey. In Findings
+of the Association for Computational Linguis-
+tics: ACL 2024, pages 10922-10943, Bangkok,
+Thailand. Association for Computational Lin-
+guistics.
+
+Benjamin Heinzerling and Kentaro Inui. 2021.
+
+Language models as knowledge bases: On en-
+tity representations, storage capacity, and para-
+phrased queries. In Proceedings of the 16th
+Conference of the European Chapter of the As-
+sociation for Computational Linguistics: Main
+Volume, pages 1772-1791, Online. Association
+for Computational Linguistics.
+
+Evan Hernandez, Arnab Sen Sharma, Tal Hak-
+
+lay, Kevin Meng, Martin Wattenberg, Jacob An-
+dreas, Yonatan Belinkov, and David Bau. 2024.
+Linearity of relation decoding in transformer
+language models. In The Twelfth International
+Conference on Learning Representations, ICLR
+2024, Vienna, Austria, May 7-11, 2024. Open-
+Review.net.
+
+
+Zhengbao Jiang, Antonios Anastasopoulos, Jun
+
+Araki, Haibo Ding, and Graham Neubig. 2020.
+X-FACTR: Multilingual factual knowledge re-
+trieval from pretrained language models. In
+Proceedings of the 2020 Conference on Empir-
+ical Methods in Natural Language Processing
+(EMNLP), pages 5943-5959, Online. Associa-
+tion for Computational Linguistics.
+
+Amir Hossein Kargaran, Ali Modarressi, Nafiseh
+
+Nikeghbal, Jana Diesner, Francois Yvon, and
+Hinrich Schiitze. 2025. MEXA: Multilin-
+gual Evaluation of English-Centric LLMs via
+Cross-Lingual Alignment. arxiv preprint:
+2410.05873.
+
+Nora Kassner, Philipp Dufter, and Hinrich
+
+Schiitze. 2021. Multilingual LAMA: Inves-
+tigating knowledge in multilingual pretrained
+language models. In Proceedings of the 16th
+Conference of the European Chapter of the As-
+sociation for Computational Linguistics: Main
+Volume, pages 3250-3258, Online. Association
+for Computational Linguistics.
+
+Zheng Wei Lim, Alham Fikri Aji, and Trevor
+
+Cohn. 2025. Language-specific latent process
+hinders cross-lingual performance.
+
+Yihong Liu, Mingyang Wang, Amir Hossein Kar-
+
+garan, Ayyoob ImaniGooghari, Orgest Xhelili,
+Haotian Ye, Chunlan Ma, Francois Yvon, and
+Hinrich Schiitze. 2025a. How transliterations
+improve crosslingual alignment. In Proceed-
+ings of the 3Ist International Conference on
+Computational Linguistics, pages 2417-2433,
+Abu Dhabi, UAE. Association for Computa-
+tional Linguistics.
+
+Yihong Liu, Mingyang Wang, Amir Hossein Kar-
+
+garan, Felicia K6rner, Ercong Nie, Barbara
+Plank, Francois Yvon, and Hinrich Schiitze.
+2025b. Tracing multilingual factual knowledge
+acquisition in pretraining. arxiv preprint.
+
+Meng Lu, Ruochen Zhang, Carsten Eickhoff, and
+
+Ellie Pavlick. 2025. Paths not taken: Under-
+standing and mending the multilingual factual
+recall pipeline. arxiv preprint.
+
+Amr Mohamed, Yang Zhang, Michalis Vazirgian-
+
+nis, and Guokan Shang. 2025. Lost in the
+mix: Evaluating LLM understanding of code-
+switched text. arXiv preprint: 2506.14012.
+
+NLLB Team. 2024. Scaling neural ma-
+chine translation to 200 languages. Nature,
+630(8018):841-846.
+
+Nostalgebraist. 2020. Interpreting GPT: the logit
+lens. Blog post.
+
+Hao Peng, Xiaozhi Wang, Shengding Hu, Hai-
+long Jin, Lei Hou, Juanzi Li, Zhiyuan Liu, and
+Qun Liu. 2022. COPEN: Probing conceptual
+knowledge in pre-trained language models. In
+Proceedings of the 2022 Conference on Em-
+pirical Methods in Natural Language Process-
+ing, pages 5015-5035, Abu Dhabi, United Arab
+Emirates. Association for Computational Lin-
+guistics.
+
+Fabio Petroni, Tim Rocktaschel, Sebastian Riedel,
+Patrick Lewis, Anton Bakhtin, Yuxiang Wu, and
+Alexander Miller. 2019. Language models as
+knowledge bases? In Proceedings of the 2019
+Conference on Empirical Methods in Natural
+Language Processing and the 9th International
+Joint Conference on Natural Language Pro-
+cessing (EMNLP-IJCNLP), pages 2463-2473,
+Hong Kong, China. Association for Computa-
+tional Linguistics.
+
+Jirui Qi, Raquel Fernandez, and Arianna Bisazza.
+2023. Cross-lingual consistency of factual
+knowledge in multilingual language models. In
+Proceedings of the 2023 Conference on Empir-
+ical Methods in Natural Language Processing,
+pages 10650-10666, Singapore. Association for
+Computational Linguistics.
+
+Nils Reimers and Iryna Gurevych. 2020. Making
+monolingual sentence embeddings multilingual
+using knowledge distillation. In Proceedings of
+the 2020 Conference on Empirical Methods in
+Natural Language Processing (EMNLP), pages
+4512-4525, Online. Association for Computa-
+tional Linguistics.
+
+Adam Roberts, Colin Raffel, and Noam Shazeer.
+2020. How much knowledge can you pack
+into the parameters of a language model? In
+Proceedings of the 2020 Conference on Empir-
+ical Methods in Natural Language Processing
+(EMNLP), pages 5418-5426, Online. Associa-
+tion for Computational Linguistics.
+
+Uma Roy, Noah Constant, Rami Al-Rfou, Aditya
+Barua, Aaron Phillips, and Yinfei Yang. 2020.
+
+
+LAReQA: Language-agnostic answer retrieval
+from a multilingual pool. In Proceedings of
+the 2020 Conference on Empirical Methods in
+Natural Language Processing (EMNLP), pages
+5919-5930, Online. Association for Computa-
+tional Linguistics.
+
+Lisa Schut, Yarin Gal, and Sebastian Farquhar.
+
+2025. Do Multilingual LLMs Think In En-
+glish? In ICLR 2025 Workshop on Building
+Trust in Language Models and Applications.
+
+Team OLMo, Pete Walsh, Luca Soldaini, Dirk
+
+Groeneveld, Kyle Lo, Shane Arora, Akshita
+Bhagia, Yuling Gu, Shengyi Huang, Matt Jor-
+dan, Nathan Lambert, Dustin Schwenk, Oyvind
+Tafjord, Taira Anderson, David Atkinson, Faeze
+Brahman, Christopher Clark, Pradeep Dasigi,
+Nouha Dziri, Michal Guerquin, Hamish Ivi-
+son, Pang Wei Koh, Jiacheng Liu, Saumya
+Malik, William Merrill, Lester James V. Mi-
+randa, Jacob Morrison, Tyler Murray, Crys-
+tal Nam, Valentina Pyatkin, Aman Rangapur,
+Michael Schmitz, Sam Skjonsberg, David Wad-
+den, Christopher Wilhelm, Michael Wilson,
+Luke Zettlemoyer, Ali Farhadi, Noah A. Smith,
+and Hannaneh Hajishirzi. 2025. 2 OLMo 2 Fu-
+rious. arxiv preprint.
+
+Mingyang Wang, Heike Adel, Lukas Lange, Yi-
+hong Liu, Ercong Nie, Jannik Strdtgen, and
+Hinrich Schuetze. 2025. Lost in multilingual-
+ity: Dissecting cross-lingual factual inconsis-
+tency in transformer language models. In Pro-
+ceedings of the 63rd Annual Meeting of the As-
+sociation for Computational Linguistics (Vol-
+ume I: Long Papers), pages 5075-5094, Vi-
+enna, Austria. Association for Computational
+Linguistics.
+
+Chris Wendler, Veniamin Veselovsky, Giovanni
+Monea, and Robert West. 2024. Do Llamas
+work in English? On the latent language of
+multilingual transformers. In Proceedings of
+the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Pa-
+pers), pages 15366-15394, Bangkok, Thailand.
+Association for Computational Linguistics.
+
+Xiaolin Xing, Zhiwei He, Haoyu Xu, Xing Wang,
+Rui Wang, and Yu Hong. 2024. Evaluating
+knowledge-based cross-lingual inconsistency in
+large language models.
+
+An Yang, Anfeng Li, Baosong Yang, Beichen
+
+Zhang, Binyuan Hui, Bo Zheng, Bowen Yu,
+Chang Gao, Chengen Huang, Chenxu Lv, Chu-
+jie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang,
+Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jia-
+long Tang, Jian Yang, Jianhong Tu, Jianwei
+Zhang, Jianxin Yang, Jiaxi Yang, Jing Zhou,
+Jingren Zhou, Junyang Lin, Kai Dang, Keqin
+Bao, Kexin Yang, Le Yu, Lianghao Deng, Mei
+Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng
+Wang, Qin Zhu, Rui Men, Ruize Gao, Shix-
+uan Liu, Shuang Luo, Tianhao Li, Tianyi Tang,
+Wenbiao Yin, Xingzhang Ren, Xinyu Wang,
+Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang
+Su, Yichang Zhang, Yinger Zhang, Yu Wan,
+Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru
+Zhang, Zhipeng Zhou, and Zihan Qiu. 2025.
+Qwen3 technical report.
+
+Sohee Yang, Elena Gribovskaya, Nora Kassner,
+
+Mor Geva, and Sebastian Riedel. 2024. Do
+large language models latently perform multi-
+hop reasoning? In Proceedings of the 62nd
+Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers),
+pages 10210-10229, Bangkok, Thailand. Asso-
+ciation for Computational Linguistics.
+
+Da Yin, Hritik Bansal, Masoud Monajatipoor, Liu-
+
+nian Harold Li, and Kai-Wei Chang. 2022. Ge-
+oMLAMA: Geo-diverse commonsense probing
+on multilingual pre-trained language models. In
+Proceedings of the 2022 Conference on Em-
+pirical Methods in Natural Language Process-
+ing, pages 2039-2055, Abu Dhabi, United Arab
+Emirates. Association for Computational Lin-
+guistics.
+
+
+Relation Number of Facts
+
+applies_to_jurisdiction 719
+capital 336
+capital_of 212
+continent 212
+country_of_citizenship 60
+developer 76
+field_of_work 167
+headquarters_location 51
+instrument 46
+language_of_work_or_name 108
+languages_spoken 104
+location_of_formation 66
+manufacturer 35
+native_language 130
+occupation 46
+official_language 602
+owned_by 50
+place_of_birth 35
+place_of_death 719
+religion 125
+Total 2,619
+
+Table 3: Number of facts per relation type.
+
+A KLAR Dataset Details
+
+The statistics of the KLAR dataset (Wang et al.,
+2025) are presented in Table 3. KLAR is based on
+BMLAMA17 (Qi et al., 2023) with some minor
+modifications to improve the applicability to au-
+toregressive models. We use 2,619 facts grouped
+into 20 relation categories.
+
+B_ Supplementary Results
+
+In §5, we propose two simple but effective strate-
+gies —- SUBSUB and SUBINJ — which inject or sub-
+stitute the subject entity in prompts with its En-
+glish translation. These interventions yield sub-
+stantial improvements in both factual recall accu-
+racy and consistency, particularly for smaller mul-
+tilingual models and English-centric models. To
+better understand the role of English (the pivot lan-
+guage) in these gains, we conduct a complemen-
+tary study using Spanish and Japanese transla-
+tions of subject entities instead using four mod-
+els: LLaMA (1B), LLaMA (8B), OLMo (1B), and
+OLMo (13B). Table 4 presents the aggregated per-
+formance; Figures 8, 9, 10 report the consistency
+across language pairs using English, Spanish, and
+Japanese subject translations, respectively.
+Japanese underperforms, especially in
+English-centric models. Using Japanese as the
+pivot language results in limited or even negative
+gains. For example, in OLMo (1B), SUBSUB
+
+with Japanese degrades performance compared
+to the base prompt. These findings suggest that
+when the pivot language differs substantially from
+the model’s conceptual embedding space, entity
+alignment becomes harder, leading to poorer
+factual recall accuracy and consistency. This
+highlights the critical role of conceptual space
+alignment in driving factual recall.
+
+Conceptual space bias explains differences
+across pivot languages. These observations sup-
+port our broader hypothesis: the model’s ability
+to project entities into a shared, language-agnostic
+conceptual space facilitates consistent factual re-
+call. In practice, however, this space is not neutral
+— it is biased toward high-resource or pretraining-
+dominant languages like English. As a result, us-
+ing English-translated subjects helps the model ac-
+tivate this space more effectively than using other
+languages like Japanese. Spanish, which shares
+the script and extensive lexical overlap, therefore
+offers comparable improvements with English.
+
+C Mechanistic Interpretability:
+Additional Results
+
+As mentioned in §6, we use Logit Lens analysis
+to examine how SUBSUB and SUBINJ influence
+internal model representations. Here, we present
+the results on LLaMA (1B) and OLMo (1B).
+
+Figure 11 shows the rank of the target object
+token and its equivalents across six languages un-
+der original prompts, SUBSUB, and SUBINJ. We
+observe consistent patterns with the larger mod-
+els: both interventions reduce object ranks across
+layers, this confirms that our findings generalize
+across different model scales.
+
+In addition to rank analysis, we also examine
+probability curves for the target object token in
+each language under the three prompting condi-
+tions (original prompt, SUBSUB, and SUBINJ). As
+shown in Figure 12, the interventions consistently
+increase the predicted probability of the correct
+object across layers. This complements the rank
+analysis and further demonstrates that providing
+English subject cues enhances crosslingual entity
+alignment, making the correct object more acces-
+sible during decoding.
+
+
+Recall (ACC)
+
+Consistency (CO)
+
+big) Lang Base SUBSUB SUBINS tsussus (%) Tsusis (%)|Base SUBSUB SUBINI tsussvs (%) tsvsiw (%)
+LLaMA (1B) eng 0.53 0.60 0.61 117 149/054 0.61 0.63 13.2 17.8
+jpn 0.53 041 0.55 BBB 2.8|0.54 050 0.57 72 5.2
+spa 0.53 (0.56 (0.59 43 10.6| 0.54 0.59 0.61 9.2 144
+LLaMA (8B) eng 0.71 0.75 0.76 5.6 72/074 0.80 0.82 77 10.0
+jpn 0.71 066 0.73 -6.9 3.4/0.74 0.73 0.78 -1.9 5.0
+spa 0.71 = 0.72—s«0.75 15 5.7|0.74 0.77 0.80 43 8.2
+OLMo(IB) eng 027. 028 0.31 24 112/027 024 0.28 8.7 48
+jpn 027 «0.15 0.27 -46.2 2.71027 0.23 0.25 -13.4 -5.1
+spa 0.27 0.25. 0.29 -8.6 5.00.27 0.24 0.27 7.8 7
+OLMo (13B) eng 043. 0.54 0.56 25.9 31.6/039 052 0.55 35.3 43.9
+jpn 0.43 0.27 ~~ 0.45 -36.2 47/039 041 0.43 5.8 10.5
+spa 0.43 «=©0.49~— 0.53 15.1 24.1/0.39 0.50 0.53 30.2 36.9
+
+Table 4: Performance comparison of the proposed remedies SUBSUB and SUBINJ for improving entity-
+level alignment, using English, Japanese, and Spanish translations of subjects. Both methods improve
+recall and consistency when the intervention leverages translations from high-resource languages such
+as English and Spanish, indicating that the alignment benefits from the conceptual space biased towards
+
+these languages.
+
+(a) LLaMA (1B)
+
+(b) LLaMA (8B)
+
+(c) OLMo (1B)
+
+(d) OLMo (13B)
+
+Figure 7: Factual recall consistency across language pairs under baseline prompting, with language-
+specific factual queries issued in their original languages.
+
+(e€) OLMo (1B) SUBSUB
+
+(f) OLMo (1B) SUBINJ
+
+(g) OLMo (13B) SUBSUB
+
+(h) OLMo (13B) SUBINI
+
+Figure 8: Factual recall consistency across language pairs using English translations of subjects in SUB-
+
+SUB and SUBINIJ.
+
+
+(d) LLaMA (8B) SUBINI
+
+(c) LLaMA (8B) SUBSUB
+
+J
+
+(b) LLaMA (1B) SUBIN.
+
+B
+
+(a) LLaMA (1B) SuBSU
+
+(f) OLMo (1B) SUBINJ (g) OLMo (13B) SUBSUB (h) OLMo (13B) SUBINI
+
+(e) OLMo (1B) SUBSUB
+
+translations of subjects in SUB-
+
+Figure 9: Factual recall consistency across language pairs using Spanish
+
+SUB and SUBINIJ.
+
+(d) LLaMA (8B) SuBINI
+
+(c) LLaMA (8B) SUBSUB
+
+I
+
+(b) LLaMA (1B) SUBIN.
+
+B
+
+(a) LLaMA (1B) SuBSU
+
+(f) OLMo (1B) SuUBINJ (g) OLMo (13B) SUBSUB (h) OLMo (13B) SUBINJ
+
+(e) OLMo (1B) SUBSUB
+
+Figure 10: Factual recall consistency across language pairs using Japanese translations of subjects in
+
+SUBSUB and SUBINIJ.
+
+
+104
+
+103
+& 102
+a
+
+101
+
+10°
+
+105
+104
+103
+we
+& 102
+[ag
+10!
+
+10°
+
+10°
+104
+===" rank
+===) rank_en 103
+rank_fr
+rank_es x
+==) rank_zh 5 102
+rank ja a
+rank_ko
+— rank (sub_sub) 1
+— rank_en (sub_sub) LO
+— rank fr (sub_sub)
+rank_es (sub_sub)
+— rank_zh (sub_sub) 10°
+rank ja (sub_sub)
+— rank_ko (sub_sub) fe)
+
+sy > & 49 © NO OD
+
+)
+
+PY HP PY?
+
+x
+
+Layer
+
+10°
+10+
+=>) rank
+rank fr
+rank_es x
+~-- rank zh S 102
+rank ja [ad
+===) rank_ko
+— rank (sub_sub) 101
+— rank_en (sub_sub)
+— rank fr (sub_sub)
+rank_es (sub_sub)
+— rank_zh (sub_sub) 10°
+rank _ja (sub_sub)
+—— rank_ko (sub_sub) ie)
+
+sy > & 49 © N %
+
+yD mb ODD
+SSNS NS OS oS
+
+x
+
+Layer
+
+rank
+===. rank_en
+~ rank fr
+rank_es
+===) rank_zh
+rank ja
+~ rank_ko
+— rank (sub_inj)
+— rank_en (sub_inj)
+rank_fr (sub_inj)
+rank_es (sub_inj)
+— rank _zh (sub_inj)
+rank ja (sub_inj)
+— rank _ko (sub_inj)
+
+94% > & 49 © AN % D
+
+SY AV De OD DS
+VV WV MY
+
+Layer
+
+(a) LLaMA (1B): Left — with SUBSUB; Right — with SUBINJ.
+
+=~" rank
+===) rank_en
+~ rank fr
+rank_es
+=~. rank_zh
+rank ja
+~--) rank_ko
+— rank (sub_inj)
+— rank_en (sub_inj)
+— rank_fr (sub_inj)
+rank_es (sub_inj)
+— rank _zh (sub_inj)
+rank ja (sub_inj)
+— rank ko (sub_inj)
+
+Sy > & 59 © AN % D
+
+Layer
+
+(b) OLMo (1B): Left — with SUBSUB; Right — with SUBINJ.
+
+Figure 11: Logit Lens analysis of object token ranks across model layers. We plot the rank of the
+target object token (lower is better) in its input language, along with its equivalents in six other languages,
+using lines of different colors. Dashed lines represent the original prompts, while solid lines correspond
+to prompts modified with SUBSUB and SUBINJ. Both interventions consistently result in lower ranks
+across languages compared to the original prompts, indicating entity representations are more aligned in
+the common conceptual space, and consequently, more consistent crosslingual factual prediction.
+
+
+1.0
+0.8
+===) prob
+---» prob_en
+>
+206 brob.f
+= rob_es
+a prob_
+o ===" prob_zh
+Ss prob _ja
+= 0.44 --~: prob_ko
+— prob (sub_sub)
+—— prob_en (sub_sub)
+prob_fr (sub_sub)
+0.2 prob_es (sub_sub)
+— prob_zh (sub_sub)
+prob_ja (sub_sub)
+— prob_ko (sub_sub)
+0.0
+
+S a
+[o-) fo)
+
+Probablity
+S °S
+eS oO
+
+9°
+N
+
+===. prob
+===) prob_en
+prob_fr
+prob_es
+===» prob_zh
+prob_ja
+===" prob_ko
+— prob (sub_inj)
+— prob_en (sub_inj)
+prob_fr (sub_inj)
+prob_es (sub_inj)
+— prob_zh (sub_inj)
+prob_ja (sub_inj)
+— prob_ko (sub_inj)
+
+oN YU > ®&
+
+5 © AN % 9
+
+SY HD & GD ON BD DY YD Ph 7
+
+Layer
+
+(a) LLaMA (1B): Left — with SUBSUB; Right — with SUBINJ.
+
+1.0
+0.8
+===" prob
+===" prob_en
+>
+206 prob.t
+= prob_es
+ra ===) prob_zh
+2 prob ja
+o 0.44 --~ prob_ko
+a —— prob (sub_sub)
+— prob_en (sub_sub)
+— prob fr (sub_sub)
+0.2 prob_es (sub_sub)
+— prob_zh (sub_sub)
+prob_ja (sub_sub)
+— prob_ko (sub_sub)
+
+2 S
+fon) [o-)
+
+id
+BR
+
+Probablity
+
+9°
+N
+
+---: prob
+===. prob_en
+prob_fr
+prob_es
+===) prob_zh
+prob _ja
+===" prob_ko
+— prob (sub_inj)
+— prob_en (sub_inj)
+— prob_fr (sub_inj)
+prob_es (sub_inj)
+— prob_zh (sub_inj)
+prob_ja (sub_inj)
+— prob_ko (sub_inj)
+
+0.0
+SV¥VYM KS OVS YODA
+
+(b) LLaMA (8B): Left — with SUBSU
+
+B; Right — with SUBINIJ.
+
+1.0
+0.8
+===" prob
+===" prob_en
+>
+Fa) 0.6 fae
+= prob_es
+2 ===) prob_zh
+2 prob ja
+o 0.4 prob_ko
+a — prob (sub_sub)
+— prob_en (sub_sub)
+— prob_fr (sub_sub)
+0.2 prob_es (sub_sub)
+— prob_zh (sub_sub)
+prob_ja (sub_sub)
+prob_ko (sub_sub)
+0.0
+
+2
+fon)
+
+Probablity
+
+id
+BR
+
+9°
+N
+
+=~: prob
+===. prob_en
+prob_fr
+prob_es
+===) prob_zh
+prob _ja
+-~ prob_ko
+— prob (sub_inj)
+— prob_en (sub_inj)
+— prob_fr (sub_inj)
+prob_es (sub_inj)
+— prob_zh (sub_inj)
+prob_ja (sub_inj)
+~ prob_ko (sub_inj)
+
+oN YU > ®&
+
+5 © AN % 9 SY GY % & 4 © NB % DY MD mh OD
+
+S
+[o-)
+
+Probablity
+S S
+eS fon}
+
+9°
+N
+
+1.0
+0.8
+===" prob
+===" prob_en
+>
+26.6 brob.f
+= prob_es
+a --— prob_zh
+2 prob_ja
+E 0.4} ~~ prob_ko
+— prob (sub_sub)
+— prob_en (sub_sub)
+— prob_fr (sub_sub)
+0.2 prob_es (sub_sub)
+—— prob_zh (sub_sub)
+prob_ja (sub_sub)
+— prob_ko (sub_sub) ae
+0 ia
+
+Figure 12: Logit Lens analysis of object token probabilities across model layers. We plot the proba-
+bility of the target object token in its input language, along with its equivalents in six other languages,
+using lines of different colors. Dashed lines represent the original prompts, while solid lines correspond
+to prompts modified with SUBSUB and SUBINJ. Both interventions consistently result in higher prob-
+abilities across languages compared to the original prompts, indicating entity representations are more
+
+0. aa : ori 0. ns mee ae
+VV HD OND ADNAN SRA DSM AOE? SUUAEOONS SWANS PLD
+
+Layer
+
+(c) OLMo (1B): Left — with SUBSUB; Right — with SUBINJ.
+
+===: prob
+===" prob_en
+prob_fr
+prob_es
+---. prob_zh
+prob _ja
+=-~. prob_ko
+— prob (sub_inj)
+— prob_en (sub_inj)
+— prob_fr (sub_inj)
+prob_es (sub_inj)
+— prob_zh (sub_inj)
+prob_ja (sub_inj)
+— prob_ko (sub_inj) Z
+
+ft
+
+Layer
+
+(d) OLMo (13B): Left — with SuBSUB; Right — with SUBINJ.
+
+aligned in the conceptual space, and consequently, more consistent crosslingual factual prediction.

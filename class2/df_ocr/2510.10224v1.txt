@@ -1,0 +1,1859 @@
+arX1iv:2510.10224v1 [cs.CL] 11 Oct 2025
+
+Text2Token: Unsupervised Text Representation Learning with Token
+Target Prediction
+
+Ruize An'”, Richong Zhang!**, Zhijie Nie!~, Zhanyu Wu!', Yanzhao Zhang, Dingkun Long
+'CCSE, School of Computer Science and Engineering, Beihang University, Beijing, China
+?Zhongguancun Laboratory, Beijing, China
+3Shen Yuan Honors College, Beihang University, Beijing, China
+{anruize24,niezj, zhangrc,wuzy24}@act.buaa.edu.cn
+
+Abstract
+
+Unsupervised text representation learning
+(TRL) is a fundamental task in natural language
+processing, which is beneficial for improving
+search and recommendations with the web’s
+unlabeled texts. A recent empirical study finds
+that the high-quality representation aligns with
+the key token of the input text, uncovering
+the potential connection between representa-
+tion space and vocabulary space. Inspired by
+the findings, we revisit the generative tasks and
+develop an unsupervised generative framework
+for TRL, Text2Token. The framework is based
+on the token target prediction task, utilizing
+carefully constructed target token distribution
+as supervisory signals. To construct the high-
+quality target token distribution, we analyze the
+token-alignment properties with advanced em-
+bedders and identify two essential categories
+of key tokens: (1) the meaningful tokens in
+the text and (2) semantically derived tokens
+beyond the text. Based on these insights, we
+propose two methods—data-driven and model-
+derived—to construct synthetic token targets
+from data or the LLM backbone. Experiments
+on the MTEB v2 benchmark demonstrate that
+Text2Token achieves performance competitive
+with the state-of-the-art embedder with unsu-
+pervised contrastive learning, LLM2Vec. Our
+analysis further shows that vocabulary and rep-
+resentation spaces optimize together and to-
+ward the optimum solution during training, pro-
+viding new ideas and insights for future work.
+
+1 Introduction
+
+Text representation learning (TRL) has demon-
+strated substantial progress, enabling the web to
+understand and process textual content semanti-
+cally, improving search and recommendation, etc.
+However, text readily available on the web is of-
+ten unlabeled, making it crucial to design efficient
+
+* Corresponding author
+
+a Coomtnnstins IH
+MTT Peril
+
+token embedding
+
+(a) Discriminative Style
+
+token embedding '
+
+(b) Generative Style
+
+Figure 1: Comparison between (a) traditional discrimi-
+native contrastive learning and (b) our proposed genera-
+tive unsupervised framework: Text2Token.
+
+unsupervised methods that autonomously learning
+high-quality text representations from the web data.
+
+With the rapid advancement of large language
+models (LLMs), embedders utilizing LLMs as
+backbones have demonstrated unprecedented gen-
+eralization on TRL (Muennighoff et al., 2023).
+However, most methods rely on contrastive learn-
+ing over large-scale annotated or generated datasets,
+with their successful experience primarily stem-
+ming from the pretrained masked language model
+(PMLM) era (Reimers and Gurevych, 2019; Gao
+et al., 2021). As shown in Figure 1(a), contrastive
+learning pulls positive examples closer and pushes
+negative examples further apart in the representa-
+tion space, representing a typical discriminative-
+style approach. In contrast, as generative models,
+LLMs are trained using generative tasks through-
+out all stages. If a generative-style task can be used
+to train text representations, it would better lever-
+age the capabilities learned by LLMs. Therefore,
+we question: Can a simple but effective genera-
+tive approach be proposed for text representation
+
+
+learning?
+
+Before contrastive learning, generative methods,
+such as Skip-Thought (Kiros et al., 2015) and Fast-
+Sent (Hill et al., 2016), had dominated the un-
+supervised TRL field. However, subsequent at-
+tempts (Wang et al., 2021; Wu and Zhao, 2022)
+using generative methods failed to demonstrate su-
+perior performance compared to the simple con-
+trastive learning method like SimCSE (Gao et al.,
+2021). Recent TRL works on generative tasks (Gao
+and Callan, 2022; Xiao et al., 2022; BehnamGhader
+et al.; Li et al., 2024) primarily employ custom
+generative tasks as pretext tasks for contrastive
+learning, thereby enhancing the capabilities of con-
+trastive fine-tuning. Even after the emergence of
+LLMs, no more natural generative task has been
+proposed to replace contrastive learning in TRL.
+
+Obviously, the decline of generative tasks stems
+primarily from the scope of the supervision signals:
+the supervisory signal for the generative task orig-
+inates from the discrete vocabulary space, while
+that for the discriminative (contrastive) task comes
+from the continuous representation space, directly
+affecting representation. For a long time, the com-
+munity lacked an understanding of the relationship
+between continuous representation spaces and dis-
+crete lexical spaces. Fortunately, a recent empirical
+study (Nie et al., 2025) finds the interesting rela-
+tionship between the high-quality representations
+produced by LLM-based embedders and the vocab-
+ulary space. That is, when the representation output
+from the fine-tuned contrastive learning embedders
+is passed through the decoder layer of LLMs, the to-
+kens with higher decoding probabilities, called the
+aligned tokens, are almost the key tokens of the in-
+put text. This phenomenon has been demonstrated
+to be prevalent across all LLM-based embedders.
+Interestingly, the decoder layer retains the original
+backbone parameters of the LLM and remains in-
+visible during contrastive learning. The reason be-
+hind related to the simple variation of the principal
+components in the feature space during contrastive
+learning (See Section 5.5 for details). In this work,
+we primarily leverage this phenomenon to design
+new generative objectives, without delving into a
+deeper study of the underlying contrastive learning
+mechanisms. Specifically, empirical observations
+in (Nie et al., 2025) demonstrate that representa-
+tions trained with contrastive learning “align” with
+key tokens. As shown in Figure 2, we hypothe-
+size that this phenomenon is reversible: if training
+an embedder to generate key tokens, it to produce
+
+high-quality representations.
+
+Inspired by this thought process, we pro-
+pose a novel unsupervised learning framework,
+Text2Token, for TRL. As illustrated in Figure
+1(b), Text2Token utilizes the decoder layer of the
+LLM to map representations onto the vocabulary
+space, while receiving the KL-divergence super-
+visory guidance from a target token distribution
+(which we also refer to as the token target). When
+designing token targets, we do not rely on anno-
+tated data or external models, but solely utilize the
+statistical metrics of the dataset or intrinsic knowl-
+edge within the LLM backbone. Consequently,
+the training methodology is entirely unsupervised.
+Specifically, we first examined how high-quality
+representations “align” with the key tokens, identi-
+fying two essential categories of key tokens: (1) the
+core tokens from the nouns and adjectives in the
+text, and (2) semantically related tokens, including
+morphological variants and near-synonyms. We
+subsequently devised two distinct approaches to
+simulate these characteristics: (1) the data-driven
+method selects key tokens from the original text;
+(2) the model-derived method filters semantically
+relevant tokens from LLM priors. The final frame-
+work employs a two-stage training paradigm, suc-
+cessively utilizing data-driven and model-derived
+methods to obtain token targets as the target distri-
+bution in the KL-divergence loss.
+
+Unlike the previous methods, Text2Token is in-
+tended to replace contrastive learning, instead of
+being a preliminary pretext task for contrastive
+learning. Therefore, we compared Text2Token
+with the state-of-the-art unsupervised TRL model,
+LLM2Vec (BehnamGhader et al.). The perfor-
+mance on MTEB v2 (Muennighoff et al., 2023)
+demonstrates that Text2Token achieves significant
+advantages across multiple tasks, substantially out-
+performing LLM2Vec in the average score. Addi-
+tionally, as a new framework, we conducted exten-
+sive analytical experiments to aid in understanding
+the role of each component within the method and
+the impact of hyperparameters. Similarly, we com-
+pared our trained embedder with the contrastive
+fine-tuned embedder on both principal component
+analysis and token-level statistics, demonstrating
+that they achieve similar parameter solutions to a
+certain extent.
+
+The main contributions of this paper are as fol-
+lows:
+
+¢ We propose a novel training framework for
+
+
+Observation: finetuned embedder Deduction: use key tokens
+aligned key tokens with text. finetune embedder.
+
+Gy Tokens
+a AU
+
+generate
+
+decoder layer (g)
+
+Key Tokens
+
+mA
+finetune y \
+
+" \
+decoder layer (g) construct
+=
+
+z Gain '
+| finetuned embedder “Abit | embedder yy
+
+Figure 2: The relation between the findings in (Nie et al.,
+2025) (left) and the new proposed training method in
+this work (right).
+
+unsupervised TRL, Text2Token, that relies en-
+tirely on the generation objective, token target
+prediction, and differs fundamentally from all
+traditional methods based on contrastive learn-
+ing.
+
+¢ We explore two unsupervised approaches for
+constructing token distribution targets: a data-
+driven method and a model-derived method.
+Both approaches are integrated into our pro-
+posed training framework.
+
+Our embedder achieves superior performance
+on the MTEB benchmark compared with the
+unsupervised SOTA.
+
+2 Background
+
+2.1 Unsupervised Text Representation
+Learning
+
+Embedding Built upon the pretrained masked
+language models (PMLMs), such as BERT (Devlin
+et al., 2019) and RoBERTa (Liu et al., 2019), it
+effectively addresses the representation collapse
+that existed in earlier BERT-based models. Specif-
+ically, given a n-sized unlabeled corpus D =
+{x1,@2,...,%n}, where x; denotes a text. Each
+text x; is represented as a token sequence 7; =
+(w1, wW2,-.., wr), where w;, denotes the k-th token
+and T denotes the sequence length of x;. When
+adapting the PMLM F' for text representation en-
+coder F”’, the masked language modeling head g
+can be conceptually replaced by a pooling layer p
+to produce text-level representations e;, while pre-
+serving the rest module f of F’. The following is
+the interpretation in formula form:
+
+F=gof>F'=pof. (1)
+
+The text representation e; of a text x; is obtained
+as:
+
+e; = p(hi) = p(f(a)), (2)
+
+where h; denotes the last hidden states from f and
+the layer p(-) can be mean pooling:
+
+c= 2 ont, 3)
+
+or using the representation of the [CLS] token:
+e; = hits), (4)
+
+Training Contrastive learning (Oord et al., 2018;
+Gao et al., 2021; Izacard et al., 2021) represents
+a breakthrough in the field of unsupervised text
+representation learning in recent years. Its core
+lies in constructing the positive example pairs. For
+example, SimCSE (Gao et al., 2021) obtains two
+different representations of each text x; with ran-
+domness of dropout masks; while Contriever (Izac-
+ard et al., 2021) randomly crops two segments from
+the same document, performs random word dele-
+tion on them, and uses them as positive sample
+pairs. Then, each positive example pairs are en-
+coded as the representation pair (e;, ef), The
+remaining representations within the same batch
+(with batch size N) are regarded as negative sam-
+ples. The InfoNCE loss (Oord et al., 2018) for
+contrastive learning:
+
+exp (sim (ei, e\"?) /r)
+
+jet exp (sim (ei, i) /*) » (5)
+
+1 N
+
+where sim(-,-) denotes the cosine similarity and 7
+is a temperature hyper-parameter. Thus, this train-
+ing process requires no manual labels for the texts,
+and as a result, numerous methods have emerged to
+further improve SimCSE, including alternative pos-
+itive sample construction (Liu et al., 2021; Jiang
+et al., 2022; Wu et al., 2022a,c), hard negative
+mining (Chen et al., 2023; Deng et al., 2023; Cao
+et al., 2022; Wu et al., 2022b; Zhou et al., 2022;
+Zhang et al., 2022a), and loss function enhance-
+ments (Zhang et al., 2022b; Liu et al., 2023; Chen
+et al., 2022; Chuang et al., 2022).
+
+Improvements for LLMs When the backbone
+model F transitions to the LLM, embedding and
+optimization methods have not undergone signifi-
+cant changes. As mentioned in Eqn. | and Eqn. 2,
+
+
+the embedder based on LLMs shares a similar for-
+mulation with the PMLMs, except that g denotes
+the decoder layer, and f denotes the remaining
+part. To better suit text representation tasks, bidi-
+rectional attention is enabled in f, following the
+design proposed by BeLLM (Li and Li, 2024) and
+adopted in subsequent studies (Zhao et al., 2025;
+Muennighoff et al., 2024; BehnamGhader et al.).
+In addition to retaining mean pooling as in Eqn. 3,
+a novel prompt-based pooling strategy (Jiang et al.,
+2024) tailored for LLMs is also employed. Specif-
+ically, a prompt Zprompt 18 prepended to guide
+semantic aggregation to the last token. For ex-
+ample, promptEOL (Jiang et al., 2024) use the
+prompt This sentence: “[text]” means in
+one word: “, and the pooling strategy is expressed
+as
+
+Ee, = OCF (prompt (%)) _ ht, (6)
+
+where Zprompt(-) is the operation of replacing
+[text] with the real text, and fleet represents the
+last hidden state of the last token.
+
+Owing to the structural similarity between the
+LLMs and the PMLMs, contrastive learning contin-
+ues to be the dominant training paradigm for text
+representation learning. Given a pair of texts with
+either a positive or negative relation, the model
+is trained to distinguish between similar and dis-
+similar pairs, which we regard as a discriminative
+training strategy.
+
+2.2 Generative Methods for Text
+Representation
+
+Before contrastive learning emerged, some meth-
+ods learn text representations through generative
+unsupervised tasks. For instance, Skip-Thought
+(Kiros et al., 2015) and FastSent (Hill et al., 2016)
+predict context sentences from the representation
+of the current text, while SDAE (Hill et al., 2016)
+added noise to the text and then reconstructed the
+original sentence using the representations. How-
+ever, these methods performed less effectively than
+contrastive learning and are no longer mainstream
+paradigms.
+
+In fact, following the emergence of contrastive
+learning, generative self-supervised tasks have pre-
+dominantly appeared as the pretext tasks (Gao and
+Callan, 2022; Xiao et al., 2022; BehnamGhader
+et al.; Li et al., 2024). Specifically, these works
+fine-tune the embedders with the pretext task (a
+designed generative unsupervised task) and the ad-
+ditional decoder module first, thereby enhancing
+
+the PLM’s ability to adapt to aggregated semantics.
+Then, the fine-tuned embedders will undergo fur-
+ther fine-tuning through contrastive learning, show-
+ing better representation quality than those that are
+not fine-tuned by pretext tasks. The success of
+these methods implies that the optimization objec-
+tives for a certain class of generative tasks align
+with contrastive learning. However, these success-
+ful empirical cases alone do not enable us to derive
+effective general principles.
+
+Fortunately, a recent study (Nie et al., 2025)
+shows that, if the original decoder layer g of LLM
+is reattached after the embedder, even embedders
+trained with contrastive learning, the representa-
+tions can effectively map the key tokens strongly
+aligned with the input text semantics. They define
+the generative structure G as
+
+G=gopof, (7)
+
+Notably, the decoder layer g is merely a simple
+linear transformation and is not involved in the
+finetuning of the embedder. In other words, the
+actual generative ability lies in the embedder itself.
+A well-trained embedder is thus capable of not
+only generating meaningful text representations
+but also generating key tokens. Then, conversely,
+could using key token prediction as the training
+task yield a high-quality embedder? It suggests that
+text representation learning based on the generative
+paradigm may have a much broader development
+potential than we previously thought.
+
+3 Text2Token: Learning Framework
+
+3.1 Motivation
+
+Generative training paradigms have a natural com-
+patibility with LLMs. However, the current main-
+stream approaches in text representation learning
+remain discriminative, such as contrastive learning,
+which limits the potential of LLMs in this field.
+From the study by (Nie et al., 2025), we observe
+that a well-trained embedder actually has a strong
+ability to generate key tokens of the input. Moti-
+vated by this, we hypothesize that training an em-
+bedder to generate key tokens can also enable it
+to produce high-quality representations, as illus-
+trated on the right of Figure 2. During training, the
+target distribution of vocabulary space guides the
+changes in the prediction distribution, influencing
+the representation space before the decoder layer
+g. Ultimately, both vocabulary and representation
+spaces converge to the optimal solution together.
+
+
+Token Prediction
+
+Embedding (hidden st SEU dimension)
+
+(tem renee Y Cpreaster
+
+Token Target (vocabulary dimension)
+
+Training
+
+Kullback—Leibler
+Divergence
+
+Term process
+
+erm [ Term Frequency 4 mUrCiacker [nutcracker _}{NouN]
+
+distribution 7 > distribution
+— decoder layer (g)
+class (Parameters Frozen) u
+
+Term process
+Contrast
+
+:
+
+* Filtering
+
+common
+
+4
+'
+i
+'
+i
+i
+1
+i
+1
+i
+i
+'
+i
+i
+'
+1
+i
+i
+i
+'
+i
+
+=
+(lever } (Noun):
+:
+
+*K aS
+
+gig).
+gag”
+
+what class lever is a nutcracker?
+
+Training
+
+'
+
+Inverse Document
+Frequency {
+
+1
+
+t
+
+1
+
+Data-Driven Method
+
+Inference
+Only
+
+Inference
+Only
+
+what class lever
+is a nutcracker?
+
+i
+i
+1
+'
+1
+i
+i
+1
+'
+t
+i
+'
+i
+1
+1
+i
+'
+i
+'
+fi
+1
+i
+'
+i
+'
+1
+i
+'
+i
+1
+1
+1
+i
+i
+'
+'
+1
+i
+t
+i
+1
+i
+1
+'
+i
+'
+1
+1
+
+aM
+
+Model-Derived Method
+
+Figure 3: The overview of our generative framework, Text2Token, for unsupervised text representation learning.
+
+3.2 Overview
+
+Based on the above hypothesis, we propose a novel
+generative framework, Text2Token, for unsuper-
+vised text representation learning. Specifically, dur-
+ing training, Text2Token uses G in Eqn.7 to predict
+the probability distribution of key tokens, super-
+vised by a precomputed target key token probabil-
+ity distribution. After training, g is discarded, and
+F’ = po f serves as the embedder to obtain text
+representations. Clearly, the core of Text2Token is
+to define the target token distribution for each text,
+referred to as the token target. We reserve this
+core component for Section 4, where we detail how
+we construct the token target through empirical re-
+search and insights from prior work. The remainder
+of this section will formally introduce our training
+strategy. Without additional explanation, the de-
+fault notation for G’s backbone is derived from
+LLMs, consistent with the experimental section.
+
+3.3. Training Strategy
+3.3.1 Token Prediction
+
+For each text x;, we can obtain the vocabulary-size
+logit s € R'! through G:
+
+s = G(x;) = g(p(f(xi)) = g(ei)
+
+= Wimei, (8)
+where Wim € R!”*¢ is the pre-trained parameter
+of g! and remain fixed during training. Then, a
+
+'To our best knowledge, the mainstream LLMs all follow
+the original design of GPT (Radford et al., 2018), employing
+an unbiased matrix as the sole parameter for the decoder layer.
+
+softmax function is applied on s to obtain the pre-
+diction distribution in the vocabulary space. For
+any wz in VY, its probability can be expressed as
+
+eee
+
+Ml exp(s;).
+(9)
+
+Qo(we|xi) = Softmax(s), =
+
+3.3.2 Token Target Construction
+
+For each x, we generate a token target Prarget(w|x)
+over the model vocabulary V to serve as the train-
+ing objective. We refer to this token distribution
+as the token target. In our expectation, it should
+assign high probabilities to key tokens and low
+probabilities to non-key tokens. The token target
+construction process can be formulated as follows:
+
+Con(ai,D),
+
+# data-driven
+Prarget(We|2i) — Con(ai,D, 90)
+
+# model-derived
+
+(10)
+
+where the construction process of token target is de-
+noted as C'on(-) and o is the pre-trained parameter
+of G. In Section 4, we propose two Con function
+methods: (1) the data-driven method relies solely
+on the training dataset D; (2) the model-derived
+method additionally leverages the original model
+80, which plays a decisive role in shaping the target.
+
+3.3.3. Loss Function
+
+To train the embedder f, we use Prarget(w|x) con-
+structed in Section 3.3.2 as the training objective
+and optimize Pygnea(w|x) from Section 3.3.1 by
+
+
+BackBone Model Top 10 Aligned Tokens
+LLM2Vec-unsup
+Mistral-7B LLM2Vec-sup
+GritLM
+Lllama3-8B LLM2Vec-unsup instrument _perc _frame guitar like |
+LLM2Vec-sup _instrument _string 14 0
+Llama2-7B Llama2vec No _like _string _instrument Q ? _is _go |_in
+
+Table 1: Top-10 Aligned Tokens from the different embedders for the text “Noori is a 14-stringed instrument shaped
+like a guitar, but with a wooden frame covered in goatskin to produce percussive sounds like those of a djembe.”
+
+minimizing the KL divergence:
+
+Ltext2token = KL (Paarget|| Qo) .
+
+4 Token Target Design
+
+(1)
+
+4.1 Observation and Discussion
+
+Recall that Text2Token is motivated by the empiri-
+cal observation that the representations produced
+by the LLM-based embedders align with key to-
+kens, although they are fine-tuned by contrastive
+learning (Nie et al., 2025). Therefore, we start by
+analyzing several state-of-the-art embedders to ex-
+amine the aligned token distributions mapped from
+their text representations. This analysis allows us
+to investigate further how a high-quality represen-
+tation aligns with an appropriate token distribution.
+The reference models studied are:
+
+¢ LLM2Vec-unsup (BehnamGhader et al.).
+LLM2Vec converts decoder-only LLMs into
+text encoders via three unsupervised steps:
+enable bidirectional attention, brief masked
+next-token adaptation, and SimCSE-style con-
+trastive learning.
+
+¢ LLM2Vec-sup (BehnamGhader et al.). The
+supervised version of LLM2Vec.
+
+¢ GritLM (Muennighoff et al., 2024). GritLM
+is a single instruction-tuned LLM that jointly
+trains generative and contrastive objectives,
+toggled by task instructions.
+
+¢ Llama2vec (Li et al., 2024). Llama2Vec
+adapts LLMs for dense retrieval via two unsu-
+pervised pretext tasks to learn text representa-
+tions: EBAE (self-reconstruction) and EBAR
+(next-sentence prediction).
+
+As illustrated in Table 1, although different mod-
+els align to different tokens, these top-aligned to-
+kens share the following common characteristics:
+
+(1) the key tokens appearing in the text (high-
+lighted in yellow) generally receive high prob-
+abilities. For example, “_No” (the first token
+of the proper noun “Noori’), “_instrument’ and
+“string” Tokens sharing the same stem with in-text
+tokens also exhibit elevated probabilities, such as
+“instruments” and “_Nor’”; (2) the semantically-
+related tokens that do not occur in the surface
+text (highlighted in red) are often assigned high
+probabilities by some embedders. For instance,
+LLM2Vec-unsup aligns the text with “drum” con-
+sistent with the phrase “sounds like those of a
+djembe” where “‘djembe” refers to a type of drum.
+Similarly, LLM2Vec-sup maps it to “_musical”,
+and Llama2vec aligns it to “what”, which is reason-
+able given that the text introduces the instrument
+“Noori’”; (3) Only a very small number of unre-
+lated tokens (highlighted in grey) are assigned
+high probabilities by some embedders. More
+examples are shown in Appendix B.
+
+The above discussion provides a foundation for
+independently constructing token targets. Our goal
+is to design token targets that closely capture the
+beneficial characteristics of these aligned distribu-
+tions. As shown in the Figure 3 on the right, we
+designed two constructors to simulate the in-text
+token distribution (the data-driven Method) and
+out-of-text token distribution (the model-derived
+Method) in aligned token distributions, respectively.
+Then use them in sequence to guide the training.
+The specific details of each method differ and are
+described in the next two sections.
+
+4.2. Data-Driven Method
+
+From the preceding analysis, we observe that the
+key token in the original text constitutes a crucial
+component of the aligned token target. In addition,
+Llama2vec (Li et al., 2024) introduced EBAE, a
+pretext task that attempts to recover all tokens ap-
+
+
+pearing in the original text. However, EBAE can
+only serve as a pretext task before contrastive learn-
+ing fine-tuning; the embedder trained solely using
+it exhibits suboptimal performance (Shown in Ta-
+ble 2). We therefore propose constructing a token
+target based on these key tokens to approximate the
+capabilities of the aligned token target and achieve
+comparable training effects.
+
+Intuitively, we should assign a significance score
+to each token in the text, reflecting its contextual
+salience. The key tokens are then selected accord-
+ing to these scores, and their scores are reflected
+as weights in the resulting distribution. To iden-
+tify core words, we employ statistical NLP tech-
+niques due to their simplicity and effectiveness.
+Specifically, we adopt TF-IDF (Ramos et al., 2003)
+for scoring and part-of-speech (POS) for further
+filtering. The POS filter is motivated by the pre-
+vious empirical study (Nie et al., 2025), which
+finds that the majority of tokens aligned by the
+trained embedders are Noun (NOUN), Proper Noun
+(PNOUN), and Adjective (ADJ). The complete
+target-construction pipeline is illustrated below.
+
+4.2.1 Corpus Process
+
+To capture global information, the inverse docu-
+ment frequency (IDF) of each word w;, is computed
+as
+
+_ iD|
+Fw) les (epee)
+
+where | - | is the cardinality operation on a set. The
+set {x € D|w, € x} contains all documents in
+which appears at least once, and its cardinality
+gives the document frequency of w;.
+
+4.2.2 Term Process
+
+For a document x; € D, the TF-IDF score of token
+wy, In x; 1s calculated as follows:
+
+count(w,|2;)
+
+~ do, count(w; xj)’
+
+Scorete-iat(we|@i) = TF(wy|;) * IDF(wz), (14)
+
+where TF(w;|x;) represents the term frequency.
+Furthermore, we use POS to conduct a further
+screening of the core words. Inspired by empir-
+ical observation of (Nie et al., 2025), we set up the
+POS filter set as
+
+P = {NOUN, PROPN, ADJ}.
+
+The filtering process is as follows:
+
+Scorepos (4, |X4) =I [pos(wy|x;) € P| * Scoretgiat(W|X;)
+
+(15)
+
+where I|-] is the indicator function and pos(-) is
+the function to return the part of speech of w, in
+the context of x;. * Finally, we constructed token
+target based on the Scorepos:
+
+Praeger (| 24 ) = Con(xi, D)
+exp(Scorepos(we|2i))
+
+wey EXP(Scorepos(wy| ri)
+(17)
+
+(16)
+
+4.3. Model-Derived Method
+
+Beyond the words explicitly present in the text, the
+aligned token target includes absent tokens that
+are morphological variants or semantically related
+terms. Such tokens cannot be extracted directly
+from the original text, but they can emerge through
+the decoder’s inherent inference capability. In our
+fine-tuned model, such key tokens already receive
+high weights. Whereas in the untuned model, high-
+weight tokens contain not only these key tokens but
+also various noisy elements.
+
+Inspired by prior works on representative words
+prediction (ROP) (Ma et al., 2021a,b) and con-
+trastive decoding (Wingate et al., 2022; Lin et al.,
+2024), we introduce a common token distribution
+to contrast and filter each text’s original token distri-
+bution. Specifically, the common distribution is de-
+fined as the mean of the token distributions mapped
+from multiple texts across the corpus. Tokens that
+consistently achieve high probabilities across all
+texts are less likely to be the key tokens of any par-
+ticular text. Therefore, tokens with high probability
+in the common distribution can be removed from a
+text’s original token distribution. The final filtered
+distribution serves as the training target to guide
+the model’s own learning. The full pipeline for
+constructing this target is illustrated below.
+
+4.3.1 Corpus process
+
+After weighing the inference cost and training effi-
+ciency, we first estimate the common token distri-
+bution by computing the expectation over a corpus
+
+"We utilize en_core_web_sm model provided by spaCy
+(Honnibal et al., 2020) for word-level part-of-speech tagging
+and assign the part-of-speech tag of each word to its split
+tokens.
+
+
+Backbone Categories > Class. Clust. PairClass. Rerank. Retr. STS Summ. | Avg
++ of datasets > 8 3 2 10 9 1 41
+Llama2vec (EBAE) 66.93 37.76 65.46 38.56 7.86 56.27 8.31 40.16
+LLM2Vec-unsup 76.25 44.99 78.01 43.24 22.35 75.55 32.62 | 53.29
+
+Llama3-8B Text2Token (Last w causal) 70.98 51.51 76.09 45.60 41.57 72.86 28.16 | 55.25
+Text2Token (Last w bidirectional) 75.68 48.17 75.77 45.38 38.35 69.36 25.23 | 53.99
+Text2Token (Mean w causal) 67.32 46.20 64.43 40.76 26.15 59.82 15.44 | 45.73
+Text2Token (Mean w bidirectional) | 66.94 44.14 59.69 36.77 8.67 52.99 9.40 39.80
+Llama2vec (EBAE) 68.37 36.02 66.24 38.28 940 62.35 1443 | 42.16
+LLM2Vec-unsup 75.72 40.74 80.94 4417 31.05 78.24 26.69 | 53.94
+
+Mistral-7B Text2Token (Last w causal) 71.65 49.71 76.98 44.85 40.12 72.05 17.20 | 53.22
+Text2Token (Last w bidirectional) 74.22 49.08 78.61 45.39 38.12 73.93 26.30 | 55.10
+Text2Token (Mean w causal) 66.08 43.48 62.65 39.57 26.23 56.34 4.79 | 42.73
+Text2Token (Mean w bidirectional) | 71.51 48.56 75.61 44.57 39.86 71.89 10.05 | 51.72
+
+Table 2: Performance comparison with unsupervised state-of-art, LLM2Vec, on MTEB.v2 benchmark. The bold
+font indicates the best score in each category, while underlined text indicates the second-best score. Detail results
+
+illustrated in Appendix E.
+
+subset Dgybset With a rational size:
+
+Qoile) = B— YL Qo (wel).
+
+Qe (wr) a
+|Dsubset| LEDsubset
+
+where Dgubset denotes a sampled subset of the cor-
+pus.
+
+4.3.2 Term process
+
+We then compute the token distribution for each
+text using the same procedure. Then, we filter the
+token distribution Qo, (w,|x;), using the common
+token distribution Q,, (w;,) as a reference, employ-
+ing a relative confidence screening method to ob-
+tain the final token targets. We compare the perfor-
+mance of different filtering formulas in Appendix
+C, and the best one is
+
+. Qo (wel zi)
+Qo. (wel ti) + Qo, (We)
+
+(19)
+where 7 is the temperature hyper-parameter for
+adjusting the distribution smoothness, similar to
+InfoNCE Loss (Eqn.5).
+
+4.4 Two-Stage Training Paradigm
+
+Since the two targets emphasize different aspects of
+key tokens, we adopt a two-stage training strategy.
+In both stages, training is conducted using only
+the KL divergence (Eqn.11). The token target in
+the first and second stage is from the data-driven
+method (Eqn.16) and the model-derived method
+(Eqn.19) by default. We further discuss the impact
+of varying the order in Section 5.3.
+
+5 Experiment
+
+5.1 Settings
+5.1.1 Training
+
+Training was fully unsupervised, using
+the Wikipedia corpus preprocessed by
+DPR (Karpukhin et al., 2020). It proceeded
+in two stages, each with a different target as the
+training signal: 500 steps in the first stage and 200
+steps in the second. We use LoRA with r = 16,
+a = 32, on gq_proj and v_proj, with 0.05 dropout
+and no bias update. The batch size is 64, and the
+sequence length is 128. Learning rate is 3e-5. The
+temperature 7 and the constructing data size of
+the common distribution for the model-derived
+method are 0.0001 and 100K.
+
+5.1.2 Baseline
+
+We adopt LLM2Vec-unsup and Llama2Vec
+(EBAE) as our baselines. Both models em-
+ploy unsupervised training approaches: LLM2Vec-
+unsup follows a contrastive learning paradigm,
+while Llama2Vec (EBAE) is based on a self-
+reconstruction objective. Unlike Text2Token,
+EBAE assigns equal probability to all tokens that
+appeared in the original text within the token target.
+
+5.1.3 Evalutaion
+
+Evaluation was performed on the Massive Text Em-
+bedding Benchmark (MTEB) (Muennighoff et al.,
+2023), using the English v2 release, covering 41
+datasets in total. Ablations and analyses are con-
+ducted in a subset of MTEB presented in Table 5.
+
+
+Llama3-8B Data-Driven
+
+Llama3-8B Model-Derived
+
+42.79
+
+Mean
+
+45.55
+
+48.59
+
+Last 58.65
+
+38.32
+
+47.27
+
+45.71
+
+20 40 60
+
+om
+
+{e) 20 40 60
+
+Stage I Stage IT Avg
+Llama3-8B (w causal)
+data-driven (Last) model-derived (Last) 61.57
+model-derived (Last) data-driven (Last) 61.58
+data-driven (Mean) model-derived (Mean) 54.35
+model-derived (Mean) data-driven (Mean) 47.79
+Mistral-7B (w bidirectional)
+data-driven (Last) model-derived (Last) 59.96
+model-derived (Last) data-driven (Last) 55.99
+data-driven (Mean) model-derived (Mean) 57.06
+model-derived (Mean) data-driven (Mean) 51.59
+
+Table 3: Ablation results of two-stage training.
+
+5.1.4 Technical Factors
+
+The experiments were conducted on two back-
+bone models, Llama3-8B and Mistral-7B. We used
+“causal” to represent conventional attention and
+“bidirectional” to represent bidirectional attention.
+We explore two pooling strategies: (1) Mean: mean
+pooling (Eqn.3), and (2) Last: last pooling (Eqn.6).
+
+5.2 Main Results
+
+Table 2 presents the results of our main experiment.
+To allow both categories of targets to contribute
+to the supervision signal, we adopt a two-stage
+training strategy in which each target type super-
+vises one training stage. It can be observed that
+Text2Token with the last-pooling method outper-
+forms LLM2Vec on average. This validates the
+effectiveness of our training framework. Specifi-
+cally, Text2Token demonstrates consistent advan-
+tages across Clustering, Reranking, and Retrieval
+tasks. Moreover, we find that Text2Token achieves
+better results with last-pooling, whereas LLM2Vec
+is more suited to mean-pooling. In summary,
+these results confirm that Text2Token achieves
+consistently superior performance across tasks,
+particularly with the last-pooling strategy.
+
+5.3 Ablation Study
+
+Text2Token involves several adjustable factors,
+and ablation experiments are necessary to clarify
+the contribution of each component. Specifically,
+we first examine how different target types, pool-
+ing strategies, and attention mechanisms influence
+training performance for a single-stage setting. Fur-
+ther, we investigate whether the applied order of
+token targets affects the results significantly.
+
+Mistral-7B Data-Driven Mistral-7B Model-Derived
+
+46.87
+38.43
+
+56.51
+Mean
+45.29
+
+55.24
+53-45
+
+37-77
+34.92
+
+Last
+
+°
+v J
+°
+
+40 60 (e) 20 40 60
+causal ©") bidirectional
+
+Figure 4: Ablation results of single-stage training.
+
+* 0% oo 0% 90%e70 0-08 FF oF GF igo
+Temperature Value Data Size
+| Llama3-8B Llama3-8B
+
+Mistral-7B
+
+(w Last causal) (w Mean causal) * (w Last bid)
+
+Mistral-7B
+(w Mean bid)
+
+Figure 5: The result variation with the hyperparameter.
+
+5.3.1 Single-Stage Training
+
+As shown in Figure 4, we observe that data-driven
+targets achieve the best performance when paired
+with last pooling, while model-derived targets are
+more effective with mean pooling. Moreover,
+Llama3-8B benefits more from causal attention,
+whereas Mistral-7B performs better with bidirec-
+tional attention. These findings reveal clear comple-
+mentarities between target types, pooling strategies,
+and attention mechanisms.
+
+5.3.2 Two-stage Training with Same Pooling
+
+As shown in Table 3, we assign the two targets
+to the two stages and further verify whether their
+training order. Based on prior observations in the
+Section 5.3.1, we use Llama3-8B with causal at-
+tention and Mistral-7B with bidirectional attention
+as backbones. First and foremost, it is crucial to
+emphasize that the experimental results can prove
+that two-stage training is indeed superior to that
+of the two single-stage trainings conducted sepa-
+rately. This validates the effectiveness of our ap-
+proach of guiding the model with two types of
+targets in a two-stage training process. Secondly,
+the results also reveal that training with data-driven
+targets first generally yields slightly better perfor-
+mance, though in certain cases, such as the method
+
+
+Model Top 10 Aligned Tokens
+
+Raw (Mistral-7B)
+Text2Token (Mistral-7B)
+
+Raw (Llama3-8B)
+Text2Token (Llama3-8B) _instrument
+
+Table 4: Top-10 aligned tokens on the backbone and our trained embedders for the Sentence “Noori is a 14-stringed
+instrument shaped like a guitar, but with a wooden frame covered in goatskin to produce percussive sounds like
+those of a djembe.”.
+
+(e) 10 20
+a e) ge? g
+B70 & & -10 5 o
+= -40 5 'S -20 ‘© -10
+EI 5 5 5
+> -60 > > 30 > -20
+co 2 = -40 “ee
+Ss -80 Ss s Ss 7-30
+-50 ait
+-100 -60
+-50
+© 1000 2000 3000 4000 0 1000 2000 3000 4000 0 1000 2000 3000 4000 0 1000 2000 3000 4000
+i (Dimension) i (Dimension) i (Dimension) i (Dimension)
+
+(a) Llama3-8B — Text2Token (b) Llama3-8B — LLM2Vec (c) Mistral-7B — Text2Token (d) Mistral-7B — LLM2Vec
+
+Figure 6: Variation of Text2Token and Variation of LLM2Vec along each principal component of the representation
+space. v; means the variation of the first principal component.
+
+of Llama3-8B with last pooling, the target order has shows results using 5k, 10k, 50k, 100k, and 1M
+minimal influence on training. These results con- | samples. Performance stabilizes beyond 10k sam-
+firm the clear advantages of the two-stage training ples, suggesting that a relatively small dataset
+strategy over the single-stage ones. suffices to capture the macro-level distribution,
+
+while excessive data may risk overfitting.
+5.4 Model-Derived Hyperparameter Study
+
+In this subsection, we discuss the influence of two 5.5 Analysis
+
+hyperparameters, (1) temperature for distribution We examine the changes in Text2Token before
+and (2) data size for common token distribution, and after fine-tuning, focusing on two aspects:
+when constructing the model-derived target. (i) the variation of its correspondence with to-
+kens in the vocabulary space, and (ii) the ad-
+justments in the representation space. Although
+In the model-derived method, a critical parameter —_ our approach differs from conventional contrastive
+is the temperature parameter 7, which is used to __ learning, we further compare these changes with
+smooth the final target distribution. We conducted those of LLM2Vec to validate their consistency,
+experiments on Mistral-7B, and as illustrated inthe | showing that Text2Token demonstrates well-
+figure 5 (left), under the same experimental settings, aligned behavior during fine-tuning, exhibiting
+adjusting the temperature within the range from _contrastive-like behavior in both token align-
+0.01 to le-5 yields stable and consistent results, ment and representation space variation.
+indicating that the model-derived target is robust
+to its variations.
+
+5.4.1 Temperature for Distribution
+
+5.5.1 Key Token Prediction
+
+As shown in the Table 4, after fine-tuning, the
+top tokens corresponding to the same text change
+significantly. These include not only in-text key
+Recall that the construction of the model-derived — tokens such as “_instrument” and “_string’’, but
+target depends on the LLM backbone’s prior knowl- _ also out-of-text key tokens such as ““_tamb” and
+edge, and a common token distribution is needed “_drums”. Moreover, when compared with the to-
+to filter and obtain the token target. We evaluate _ kens predicted by other embedders reported in Ta-
+how dataset size affects the quality of this distri- ble 1, Text2Token achieves a comparable or even
+bution to reduce inference cost. Figure 5 (right) higher level in predicting key tokens. More exam-
+
+5.4.2 Data Size for Common Token
+Distribution
+
+10
+
+
+ples are shown in Appendix D.
+
+5.5.2 Variation on Embedding Space
+
+The prior study (Nie et al., 2025) shows that
+the spectral variation of existing embedders (e.g.,
+LLM2Vec) is primarily concentrated in the first
+principal component (v1), which often captures
+noise in high-dimensional spaces. Thus, ana-
+lyzing changes in v, provides a means to as-
+sess fine-tuning effectiveness. As shown in
+Figure 6, LLM2Vec follows this pattern, and
+Text2Token exhibits similar behavior, indicating
+that our training strategy effectively regularizes the
+high-dimensional space.
+
+6 Conclusion
+
+In this work, we introduced Text2Token to learn
+text representation with the generative objectives
+without supervision, moving beyond the conven-
+tional reliance on contrastive learning. By defining
+the aligned token target and analyzing its composi-
+tion, we proposed two practical strategies for gen-
+erating synthetic token targets: data-driven and
+model-derived. Text2Token achieves state-of-the-
+art results among unsupervised methods on MTEB
+v2. Importantly, we verified the connection be-
+tween token distributions and representations dur-
+ing training, suggesting a new perspective for de-
+signing more effective generative TRL strategies
+in future.
+
+References
+
+Parishad BehnamGhader, Vaibhav Adlakha, Marius
+Mosbach, Dzmitry Bahdanau, Nicolas Chapados, and
+Siva Reddy. Llm2vec: Large language models are
+secretly powerful text encoders. In First Conference
+on Language Modeling.
+
+Rui Cao, Yihao Wang, Yuxin Liang, Ling Gao, Jie
+Zheng, Jie Ren, and Zheng Wang. 2022. Explor-
+ing the impact of negative samples of contrastive
+learning: A case study of sentence embedding. In
+Findings of the Association for Computational Lin-
+guistics: ACL 2022, pages 3138-3152, Dublin, Ire-
+land. Association for Computational Linguistics.
+
+Nuo Chen, Linjun Shou, Jian Pei, Ming Gong, Bowen
+Cao, Jianhui Chang, Jia Li, and Daxin Jiang. 2023.
+Alleviating over-smoothing for unsupervised sen-
+tence representation. In Proceedings of the 61st An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 3552-
+3566, Toronto, Canada. Association for Computa-
+tional Linguistics.
+
+11
+
+Shaobin Chen, Jie Zhou, Yuling Sun, and Liang He.
+2022. An information minimization based con-
+trastive learning model for unsupervised sentence
+embeddings learning. In Proceedings of the 29th
+International Conference on Computational Linguis-
+tics, pages 4821-4831, Gyeongju, Republic of Korea.
+International Committee on Computational Linguis-
+tics.
+
+Yung-Sung Chuang, Rumen Dangovski, Hongyin Luo,
+Yang Zhang, Shiyu Chang, Marin Soljacic, Shang-
+Wen Li, Scott Yih, Yoon Kim, and James Glass. 2022.
+DiffCSE: Difference-based contrastive learning for
+sentence embeddings. In Proceedings of the 2022
+Conference of the North American Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies, pages 4207-4218, Seattle,
+United States. Association for Computational Lin-
+guistics.
+
+Jinghao Deng, Fanqi Wan, Tao Yang, Xiaojun Quan,
+and Rui Wang. 2023. Clustering-aware negative sam-
+pling for unsupervised sentence representation. In
+Findings of the Association for Computational Lin-
+guistics: ACL 2023, pages 8713-8729.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. Bert: Pre-training of deep
+bidirectional transformers for language understand-
+ing. In Proceedings of the 2019 conference of the
+North American chapter of the association for com-
+putational linguistics: human language technologies,
+volume 1 (long and short papers), pages 4171-4186.
+
+Luyu Gao and Jamie Callan. 2022. Unsupervised cor-
+pus aware language model pre-training for dense pas-
+sage retrieval. In Proceedings of the 60th Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume I: Long Papers), pages 2843-2853.
+
+Tianyu Gao, Xingcheng Yao, and Danqi Chen. 2021.
+Simcse: Simple contrastive learning of sentence em-
+beddings. In Proceedings of the 2021 Conference on
+Empirical Methods in Natural Language Processing,
+pages 6894-6910.
+
+Felix Hill, Kyunghyun Cho, and Anna Korhonen. 2016.
+Learning distributed representations of sentences
+from unlabelled data. In Proceedings of the 2016
+Conference of the North American Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies, pages 1367-1377.
+
+Matthew Honnibal, Ines Montani, Sofie Van Lan-
+deghem, and Adriane Boyd. 2020. spaCy: Industrial-
+strength Natural Language Processing in Python.
+
+Gautier Izacard, Mathilde Caron, Lucas Hosseini, Se-
+bastian Riedel, Piotr Bojanowski, Armand Joulin,
+and Edouard Grave. 2021. Unsupervised dense in-
+formation retrieval with contrastive learning. arXiv
+preprint arXiv:2112.09118.
+
+Ting Jiang, Shaohan Huang, Zhongzhi Luan, Deqing
+Wang, and Fuzhen Zhuang. 2024. Scaling sentence
+
+
+embeddings with large language models. In Find-
+ings of the Association for Computational Linguis-
+tics: EMNLP 2024, pages 3182-3196.
+
+Ting Jiang, Jian Jiao, Shaohan Huang, Zihan Zhang,
+Deqing Wang, Fuzhen Zhuang, Furu Wei, Haizhen
+Huang, Denvy Deng, and Qi Zhang. 2022. Prompt-
+BERT: Improving BERT sentence embeddings with
+prompts. In Proceedings of the 2022 Conference on
+Empirical Methods in Natural Language Processing,
+pages 8826-8837, Abu Dhabi, United Arab Emirates.
+Association for Computational Linguistics.
+
+Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick
+Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and
+Wen-tau Yih. 2020. Dense passage retrieval for open-
+domain question answering. In Proceedings of the
+2020 Conference on Empirical Methods in Natural
+Language Processing (EMNLP), pages 6769-678 1.
+
+Ryan Kiros, Yukun Zhu, Russ R Salakhutdinov, Richard
+Zemel, Raquel Urtasun, Antonio Torralba, and Sanja
+Fidler. 2015. Skip-thought vectors. Advances in
+neural information processing systems, 28.
+
+Chaofan Li, Zheng Liu, Shitao Xiao, Yingxia Shao, and
+Defu Lian. 2024. Llama2vec: Unsupervised adap-
+tation of large language models for dense retrieval.
+In Proceedings of the 62nd Annual Meeting of the
+Association for Computational Linguistics (Volume
+1: Long Papers), pages 3490-3500.
+
+Xianming Li and Jing Li. 2024. BeLLM: Backward
+dependency enhanced large language model for sen-
+tence embeddings. In Proceedings of the 2024 Con-
+ference of the North American Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies (Volume 1: Long Papers), pages
+792-804, Mexico City, Mexico. Association for Com-
+putational Linguistics.
+
+Zicheng Lin, Tian Liang, Jiahao Xu, Qiuzhi Liu, Xing
+Wang, Ruilin Luo, Chufan Shi, Siheng Li, Yujiu
+Yang, and Zhaopeng Tu. 2024. Critical tokens matter:
+Token-level contrastive estimation enhances Ilm’s
+reasoning capability. In Forty-second International
+Conference on Machine Learning.
+
+Fangyu Liu, Ivan Vuli¢é, Anna Korhonen, and Nigel
+Collier. 2021. Fast, effective, and self-supervised:
+Transforming masked language models into universal
+lexical and sentence encoders. In Proceedings of the
+2021 Conference on Empirical Methods in Natural
+Language Processing, pages 1442-1459, Online and
+Punta Cana, Dominican Republic. Association for
+Computational Linguistics.
+
+Jiduan Liu, Jiahao Liu, Qifan Wang, Jingang Wang,
+Wei Wu, Yunsen Xian, Dongyan Zhao, Kai Chen,
+and Rui Yan. 2023. RankCSE: Unsupervised sen-
+tence representations learning via learning to rank.
+In Proceedings of the 61st Annual Meeting of the
+Association for Computational Linguistics (Volume 1:
+Long Papers), pages 13785-13802, Toronto, Canada.
+Association for Computational Linguistics.
+
+12
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Dangi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. arXiv preprint arXiv:1907.11692.
+
+Xinyu Ma, Jiafeng Guo, Ruqing Zhang, Yixing Fan, Xi-
+ang Ji, and Xueqi Cheng. 2021a. Prop: Pre-training
+with representative words prediction for ad-hoc re-
+trieval. In Proceedings of the 14th ACM international
+conference on web search and data mining, pages
+
+283-291.
+
+Xinyu Ma, Jiafeng Guo, Ruqing Zhang, Yixing Fan,
+Yingyan Li, and Xueqi Cheng. 2021b. B-prop: boot-
+strapped pre-training with representative words pre-
+diction for ad-hoc retrieval. In Proceedings of the
+44th International ACM SIGIR Conference on Re-
+search and Development in Information Retrieval,
+
+pages 1513-1522.
+
+Niklas Muennighoff, SU Hongjin, Liang Wang, Nan
+Yang, Furu Wei, Tao Yu, Amanpreet Singh, and
+Douwe Kiela. 2024. Generative representational in-
+struction tuning. In The Thirteenth International
+Conference on Learning Representations.
+
+Niklas Muennighoff, Nouamane Tazi, Loic Magne, and
+Nils Reimers. 2023. Mteb: Massive text embedding
+benchmark. In Proceedings of the 17th Conference
+of the European Chapter of the Association for Com-
+putational Linguistics, pages 2014-2037.
+
+Zhijie Nie, Richong Zhang, and Zhanyu Wu. 2025. A
+text is worth several tokens: Text embedding from
+LLMs secretly aligns well with the key tokens. In
+Proceedings of the 63rd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 7683-7694, Vienna, Austria.
+Association for Computational Linguistics.
+
+Aaron van den Oord, Yazhe Li, and Oriol Vinyals. 2018.
+Representation learning with contrastive predictive
+coding. arXiv preprint arXiv: 1807.03748.
+
+Alec Radford, Karthik Narasimhan, Tim Salimans, Ilya
+Sutskever, and | others. 2018. Improving language
+understanding by generative pre-training.
+
+Juan Ramos and | others. 2003. Using tf-idf to de-
+termine word relevance in document queries. In
+Proceedings of the first instructional conference on
+machine learning, volume 242, pages 29-48. New
+Jersey, USA.
+
+Nils Reimers and Iryna Gurevych. 2019. Sentence-bert:
+Sentence embeddings using siamese bert-networks.
+In Proceedings of the 2019 Conference on Empirical
+Methods in Natural Language Processing and the 9th
+International Joint Conference on Natural Language
+Processing (EMNLP-IJCNLP), pages 3982-3992.
+
+Kexin Wang, Nils Reimers, and Iryna Gurevych. 2021.
+Tsdae: Using transformer-based sequential denoising
+auto-encoderfor unsupervised sentence embedding
+learning. In Findings of the Association for Compu-
+tational Linguistics: EMNLP 2021, pages 671-688.
+
+
+David Wingate, Mohammad Shoeybi, and Taylor
+Sorensen. 2022. Prompt compression and contrastive
+conditioning for controllability and toxicity reduction
+in language models. In Findings of the Association
+for Computational Linguistics: EMNLP 2022, pages
+5621-5634.
+
+Bohong Wu and Hai Zhao. 2022. Sentence represen-
+tation learning with generative objective rather than
+contrastive objective. In Proceedings of the 2022
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 3356-3368.
+
+Qiyu Wu, Chongyang Tao, Tao Shen, Can Xu, Xi-
+ubo Geng, and Daxin Jiang. 2022a. PCL: Peer-
+contrastive learning with diverse augmentations for
+unsupervised sentence embeddings. In Proceedings
+of the 2022 Conference on Empirical Methods in
+Natural Language Processing, pages 12052—12066,
+Abu Dhabi, United Arab Emirates. Association for
+Computational Linguistics.
+
+Xing Wu, Chaochen Gao, Yipeng Su, Jizhong
+Han, Zhongyuan Wang, and Songlin Hu. 2022b.
+Smoothed contrastive learning for unsupervised sen-
+tence embedding. In Proceedings of the 29th Inter-
+national Conference on Computational Linguistics,
+pages 4902-4906, Gyeongju, Republic of Korea. In-
+ternational Committee on Computational Linguistics.
+
+Xing Wu, Chaochen Gao, Liangjun Zang, Jizhong Han,
+Zhongyuan Wang, and Songlin Hu. 2022c. ESim-
+CSE: Enhanced sample building method for con-
+trastive learning of unsupervised sentence embed-
+ding. In Proceedings of the 29th International Con-
+ference on Computational Linguistics, pages 3898—
+3907, Gyeongju, Republic of Korea. International
+Committee on Computational Linguistics.
+
+Shitao Xiao, Zheng Liu, Yingxia Shao, and Zhao Cao.
+2022. Retromae: Pre-training retrieval-oriented lan-
+guage models via masked auto-encoder. In Proceed-
+ings of the 2022 Conference on Empirical Methods
+in Natural Language Processing, pages 538-548.
+
+Yanzhao Zhang, Richong Zhang, Samuel Mensah,
+Xudong Liu, and Yongyi Mao. 2022a. Unsupervised
+sentence representation via contrastive learning with
+mixing negatives. Proceedings of the AAAI Confer-
+ence on Artificial Intelligence, 36(10):11730-11738.
+
+Yuhao Zhang, Hongji Zhu, Yongliang Wang, Nan Xu,
+Xiaobo Li, and Bingiang Zhao. 2022b. A contrastive
+framework for learning sentence representations from
+pairwise and triple-wise perspective in angular space.
+In Proceedings of the 60th Annual Meeting of the
+Association for Computational Linguistics (Volume
+1: Long Papers), pages 4892-4903, Dublin, Ireland.
+Association for Computational Linguistics.
+
+Kaiyan Zhao, Qiyu Wu, Zhongtao Miao, and Yoshi-
+masa Tsuruoka. 2025. Prompt tuning can simply
+adapt large language models to text encoders. In
+Proceedings of the 10th Workshop on Representation
+Learning for NLP (RepL4NLP-2025), pages 38-50,
+
+13
+
+Albuquerque, NM. Association for Computational
+Linguistics.
+
+Kun Zhou, Beichen Zhang, Xin Zhao, and Ji-Rong Wen.
+2022. Debiased contrastive learning of unsupervised
+sentence representations. In Proceedings of the 60th
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 6120-
+6130, Dublin, Ireland. Association for Computational
+Linguistics.
+
+
+A The Subset of MTEB.v2 Used for
+Analysis
+
+Since the MTEB benchmark includes numerous
+tasks, my analysis experiments are also extensive.
+Therefore, we use a subset shown as Table 5 to
+improve efficiency. The subset ensures coverage of
+all task categories, maintaining the validity of the
+results.
+
+Category Dataset
+. ArguAna
+Retrieval FEVERHardNegatives.
+Reranking AskUbuntuDupQuestions
+BiorxivClusteringP2P.v2
+Clustering MedrxivClusteringS2S.v2
+
+TwentyNewsgroupsClustering.v2
+
+PairClassification SprintDuplicateQuestions
+
+Banking77Classification
+MassivelntentClassification
+
+SICK-R
+STSBenchmark
+
+Classification
+
+STS
+
+Summarization SummEvalSummarization.v2
+
+Table 5: Subset of MTEB tasks used for ablations and
+analysis
+
+B_ Further Token Target Study
+
+In Table 6, we provide three more examples from
+LLM2Vec, GritLM, and Llama2vec. We observe
+similar phenomena as in Section 4.1.
+
+To make these observations more general, we
+performed a quantitative analysis. We randomly
+sampled 1,000 texts from Wikipedia, mapped each
+onto the vocabulary, and recorded whether their
+top-10 tokens occurred in the corresponding text.
+
+LLM2vec-unsup
+
+2%
+LLM2vec-sup 58.1%
+(Mistral-7B)
+GritLM
+0%
+a
+°
+= LLMavec-unsup race
+(Llama3-8B)
+
+LLM2vec-sup
+
+0%
+(Llama3-8B) athe
+
+Hit
+. Llama2vec
+| Miss (Llama2-7B)
+
+47.0%
+
+Figure 7: Cumulative Occurrence of Top-10 Tokens
+
+Figure 7 presents the results of evaluating the
+top-10 tokens for each sample, yielding a total of
+10,000 tokens (1,000 texts x 10 tokens). Tokens
+in the original text are labeled as Hit, while those
+absent are labeled as Miss. The two categories
+are roughly balanced, with a slightly higher count
+
+14
+
+GritLM
+(Mistral-7B)
+
+LLM2vec-unsup
+(Mistral-7B)
+
+LLMo2vec-sup
+(Mistral-7B)
+
+Sample Quantity
+$
+6
+
+fo}
+
+fe) 5 10 ° 5 10 ° 5 10
+
+Llama2vec
+(Llama2-7B)
+
+LLM2vec-unsup
+(Llama3-8B)
+
+LLMo2vec-sup
+(Llama3-8B)
+
+nN
+le}
+fo}
+
+B
+°
+fo}
+
+Sample Quantity
+
+fo}
+
+oO 10
+
+10 5
+Number of Hits
+
+10 ° 5
+Number of Hits
+
+oO 5
+Number of Hits
+Figure 8: Per-Sentence Count of Top-10 Tokens Appear-
+ing
+
+of tokens falling into the Miss category. Figure 8
+shows, for each text, how many of its top-10 tokens
+appear in the text itself. We can observe that in
+each text, there are 4 to 6 tokens that rank among
+the top 10. The two statistical analyses suggest that
+the top 10 tokens are consistently present in both
+the tokens within the texts and those outside the
+texts.
+
+C_ Filter Formula Comparison
+
+To filter out noisy elements in the raw token distri-
+bution from the untuned model, we evaluate three
+filtering formulas. The effect is illustrated by a
+sample in Table 8. We ultimately adopted the Div
+type for the main study.
+
+D_ Aligned Token Analysis
+
+To analyze the ability of aligned tokens in our
+model, we provide three more examples in Table 7
+and observe similar phenomena as in Section 5.5.
+
+E_ Detailed Results
+
+Table 9 presents the detailed results of the two
+models that performed the best in the main results.
+
+
+Top 10 Aligned Tokens
+
+BackBone Model
+LLM2Vec-unsup _Ball _Gold ball ball _South
+Mistral-7B LLM2Vec-sup _South _Gold _gold _discovery _ _migr
+GritLM _South _Ball _Gold _migration ball L D
+
+Sou _had
+
+a
+
+_had
+
+Lllama3-8B LLM2Vec-unsup _Gold eal |
+LLM2Vec-sup _Gold
+
+Llama2-7B Llama2vec _gold _Gold ? _ ct | i csouth fe
+
+Text: The discovery of Gold in Ballarat caused a large migration from South Australia and by 1852 some 8000 had
+left for the Goldfields.
+
+>
+
+BackBone Model Top 10 Aligned Tokens
+
+LLM2Vec-unsup _Work [Work _ Allen _Services
+Mistral-7B LLM2Vec-sup Work _Man _work
+GritLM Work _Services Work _cr _James _Jim
+Lllama3-8B LLM2Vec-unsup _cricket a G ustr icit ve
+LLM2Vec-sup _cricket [Cricket _Work Oe cava
+
+Llama2-7B Llama2vec _Work _Australian _cr _James _Services _ 1 Te cr u
+
+Text: James Allen Workman (17 March 1917 — 23 December 1970) was an Australian cricketer who played
+first-class cricket for the Australian Services team from May 1945 to January 1946.
+
+Top 10 Aligned Tokens
+
+BackBone Model
+LLM2Vec-unsup _Cow cow _Henry
+
+Mistral-7B LLM2Vec-sup Cow _Henry _World _music _Problem
+_problem world _Cow
+
+GritLM World _music Hen _Problem
+
+LLM2Vec-unsup problems problem _Cow _Henry cow _Problem Problems cows world
+
+Llama2-7B Llama2vec _Henry _Cow _ cow: 2 chen : cow _world !
+
+Text: "The World Is a Problem" chronicles the history of Henry Cow and their exploration of music and activism,
+from their inception in 1968 to their break-up in 1978.
+
+Lllama3-8B
+
+LLM2Vec-sup
+
+Table 6: Top-10 Aligned Token from the Text2Token Framework on different embedders.
+
+Model | Top 10 Aligned Tokens
+Raw (Mistral-7B) \n _n , _Gold _Australia . _in _and a.
+
+Raw (Llama3-8B) the _ |. _Ball (C ..C _of _in;A
+Text: The discovery of Gold in Ballarat caused a large migration from South Australia and by 1852 some 8000 had left for
+the Goldfields.
+
+Model Top 10 Aligned Tokens
+
+Raw (Mistral-7B)
+
+- 1Beaee2 _( _in ...
+Text2Token (Mistral-7B) _Work _cricket _Allen _Services wa ws _ Australian ae _James Test
+
+Raw (Llama3-8B) wae 5 eC C . _and;...CC
+
+Text2Token (Llama3-8B) _cricket Work Wok ere ve Pca Allen Cricket ‘Australia _ Australian
+
+Text: James Allen Workman (17 March 1917 — 23 December 1970) was an Australian cricketer who played first-class
+cricket for the Australian Services team from May 1945 to January 1946.
+
+15
+
+
+Model | Top 10 Aligned Tokens
+
+Raw (Mistral-7B) \ im en) in \n _a . _Problem
+Text2Token (Mistral-7B) _Cow _Henry _Problem _problem _Crow _hen
+
+Raw (Llama3-8B) ta _the . , _..H _Henry K _in
+TextToken (Llama) Cow i Henry bands muse punk cow
+Text: "The World Is a Problem" chronicles the history of Henry Cow and their exploration of music and activism, from
+their inception in 1968 to their break-up in 1978.
+
+Table 7: Top-10 Aligned Token from the Text2Token Framework on raw backbone and our embedders for Three
+Examples.
+
+Model Filter Formula Top 10 Aligned Tokens
+Original “ Ss fice Pan al in) aad) Pe Pen | file
+Log type Jue = —Qeo (wel xi) log Qe, (we) . a .\n _the _file _corruption data _may _in
+B Q69 (wel ti)+Qay (we) _shutdown _Ms Microsoft _file
+Gu, = .
+Sub type ~ a .\n the _file ma. corruption ... _can
+yP log Qoo (welxi) — log Qo, (we) - = data a P =
+
+Text: Common reasons for Ms excel corruption. Improper shutdown of computer a Basically the files size of Excel are
+large therefore if there is any improper shutdown of system occur there are chances that your open Ms excel can easily
+corrupt. The improper shut down can occur due to power failure or any other reason.
+
+Table 8: Example of three filtering formulas on the Top-10 Aligned Tokens in the Text2Token framework.
+
+Task Mistral-7B Llama3-8B | Task Mistral-7B Llama3-8B
+
+Banking77Classification 82.37 81.73 ArguAna 52.73 55.03
+ImdbClassification 67.40 67.32 CQADupstackGamingRetrieval 39.22 33:53
+MTOPDomainClassification 92.72 93.26 CQADupstackUnixRetrieval 20.91 27.56
+MassivelntentClassification 69.32 69.15 ClimateFE VER HardNegatives 23,93 28.48
+MassiveScenarioClassification 75.63 76.10 FEVERHardNegatives 62.81 71.40
+ToxicConversationsClassification 63.87 635.75 FiQA2018 29.70 28.62
+TweetSentimentExtractionClassification 54.59 52.39 HotpotQAHardNegatives 49.49 51.37
+AmazonCounterfactualClassification 66.16 62.18 SCIDOCS 18.12 18.56
+ArXivHierarchicalClusteringP2P 61.12 62.47 TRECCOVID 61.55 57.10
+ArXivHierarchicalClusteringS2S 59.98 61.99 Touche2020Retrieval.v3 40.57 44.03
+BiorxivClusteringP2P.v2 42.20 42.74 BIOSSES 81.98 82.75
+MedrxivClusteringP2P.v2 36.13 37.18 SICK-R 69.19 68.32
+MedrxivClusteringS2S.v2 33.19 36.93 STS12 56.13 64.24
+StackExchangeClustering.v2 66.63 68.57 STS13 72.45 78.14
+StackExchangeClusteringP2P.v2 44.01 47.95 STS14 67.80 71.11
+TwentyNewsgroupsClustering.v2 44.64 54.22 STS15 78.45 79.64
+SprintDuplicateQuestions 89.26 91.69 STSBenchmark 73.83 74.34
+TwitterSemEval2015 58.21 55.3 STS17 82.50 80.91
+TwitterURLCorpus 79.36 81.29 STS22.v2 64.66 56.32
+AskUbuntuDupQuestions 55.75 57.44 SummEvalSummarization.v2 10.05 28.16
+MindSmallReranking 33:39 33.76 Average 55.10 99:25
+
+Table 9: Details results of Text2Token on MTEB v2.
+
+16

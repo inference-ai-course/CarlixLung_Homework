@@ -1,0 +1,843 @@
+arX1iv:2510.10890v1 [cs.CL] 13 Oct 2025
+
+LLM x MapReduce-V3: Enabling Interactive In-Depth Survey Generation
+through a MCP-Driven Hierarchically Modular Agent System
+
+Yu Chao!* Siyu Lin’* Xiaorong Wang® Zhu Zhang! Zihan Zhou®
+Haoyu Wang* Shuo Wang!’ Jie Zhou? Zhiyuan Liu!’ Maosong Sun''
+‘Dept. of Comp. Sci. & Tech., Institute for AI, BNRist Center, Tsinghua University
+
+Peking University *Modelbest Inc.
+
+Abstract
+
+We introduce LLM x MapReduce-V3, a hi-
+erarchically modular agent system designed
+for long-form survey generation. Building on
+the prior work, LLMxMapReduce-V2, this
+version incorporates a multi-agent architec-
+ture where individual functional components,
+such as skeleton initialization, digest construc-
+tion, and skeleton refinement, are implemented
+as independent model-context-protocol (MCP)
+servers. These atomic servers can be aggre-
+gated into higher-level servers, creating a hier-
+archically structured system. A high-level plan-
+ner agent dynamically orchestrates the work-
+flow by selecting appropriate modules based
+on their MCP tool descriptions and the exe-
+cution history. This modular decomposition
+facilitates human-in-the-loop intervention, af-
+fording users greater control and customization
+over the research process. Through a multi-
+turn interaction, the system precisely captures
+the intended research perspectives to generate
+a comprehensive skeleton, which is then devel-
+oped into an in-depth survey. Human evalua-
+tions demonstrate that our system demonstrates
+strong performance in both content depth and
+length, highlighting the strength of MCP-based
+modular planning. !
+
+1 Introduction
+
+Generating high-quality long-form survey arti-
+cles poses significant challenges to AI Agent sys-
+tems (Li et al., 2024; Zhang et al., 2025b; Qin
+et al., 2024). First, the system must effectively ag-
+gregate and synthesize information from a large
+collection of reference materials (Nakano et al.,
+2021; Asai et al., 2023; Huang et al., 2024), which
+span various subdomains and perspectives. Sec-
+ond, it requires the ability to construct a coherent
+
+“Equal contribution.
+
+Corresponding authors.
+
+'The code is publicly available at https: //github.com/
+thunlp/LLMxMapReduce.
+
+“Nanyang Technological University
+
+and comprehensive skeleton that guides the orga-
+nization of content at a global level (Wang et al.,
+2024; Wen et al., 2025). Third, as the upstream
+component, reference exploitation exerts a signifi-
+cant influence (Elovic, 2024), thus many AlI-based
+survey generation tools have begun to focus on
+improving the quality of search results before the
+writing stage begins. Addressing these challenges
+demands controllable mechanisms for information
+acquisition, structural planning, and content gener-
+ation.
+
+To address these challenges, we propose
+LLM x MapReduce-V3, an interactive and self-
+organized modular agents system for long-form sur-
+vey generation. Our system builds upon the design
+of LLM x MapReduce-V2 (Wang et al., 2025), but
+extends it in several important ways to enable mod-
+ularity, adaptability, and dynamic planning (Qiu
+et al., 2025b,a). At the core of our approach is the
+use of the model context protocol (MCP), a stan-
+dardized function-calling mechanism that allows
+tools and modules to be composed as independent
+MCP servers (Raseed, 2025; Unleash, 2025). We
+proposes a multi-stage workflow of document di-
+gestion, skeleton construction and refinement, and
+survey writing. Building upon this foundation, we
+re-architect the system into a multi-agent paradigm,
+wherein core functionalities are decomposed across
+specialized agents, and the algorithmic workflow is
+encapsulated as a suite of tools in MCP servers (An-
+thropic, 2024) to facilitate agent-level invocation
+and coordination.
+
+A key improvement in our system lies in pipeline
+flexibility with an agent planner (Moura et al.,
+2024; Link-AGI, 2024). Rather than following
+a fixed control flow, the agent receives a set of
+available MCP tools along with previous outputs,
+and dynamically selects the next module to invoke.
+This enables non-linear, adaptive workflows tai-
+lored to the specific needs of each writing task. To
+support user intent alignment, we also introduce
+
+
+human-in-the-loop interaction. Users begin by
+providing a target topic and basic writing instruc-
+tions. The system then engages in a multi-turn
+dialogue to identify the user’s preferred and fine-
+grained research perspectives.
+
+To thoroughly examine the performance of
+LLM x MapReduce-V3, we conduct a human eval-
+uation to assess system effectiveness. Domain ex-
+perts compare the output of our system with those
+from other popular deep research systems across
+multiple topics. The results suggest that our system
+generates more informative outlines and higher-
+quality, more in-depth survey articles. Our main
+contributions are summarized as follows:
+
+¢ Methodological Innovation: We propose
+the first MCP-based modular agent system
+for academic survey generation, enabling un-
+precedented customization and institutional
+integration while maintaining survey quality
+standards.
+
+Architectural Advancement: We propose a
+dynamic, LLM-driven planner that supports
+multi-stage module orchestration for adaptive,
+non-static workflows.
+
+User-Centric Design: We design a human-in-
+the-loop interaction framework that ensures
+generated surveys align with user expertise
+and research perspectives, bridging the gap
+between automation and scholarly rigor.
+
+2 Related Work
+
+2.1 AJI-Powered Automated Research
+
+Early automated research systems focused
+on web-based information retrieval, with We-
+bGPT (Nakano et al., 2021) and Self-RAG (Asai
+et al., 2023) pioneering LLM-based web brows-
+ing through human feedback or self-reflection
+mechanisms for adaptive retrieval and generation.
+Recent advances include sophisticated autonomous
+agents like GPT-Researcher (Elovic, 2024) with
+dual-agent architectures, ResearchAgent (Huang
+et al., 2024) for iterative research idea generation
+through multi-agents collaboration, and products
+including Perplexity Deep Research (AI, 2024) and
+ChatGPT Deep Research (OpenAI, 2024). While
+some closed-source deep research systems can
+produce valuable results, we contend that flexible
+user involvement is critical for a truly practical
+system. We therefore propose an open-source,
+
+hierarchically modular system specifically de-
+signed to facilitate and support human intervention
+throughout the research process.
+
+2.2 Survey Generation
+
+LLM-driven survey generation has emerged with
+AutoSurvey (Wang et al., 2024), which introduced
+a four-stage methodology that addresses context
+limitations and evaluation challenges, while Inter-
+activeSurvey (Wen et al., 2025) advances through
+personalized, interactive generation with continu-
+ous user customization of reference categorization
+and content synthesis. SurveyX (Liang et al., 2025),
+on the other hand, focuses on extracting topics and
+content by pre-organizing the literature into the
+form of an attribute tree. Despite these advances,
+existing systems often lock users into a rigid, "all-
+or-nothing" paradigm. Stemming from inflexible
+integration approaches, they lack the necessary in-
+terfaces for iterative refinement and specialized cus-
+tomization. In response, we adopt MCP to modular-
+ize our algorithmic workflow, enabling the agents
+to iteratively select and invoke appropriate tools for
+survey generation.
+
+2.3 Model Context Protocol and Modular
+Self-Organized Agent System
+
+MCP (Anthropic, 2024) establishes open standards
+for connecting AI assistants to diverse tool sources
+through a unified client-server architecture. Recent
+applications demonstrate its potential for multi-
+agents intelligence (Raseed, 2025) and scalable
+systems (Unleash, 2025). Alita (Qiu et al., 2025b)
+leverages MCP to autonomously construct and
+reuse external capabilities through task-related pro-
+tocols, achieving scalable agentic reasoning with
+minimal pre-definition. AgentDistill (Qiu et al.,
+2025a) enables training-free knowledge transfer via
+reusable MCP boxes, allowing smaller agents to
+achieve performance comparable to large LLM sys-
+tems. These MCP-based self-evolution approaches
+demonstrate the its potential for adaptive agent sys-
+tems. Our work first introduces the MCP-based
+hierarchically modular survey generation system,
+combining protocol standardization with special-
+ized academic optimizations to enable unprece-
+dented user customization and institutional integra-
+tion while maintaining the quality of survey paper
+generation.
+
+
+Pipeline Initialize ey Model Context Protocol sf
+
+Agents as MCP Hosts
+
+Topic: J want to learn
+MLLM reasoning.
+Description: J am
+interested in RL
+method in MLLM
+reasoning.
+
+User loaded files
+
+Get related work
+
+Generate and refine
+skeleton
+
+Content writing
+based on skeleton
+
+User Customized
+Agent
+
+SS ee ae
+
+AY GRAD
+
+Tools integrated into a
+MCP Servers
+
+MLLM Reasoning Overview
+Search Agent
+
+Abstract
+
+Search Server
+Introduction
+
+Papers review
+
+= aC)
+
+Group Server
+
+|
+|
+|
+|
+|
+|
+|
+|
+|
+|
+Skeleton Initialize Server I
+Skeleton Refinement Server | Agent self-organised analysis
+| Main body of the survey
+|
+|
+|
+|
+|
+|
+|
+|
+|
+
+Conclusion
+
+Digest Server
+
+Orchestra Server
+
+Reference
+
+User Customized Server
+
+Figure 1: Our agent-server ecosystem pipeline. Users begin by specifying a topic, optionally adding detailed
+descriptions or uploading documents. The Analysis Agent interprets user intent and coordinates with the Search
+Agent to retrieve and organize relevant literature. The Skeleton Agent then generates and refines an outline, which
+
+is used by the Writing Agent to complete the paper.
+
+3 Hierarchically Modular Agent System
+
+Our system employs a multi-agent paradigm where
+specialized agents handle distinct phases of survey
+generation, each independently connecting to both
+algorithm-internal and user-provided MCP servers.
+
+3.1 System Design
+
+Let A = {Aj, Ao, A3} denote the set of special-
+ized agents, where A;, Ao, Az denote the Analy-
+sis Agent, Skeleton Agent, and the Wirting Agent,
+respectively. The MCP server ecosystem can be
+represented as S = {5}, $9, 53, S4, 55,56, S*},
+including the Search Server, Group Server, Skele-
+ton Initialization Server, Digest Server, Skeleton
+Refinement Server, Orchestra Server, and user cus-
+tomized servers (i.e., S*).
+
+At each tool-calling round, the connection be-
+tween the Agent and the Server is defined as €,
+which is determined based on the previous output
+and the Agent’s current plan.
+
+€ = MCP(A,(output,_,, plan), @(Ai))
+The agent-server mapping is defined as:
+¢:A>2°
+
+where $(A;) specifies the server subset accessible
+to agent Aj.
+
+The system architecture forms a directed graph
+G = (A,€,S) where MCP(A;,S;) represents
+agents communicate through standardized MCP
+interfaces.
+
+Each server S; € S exposes a tool collection
+T (Si) = {tis, ti, -.-, tin, } through standardized
+MCP protocols. Tool invocation is formalized as:
+
+invoke: Ax Tx ZO
+
+where Z and © represent input and output spaces
+respectively.
+
+3.1.1 Analysis Agent
+
+The Analysis Agent orchestrates the initial litera-
+ture processing and manages interaction with the
+Search Agent. Given a user-defined research topic
+and initial description, it first explores users’ un-
+written needs by multi-turn dialogue with users,
+thus enhance both retrieval width and depth.
+
+It then invokes the search agent for references
+acquisition and integrates materials uploaded by
+the user. Subsequently, the agent applies clustering
+algorithms from the group server to group the ref-
+erences by thematic relevance and methodological
+similarity, constructing a structured representation
+of the retrieve result. Finally, the agent initializes a
+tree graph to store the grouped references, and all
+downstream data structures are organized by this
+tree.
+
+
+3.1.2 Skeleton Agent
+
+The Skeleton Agent is responsible for constructing
+a globally organized and content-aware skeleton,
+serving as the structural backbone of the generated
+survey article. It operates under the coordination
+of an orchestration module and proceeds through
+three main stages: Skeleton Initialization, Digest
+Construction, and Skeleton Refinement.
+
+3.1.3 Writing Agent
+
+The Writing Agent executes the final content syn-
+thesis, transforming the refined skeleton into coher-
+ent survey sections. This agent integrates literature
+digests, maintains citation consistency, and ensures
+academic writing standards while preserving the
+logical flow established by the skeleton structure.
+
+To enhance generation quality, users may cus-
+tomize the writing agent to adapt to varying format-
+ting specifications, support figure generation, and
+address other individualized requirements. Here
+we implement a dedicated figure server to support
+the generation of Mermaid-style diagrams.
+
+3.2. External and Replaceable Agents
+3.2.1 Search Agent
+
+The Search Agent provides literature retrieval ca-
+pabilities through the interface. This agent can be
+seamlessly replaced with alternative search imple-
+mentations, including domain-specific databases,
+institutional repositories, or specialized academic
+search engines.
+
+In parallel, the agent is also capable of acting as
+an MCP server. In our implementation, the Search
+Agent is supported by a dedicated search server,
+which integrates four core tools: query generation,
+web retrieval, crawling, and similarity analysis.
+This high-level server operates under the coordina-
+tion of the Analysis Agent.
+
+3.2.2 Other Agents
+
+The system’s extensibility is reflected in its sup-
+port for user-defined agents—such as academic
+critics, formatting agent, and domain-specific an-
+alyzers—enabling institutional customization and
+specialized workflows while preserving overall co-
+herence through standardized interfaces.
+
+4 MCP Implementation Framework
+
+Our implementation leverages MCP’s client-server
+architecture to encapsulate core functionalities as
+reusable, composable modules. Each functional
+component operates as an independent MCP server,
+
+exposing standardized tool interfaces for agent in-
+vocation.
+
+4.1 Native Server Construction
+
+We re-organize the procedure proposed in
+LLM x MapReduce-V2 (Wang et al., 2025) into
+several MCP servers.
+
+4.1.1 Group Server
+
+The Group Server serves as a content-based orga-
+nizer that preprocesses the retrieved reference cor-
+pus. Before structural planning begins, this module
+clusters the documents into coherent topical groups.
+This pre-organization significantly reduces topic
+fragmentation and provides a more stable input for
+downstream outline construction. The grouping
+strategy is guided by both thematic relevance and
+methodological similarity.
+
+4.1.2. Orchestra Server
+
+The orchestration of the skeleton construction pro-
+cess is managed by the Orchestra Server, which
+acts as a lightweight planner based on an LLM
+backbone. At each stage, it takes the current in-
+termediate outputs as input, along with formal de-
+scriptions of the available servers. Based on these
+inputs, it generates next-step instructions. This
+centralized coordination allows the system to adap-
+tively guide the overall skeleton-building process,
+ensuring alignment between user intent, module
+capability, and evolving outline structure. The Or-
+chestra Server thus serves as a dynamic planner and
+command generator that orchestrates multi-module
+collaboration across the pipeline.
+
+4.1.3 Skeleton Initialization Server
+
+Given the refined research angles and grouped ref-
+erences provided by the Analysis Agent, the Skele-
+ton Initialization Server constructs a high-level
+section-wise outline. This initial structure serves
+as a coarse-grained scaffold, segmenting the arti-
+cle into major thematic areas that reflect distinct
+facets of the research topic. Each section is derived
+by mapping the user-specified focus onto promi-
+nent subfields within the references, ensuring both
+topical coverage and logical segmentation.
+
+4.1.4 Digest Server
+
+The Digest Construction Server enhances the ini-
+tial skeleton by generating content aware revision
+signals derived from the reference documents. It
+includes two steps: firstly, for each reference doc-
+ument, the system prompts an LLM to generate a
+
+
+brief summary along with suggestions for improv-
+ing the current outline. These digests reflect how
+individual sources align or conflict with the existing
+skeleton. Secondly, the system aggregates all di-
+gests and suggestions, merges redundant feedback,
+and synthesizes a consolidated revision plan. This
+output serves as a high-level guide for improving
+the outline’s coverage, organization, and alignment
+with the source materials.
+
+4.1.5 Skeleton Refine Server
+
+Skeleton Refinement Server applies an iterative
+multi-layer convolution-inspired process to opti-
+mize the structure for coherence, consistency, and
+informativeness. This refinement mechanism op-
+erates both within sections (to enhance seman-
+tic alignment among digests) and across sections
+(to improve global representation and eliminate
+redundancy). This process simulates the multi-
+layer grouped convolution in Convolutional Neu-
+ral Networks (CNN), which effectively integrates
+intra-group information and expand the contextual
+"receptive field" during information aggregation
+through a multi-layer iterative method. When the
+references are effectively aggregated, Skeleton Re-
+fine Server produces an in-depth and fine-grained
+survey skeleton, which also determines the struc-
+tural integrity of the subsequent survey writing.
+
+4.1.6 Iterative Refinement Through
+Multi-turn Tool-use
+
+The refinement process is conceptualized as a multi-
+turn, tool-based self-evolution framework, wherein
+the agent acts as a dynamic coordinator. This co-
+ordination is guided by intermediate outputs and,
+when available, user feedback.
+
+The Orchestra Server implements a planning
+function:
+
+T:HxC3T*
+
+where H. denotes execution history, C represents
+current context, and 7* is the space of tool se-
+quences.
+
+At each decision point ¢, given skeleton state
+a € X and history h € H, the agent selects
+action:
+
+u® = r(x, nh)
+
+The refinement process operates through itera-
+tive state transitions:
+
+2D = (2, ul)
+
+Through this mechanism, the system progres-
+sively refines the survey skeleton and content analy-
+sis, enabling adaptive improvement across multiple
+iterations.
+
+At each refinement iteration, skeleton agent con-
+sults the orchestra server to determine the optimal
+sequence of actions based on current skeleton state
+and available feedback. The Orchestra Server ana-
+lyzes the current context and returns structured ac-
+tion plans which includes subsequent MCP server
+invocations, enabling adaptive workflow manage-
+ment based on real-time assessment of skeleton
+quality and user requirements.
+
+Skeleton agent employs the Digest Server to
+generate targeted literature summaries for specific
+skeleton sections.
+
+These digests are then integrated into the skele-
+ton structure through coordinated calls to theSkele-
+ton Server, which maintains structural consistency
+while incorporating new content elements.
+
+4.2 Agent Integration and Replaceable
+Invocation
+
+Our orchestration mechanism treats each MCP
+server as a callable tool, associated with relevant
+metadata, which allows the central planner to make
+informed decisions regarding the sequencing of
+modules.
+
+Additionally, the system supports user-defined
+extensions, enabling the integration of custom
+MCP servers or external servers tailored to specific
+agents or tasks.
+
+5 Human-Agent Interaction
+
+Our system incorporates human feedback at key de-
+cision points to enhance survey quality and ensure
+alignment with user objectives. The interaction
+mechanism unfolds in structured phases that itera-
+tively capture user input and refine system outputs.
+
+5.1 Consensus Achievement
+
+Topic Consensus Phase begins with user-defined
+topics and goals, followed by LLM-generated topic
+analysis and expansion. Through multi-turn di-
+alogue, the system clarifies the research scope,
+identifies critical perspectives, and develops search
+strategies. This phase continues until a consen-
+sus is reached between the user and the AI on the
+survey’s focus and coverage.
+
+
+Legend: ¥ = Full Support; ~ = Limited Support; x = No Support
+
+System User Modular MCP Custom | Survey | Open
+Interaction | Design | Support Tools Focus | Source
+Commercial Platforms
+Perplexity DR (AI, 2024) Vv x x x x x
+OpenAI DR (OpenAI, 2024) v x x x x x
+Gemini DR (Citron, 2024) v x os x x %
+Manus AI (Monica (Butterfly Effect AI), 2025) v x x x x x
+Deep Research Systems
+WebGPT (Nakano et al., 2021) v ~ x x x x
+GPT-Researcher (Elovic, 2024) ~ v v v x v
+ResearchAgent (Huang et al., 2024) v v x ~ x ~
+Self-RAG (Asai et al., 2023) x v x x x v
+CoSearchAgent (Chen et al., 2024) ~ ~ x 3 * x
+OpenResearcher (Liu et al., 2024) x ~ x x x ~
+Search-ol (Zhang et al., 2025a) x ~ x x x v
+Agent-R1 (Chen et al., 2025) x ~ x x x v
+Multi-Agent Frameworks
+CrewAI (Moura et al., 2024) ~ v v v v
+AutoA gent (Link-AGI, 2024) x v x ~ x v
+Alita (Qiu et al., 2025b) x v Vv v x Vv
+Survey Generation Systems
+AutoSurvey (Wang et al., 2024) x x x x Vv Vv
+InteractiveSurvey (Wen et al., 2025) v ~ x x v v
+SurveyX (Liang et al., 2025) ~ ~ x x Vv Vv
+LLM x MapReduce-V3 (Ours) v v v v v v
+Table 1: Comparison of Survey Generation and Deep Research Systems
+5.2 Feedback Integration System Skeleton Length Quality
+Outline Refinement Phase presents the gener- GeminiDR 54.54% — 9.09% — 42.86%
+ated survey skeleton for user review and modifi- Manus AI 27.27% 9.09% — 0.00%
+Our work 18.18% 81.81% 57.14%
+
+cation. Users may request structural adjustments,
+section reordering, or changes in content emphasis.
+The system processes this feedback via the skeleton
+server, ensuring coherence while accommodating
+user preferences.
+
+Quality Assurance Integration — enables users to
+assess intermediate outputs at each stage, providing
+feedback that influences subsequent module exe-
+cutions. This ensures the final survey reflects both
+user expertise and the system’s ability to synthesize
+comprehensive literature.
+
+6 Comparison and Evaluation
+
+As shown in Table 1, our LLM x MapReduce-V3
+system is uniquely equipped to meet the compre-
+hensive demands of academic survey generation.
+While existing solutions excel in specific areas,
+commercial platforms in user interaction, research
+systems in modularity, and frameworks in MCP
+integration, none provide an all-encompassing solu-
+tion. Our system is the first to holistically integrate
+comprehensive user interaction, a modular design,
+MCP standardization, custom tool integration, and
+survey-specific optimizations.
+
+The evaluation results in Table 2 indicate that
+
+Table 2: Human evaluation results. We recruited five
+human expert reviewers to evaluate articals generated
+by Gemini DeepResearch, Manus AI, and our system
+across eleven topics. Reviewers cast their votes based
+in three criteria: skeleton, length, and quality.
+
+Manus AI just generates preliminary outlines and
+contents lacks depth. Gemini DeepResearch pro-
+vides superior depth, structural coherence, and flu-
+ency. Compared to other systems, ours provides
+broader coverage, particularly in literature reviews,
+and produces significantly longer contexts.
+
+7 Conclusion
+
+LLM x MapReduce-V3 introduces a modular,
+MCP-based architecture that enables automated
+research assistance. By supporting open integra-
+tion of customizable agents and servers, it over-
+comes the rigidity of traditional closed-agent sys-
+tems. Through standardized interfaces, our sys-
+tem enables flexible composition of community-
+developed components to meet diverse research
+needs. The proposed system also shows strong
+potential for broader application in knowledge-
+
+
+intensive tasks. With human-in-the-loop design,
+it achieves better alignment with human objectives.
+Despite existing challenges, such as fixed work-
+flows and complex data exchange, we advocate for
+open, adaptable agent ecosystems that evolve with
+advancing tools and demands.
+
+Ethics Statement
+
+This work focuses on the development of an open-
+source, modular agent system for academic survey
+generation. Our system is intended to support and
+augment human researchers, not to replace them.
+We emphasize human-in-the-loop design to en-
+sure transparency, user control, and alignment with
+scholarly standards. No sensitive personal data or
+copyrighted materials were used in model train-
+ing or evaluation. All evaluation was conducted
+with the consent of expert annotators. We acknowl-
+edge the potential risks of misuse in automating
+academic writing and encourage responsible de-
+ployment with clear disclosure of AI assistance.
+
+Acknowledgement
+
+This work is supported by the AI9Stars community.
+We also thank the anonymous reviewers for their
+insightful suggestions.
+
+References
+
+Perplexity AI. 2024. Perplexity deep research.
+
+Anthropic. 2024. Introducing the model context proto-
+col.
+
+Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and
+Hannaneh Hajishirzi. 2023. Self-rag: Learning to
+retrieve, generate, and critique through self-reflection.
+arXiv preprint arXiv:2310.11511.
+
+Yihang Chen, Weizhi Zhang, Yangning Li, and 1 oth-
+ers. 2024. Cosearchagent: A lightweight collabora-
+tive search agent with large language models. arXiv
+preprint arXiv:2402.06360.
+
+Yihang Chen, Weizhi Zhang, Yangning Li, and | others.
+2025. Agent-rl: Training powerful Ilm agents with
+end-to-end reinforcement learning. arXiv preprint
+arXiv:2503.07891.
+
+Dave Citron. 2024. Try deep research and gemini 2.0
+flash experimental. Google Blog.
+
+Assaf Elovic. 2024. Gpt-researcher: Autonomous agent
+designed for comprehensive online research.
+
+Jinhao Huang, Qingyun Gu, Liangming Tran, Hao Chen,
+Yuning Li, Haotian Ren, Zirui Yao, Yitao Wang, and
+Diyi Yang. 2024. Researchagent: Iterative research
+
+idea generation over scientific literature with large
+language models. arXiv preprint arXiv:2404.07738.
+
+Yushi Li, Yiming Zhang, Jing Chen, Zhen Wang, Han-
+ming Liu, and Yiming Zhang. 2024. Hellobench:
+Evaluating long text generation capabilities of large
+language models. arXiv preprint arXiv:2409.16191.
+
+Jinhao Liang, Yihang Chen, Haozheng Zhang, and
+1 others. 2025. Surveyx: An end-to-end solution
+for automated survey generation. arXiv preprint
+arXiv:2501.12345.
+
+Link-AGI. 2024. Autoagent: A fully-automated and
+zero-code framework for Ilm agents.
+
+Yuxuan Liu, Haozheng Chen, Weizhi Zhang, and
+1 others. 2024. Openresearcher: Unleashing ai
+for accelerated scientific research. arXiv preprint
+arXiv:2408.06941.
+
+Monica (Butterfly Effect AI). 2025. Manus (ai agent).
+Autonomous artificial intelligence agent.
+
+Joao Moura and | others. 2024. Crewai: Framework
+for orchestrating role-playing, autonomous ai agents.
+https: //github.com/crewAIInc/crewal.
+
+Reiichiro Nakano, Jacob Hilton, Suchir Balaji, Jeff Wu,
+Long Ouyang, Christina Kim, Christopher Hesse,
+Shantanu Jain, Vineet Kosaraju, William Saunders,
+and 1 others. 2021. Webgpt: Browser-assisted
+question-answering with human feedback. arXiv
+preprint arXiv:2112.09332.
+
+OpenAI. 2024. Deep research with chatgpt.
+
+Yuxia Qin, Zhen Wang, Yongqi Chen, and Hanming Liu.
+2024. Factuality of large language models: A survey.
+arXiv preprint arXiv:2411,.15993.
+
+Jiahao Qiu, Xinzhe Juan, Yimin Wang, Ling Yang, Xuan
+Qi, Tongcheng Zhang, Jiacheng Guo, Yifu Lu, and
+1 others. 2025a. Agentdistill: Training-free agent
+distillation with generalizable mcp boxes. arXiv
+preprint arXiv:2506.14728.
+
+Jiahao Qiu, Xuan Qi, Tongcheng Zhang, Xinzhe Juan,
+Jiacheng Guo, Yifu Lu, Yimin Wang, Zixin Yao, Qi-
+han Ren, Xun Jiang, and 1 others. 2025b. Alita: Gen-
+eralist agent enabling scalable agentic reasoning with
+minimal predefinition and maximal self-evolution.
+arXiv preprint arXiv:2505.20286.
+
+Harun Raseed. 2025. The model context protocol (mcp):
+A new standard for multi-agent intelligence in ai
+systems. Medium.
+
+Unleash. 2025. Mcp for ai agents: Enabling modular,
+scalable agentic systems.
+
+Haoyu Wang, Yujia Fu, Zhu Zhang, Shuo Wang,
+Zirui Ren, Xiaorong Wang, Zhili Li, Chaoqun
+He, Bo An, Zhiyuan Liu, and Maosong Sun.
+2025. Llmxmapreduce-v2: Entropy-driven convo-
+lutional test-time scaling for generating long-form
+articles from extremely long resources. Preprint,
+arXiv:2504.05732.
+
+
+Yidong Wang, Qi Guo, Wenjin Yao, Hongbo Zhang,
+Xin Zhang, Zhen Wu, Meishan Zhang, Xinyu Dai,
+Min Zhang, Qingsong Wen, and | others. 2024. Au-
+tosurvey: Large language models can automatically
+write surveys. arXiv preprint arXiv:2406.10252.
+
+Zhiyuan Wen, Jiannong Cao, Zian Wang, Beichen Guo,
+Ruosong Yang, and Shuaiqi Liu. 2025. Interac-
+tivesurvey: An Ilm-based personalized and interac-
+tive survey paper generation system. arXiv preprint
+arXiv:2504.08762.
+
+Weizhi Zhang, Yangning Li, Yihang Chen, and | others.
+2025a. Search-ol: Agentic search-enhanced large
+reasoning models. arXiv preprint arXiv:2502.09049.
+
+Yiming Zhang, Yongqi Chen, Zhen Wang, and Han-
+ming Liu. 2025b. Mastering ultra-long text gen-
+eration via reinforcement learning. arXiv preprint
+arXiv:2506. 18841.

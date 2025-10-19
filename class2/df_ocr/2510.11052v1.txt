@@ -1,0 +1,1149 @@
+arXiv:2510.11052v1 [es.CL] 13 Oct 2025
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+LATENT REFINEMENT DECODING: ENHANCING
+DIFFUSION- BASED LANGUAGE MODELS BY REFINING
+BELIEF STATES
+
+Qinglin Zhu!* Yizhen Yao'* Runcong Zhao!’ Yanzheng Xiang! Amrutha Saseendran®
+Chen Jin® Philip Alexander Teare? Bin Liang*® Yulan He!:? Lin Gui!
+
+' King’s College London, UK ? The Alan Turing Institute, UK
+
+3 Centre for Al, Data Science & Artificial Intelligence, BioPharmaceuticals R&D, AstraZeneca, UK
+4 The Chinese University of Hong Kong ° MoE Lab, CUHK
+
+{qinglin.1.zhu, yizhen.yao, runcong. zhao, yanzheng.xiang}@kcl.ac.uk
+{philip.teare, amrutha.saseendran, chen. jin}@astrazeneca.com
+{bin.liang}@cuhk.edu.hk {yulan.he,lin.1.gui}@kcl.ac.uk
+
+ABSTRACT
+
+Autoregressive (AR) models remain the standard for natural language genera-
+tion but still suffer from high latency due to strictly sequential decoding. Recent
+diffusion-inspired approaches, such as LlaDA and Dream, mitigate this by gener-
+ating in parallel, yet they suffer from two core limitations: information loss, as
+predictive distributions for non-finalized tokens are discarded at each step, and
+premature commitment, where local decisions are made without sufficient global
+coordination. We introduce Latent Refinement Decoding (LRD), a two-stage
+framework with Latent Refinement and a Predictive Feedback Loop. The first
+stage maintains masked positions as distributional mixtures of predicted tokens
+and the mask embedding, allowing the model to establish more globally consistent
+beliefs. The second stage progressively finalizes confident tokens while retaining
+uncertain ones for iterative feedback. KL-divergence dynamics provide a princi-
+pled and reliable criterion for convergence and early stopping. Experiments across
+coding (HumanEval +6.3, MBPP +2.6) and reasoning (GSM8K +2.9, MATHS00
++3.8) show that LRD improves accuracy while delivering speedups of up to 10.6x,
+making it a strong and versatile alternative for parallel sequence generation.
+
+1 INTRODUCTION
+
+Autoregressive (AR) models have long defined the standard for natural language generation
+
+2020} 2025} 2023 2025), but their inherently sequential
+token-by-token decoding imposes a fundamental bottleneck on inference latency 2023
+2024). This constraint has motivated the development of parallel decoding paradigms.
+
+Among them, diffusion-inspired approaches such as LLaDA 2025) and Dream
+2025) offer a particularly promising direction. By formulating text generation as an iterative
+
+refinement process and updating all token positions in parallel at each step, these methods provide a
+compelling alternative to traditional AR decoding, achieving significant speedups while maintaining
+
+competitive quality (Labs et al. 2025). Despite recent progress, diffusion language
+models employ hard assignment strategies (Gong et al.| {2025 2025 2025):
+
+at each denoising step, they commit high-confidence positions to specific tokens while resetting
+remaining positions to uniform [MASK] tokens. The predictive distributions from earlier steps are
+discarded, limiting the model’s ability to build upon partial beliefs established in earlier iterations.
+
+This design introduces two limitations: (i) Information loss from hard masking 2024): At
+each denoising step, positions below confidence thresholds are reset to uniform [MASK] embeddings,
+completely discarding their predictive distributions. This prevents uncertain positions from sharing
+
+“Equal contribution.
+Corresponding Author.
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+probabilistic information through self-attention, forcing each masked position to be predicted in
+isolation. When mispredictions occur, the hard assignment yields infinite KL divergence from the
+true posterior, as it assigns zero probability mass to the correct token. (ii) Inefficient convergence
+dynamics (Luxembourg et al.|[2025} {Li & Cail [2025): The binary nature of hard assignment creates
+a dilemma: aggressive selection commits early and can lock in incorrect predictions, propagating
+errors through later steps; conservative selection keeps many positions masked, which slows progress
+and requires many denoising iterations. Moreover, using a fixed number of iterations ignores the
+varying complexity across different generation tasks, wasting computation on simple cases while
+potentially underserving complex ones.
+
+To overcome these limitations, we move beyond purely discrete denoising and introduce Latent
+Refinement Decoding (LRD), a hybrid framework that operates in both embedding and token spaces.
+LRD restructures the denoising process into two coordinated stages. Phase 1: Latent Refinement
+performs distribution-preserving updates entirely in the embedding space: for each masked position,
+we form a mix embedding by mixing the [MASK] embedding with the entropy-normalised expecta-
+tion over top-p predicted token embeddings, allowing the model to “think latently” in continuous
+embedding space, establishing globally coherent beliefs before committing to discrete decisions. Once
+the predictive distributions stabilise, Phase 2: Predictive Feedback Loop progressively converts
+low-entropy positions into discrete tokens while keeping the remaining positions in soft form, feeding
+each step’s predictions back into the next soft mixture; KL-based monitors govern the soft-to-hard
+transition and enable adaptive early stopping. Specifically, the main contributions of LRD are:
+
+1. Soft diffusion that enables continuous denoising in embedding space by mixing [MASK]
+with weighted token representations. This preserves distributional information across steps
+and enables cross-position refinement through self-attention.
+
+2. Adaptive two-phase sampling that combines soft refinement for global coherence with hard
+decoding for precise convergence. KL-based monitoring enables automatic phase transitions
+and early stopping based on actual convergence rather than fixed iteration counts.
+
+3. We validate LRD across diverse model families, generation lengths, and benchmarks span-
+ning coding (HumanEval: +6.3, MBPP: +2.6) and reasoning (GSM8K: +2.9, MATHS500:
++3.8), consistently improving accuracy while achieving speedups of up to 10.6x.
+
+2 PRELIMINARY
+
+For dL (Oust al] 2024] Zheng eta 2024 SH eta 024 Gong al] 2025) tne forvar
+
+process corrupts data xo € {1,...,.V}% (a sequence of L tokens from vocabulary. size V) into
+progressively noisier versions xj, ...,X7. At each timestep, the forward process is defined as a
+categorical distribution:
+
+q(x+|xt-1) = Cat(x1; Q/ x11) (1)
+where x; € {0,1}”*” is the one-hot representation of tokens at time t, and Q; € [0,1]”*” is the
+transition matrix. Each token either remains unchanged with probability 1 — (; or transitions to the
+special [MASK] token with probability 3, € (0,1): Q; = (1 — 6,)I+ 6,1m", where I ¢ RY*Y
+is the identity matrix, 1 € R” is an all-ones vector, and m € {0,1}” is the one-hot encoding of
+the [MASK] token. Under continuous-time formulation with ¢ € [0, 1], the cumulative transition
+matrix from xp to x; becomes: Q, = afI + (1 — a*)1m", where a* = []‘_,(1 — 8.) represents
+the probability of a token remaining unmasked from time 0 to time t.
+
+The reverse process pg(x+—1|Xz) aims to reconstruct the original data by iteratively denoising from
+x7 (fully masked) to xo (clean text). At each denoising step ¢, the model predicts a distribution over
+
+tokens for each position: p? (Xo|X,) for position i.
+In transformer-based diffusion models, each token is represented by a learnable embedding vector.
+Let e, € R®@ denote the embedding for token v € V, and €(mask] € IR? the embedding for the
+
+[MASK] token. During the reverse process, traditional sampling strategies employ hard assignment,
+selecting tokens based on prediction confidence:
+
+@ — Jargmaxycy Py) (v[xe), if i € top-1({HyY},)
+
+= 2
+" [MASK], otherwise iad
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Prompt Token Mask token Prob dist. Mixed token | Cic Unmask tokens
+
+The denoising order
+
+1. Input Prompt and Mask Tokens
+
+2. Model predicts the token distributions for all Mask positions.
+
+3. Retain lowest entropy token and remask others.
+
+e)
+
+Repeat 2 and 3 until no Mask tokens left.
+(1) Low entropy Denoising (Baseline)
+
+Token dist.
+
+{ 1
+1 1
+
+' 1
+
+a j
+
+Mixed token ; er | Mask token ;
+C \ a-Top-p tokens embedding + (1-a):mask token embedding i
+) y
+
+Iterative token dist. & mixing until global info is captured
+
+Phase 2. Predictive Feedback Loop
+1. Model predicts the token dist. for all Mix Mask positions.
+
+2. Retain lowest entropy token and mix other MASK token.
+
+re)
+
+Early Stop — Repeat 1 and 2 until no MASK tokens left or Early Stop.
+
+(2) Latent Refinement Decoding (ours)
+
+Figure 1: Comparison between the existing decoding strategy and the proposed method. Different
+colours represent distinct tokens, while gradient colours indicate predicted token representations. Top:
+In the existing strategy, all [MASK] tokens share the same embedding and are repeatedly remasked if
+not selected. Bottom: In LRD, Phase | refines each [MASK] embedding, and Phase 2 progressively
+commits confident tokens while keeping uncertain ones soft for context-aware decoding.
+
+where HY) = — p (v|xz) log pY? (u|xz) is the entropy at position j, and top-1 selects the
+position with lowest entropy (highest confidence). This creates a binary embedding assignment: each
+position uses either ejasx] Or a specific token embedding ei), resulting in complete information
+
+loss for positions not selected. This binary decision mechanism creates a discontinuous mapping
+from probability distributions to discrete embeddings: positions below the confidence threshold are
+reset to pure [MASK] embeddings, completely discarding their distributional information jg (-|x:),
+resulting in abrupt information loss and suboptimal exploration of the posterior distribution.
+
+3. METHODOLOGY
+
+Effective discrete diffusion sampling requires maintaining sufficient uncertainty for exploration
+while gradually incorporating token-specific information for convergence. To achieve this balance,
+we propose LRD: instead of binary decisions that abruptly switch between pure noise ([MASK])
+and deterministic tokens, we create intermediate representations through continuous embedding
+interpolation. Specifically, we construct mixed embeddings that blend [MASK] and token embeddings
+weighted by prediction uncertainty, where high-entropy positions retain more mask-like characteristics
+(preserving exploration) while low-entropy positions incorporate more token information (enabling
+commitment). This enables a gradual denoising trajectory where the noise-signal ratio smoothly
+decreases, yielding better-calibrated probability distributions for subsequent sampling steps.
+
+3.1 SOFT DIFFUSION
+
+Our method operates in the embedding space rather than discrete token space. At each timestep t, we
+
+maintain a set of soft embeddings E, = fa), ae a(X)} where
+6 =(1- at”) * @(masxy 1 oy” : Ss? at), (v) "ey (3)
+veT,?
+t+1
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Here, e, € R® denotes the embedding of the token v € 7) ‘1, where Te is the top-p nucleus set.
+€ mask) 1s the [MASK] embedding, ay (v) denotes the probability mass of token v at position i,
+
+renormalised to the nucleus set Te. The coefficient al!) € [0, 1] controls the interpolation strength.
+
+The mixing weight a; is controlled by entropy:
+
+_ De pi (F) log pita (Fs)
+log |V|
+
+af) =rp-(1— AY.) = 15-1
+
+) (4)
+
+where pr, (k) refers to the probability distribution over the full vocabulary, H no is the normalised
+entropy of this distribution, and rr € (0, 1] sets the maximum interpolation strength. Since the entropy
+of a categorical distribution over a vocabulary of size V lies in [0, log |V|], we divide by log |V| to
+normalise it into [0, 1]. This design ensures that uncertain positions stay mask-like while confident
+
+ones commit to tokens. Formal justification and stability analysis are deferred to Appendix [D]
+
+Consider the absorbing discrete diffusion process where the true posterior distribution q* (a4~1|Xz, Xo)
+2)
+
+represents optimal denoising. For masked positions where z;’ = [MASK], Bayes’ rule yields:
+
+t
+where the detailed derivation is provided in spent 7 assignment approximates this by a
+
+degenerate distribution Gpara € {5,00 , Ormasxy }. If a at x a , then Gnara assigns zero probability
+
+where q* is positive, leading to KL(q*||Gnara) = ©. Moreover, positions that remain masked
+are represented by a fixed embedding e;yasx);, which conveys no distributional information to
+neighbouring positions.
+
+Latent Refinement Decoding mitigates both issues. First, @,o assigns non-zero probability to all
+tokens, ensuring the true token retains a positive mass even under misprediction. Second, the weighted
+
+mixture ) ©, p? (v)e, can be viewed as the expected embedding under the model’s belief at position 7.
+Since self-attention is linear in the embeddings, this representation propagates uncertainty information
+across positions, enabling different tokens to condition on each other’s belief states.
+
+3.2 ADAPTIVE SAMPLING WITH SOFT-TO-HARD SCHEDULING
+
+The optimal denoising strategy must balance two objectives: preserving sufficient uncertainty for
+exploration while progressively reducing entropy for convergence. Latent Refinement Decoding
+provides a smooth relaxation in the embedding space, where gradient-based updates are well behaved
+and guarantee contraction toward fixed points. This geometry enables rapid early progress, as
+the gradients carry informative signals across the entire vocabulary. However, Latent Refinement
+Decoding cannot fully collapse distributions to one-hot states, since embeddings always encode
+mixtures rather than discrete commitments. As a result, convergence slows in later stages when
+sharper updates are required for final token generation.
+
+To overcome this limitation, we adopt a two-phase schedule. Phase 1 exploits the favourable geometry
+of soft embeddings to quickly nee 2 stable neighborhood of the optimum. Once the model’s
+
+predictive distributions stabilise (Di () < Trefine), Phase 2 transitions to hard assignment, which
+enables decisive discrete optimisation within the well-conditioned basin. This design follows the
+principle of graduated optimisation: begin with a smooth relaxation to encourage global exploration,
+then progressively sharpen the objective to encourage convergence.
+
+Phase 1: Latent Refinement via Soft Embeddings. During the initial refinement phase, the model
+iteratively refines predictive distributions through soft embedding propagation without committing to
+any discrete tokens. Starting from ¢ = T’ (fully masked), we compute soft embeddings using Equa-
+tion|3| where predictions p? (v) = dLLMo(E;) are conditioned on the previous soft embeddings
+rather than discrete tokens. This allows distributional information to propagate across timesteps.
+
+As refinement progresses, the soft embeddings approach a fixed point where the model’s predictions
+become self-consistent, that is, the output distribution given the current soft embeddings closely
+matches the distribution encoded in those embeddings. At this convergence point, the model has
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+extracted all available information from the global distributional structure and further soft refinement
+yields diminishing returns. We detect this saturation by monitoring the KL divergence between
+consecutive predictions:
+
+L
+1 a a
+Dat = pd. Dav (Pr lee) (6)
+
+i=l
+
+When DY < Tretine, the belief state has stabilised, indicating that the model can no longer benefit
+from the soft embedding’s global information and requires discrete commitments to make further
+progress. This triggers the transition to Phase 2, where discrete token generation can exploit the
+well-initialised distributions from Phase |. Alternatively, if convergence is not achieved within
+Trefine Steps, we still transition to Phase 2 for computational efficiency, as extended refinement shows
+diminishing returns while incurring additional computational cost.
+
+Phase 2: Predictive Feedback Loop. Once convergence is detected at timestep t*, we switch to
+Predictive Feedback decoding for the remaining timesteps t € [t*, 0]. We modify the standard hard
+assignment (Equation [2) by replacing [MASK] embeddings with soft embeddings for unselected
+positions:
+
+(3) {Sa maxy p(w)! ific top-1({ HW) L) o
+(i)
+
+é", otherwise
+
+This preserves the distributional information from Phase 1’s refinement in uncommitted positions,
+providing richer context for subsequent decoding steps while still allowing confident positions to
+make discrete commitments.
+
+During decoding, we continue monitoring DY (Equation|6}, If Di? < Taecodes the predictive
+distributions over the whole sentence have converged to a stable configuration and further iterations
+would be redundant. This early stopping mechanism terminates the generation and outputs the final
+sequence, ensuring computational efficiency without sacrificing output quality. In practice, this allows
+the model to adaptively adjust its generation length based on the problem complexity rather than
+using a fixed number of steps.
+
+4 EXPERIMENTS
+
+4.1 IMPLEMENTATION DETAILS
+
+We evaluate our method on two representative diffusion-based language models: LLaDA 8B
+and Dream 7B (2025), each with both Base and Instruct
+variants. To ensure robustness, we fix the temperature to 0 and always select the token with the
+minimum entropy at each decoding step, detailed configuration in Appendix [A] All experiments are
+conducted on a server equipped with 8 NVIDIA A100 80GB GPUs.
+
+4.2 BENCHMARKS AND METRICS
+
+To comprehensively assess the effectiveness of our approach, we conduct experiments on four
+benchmarks spanning mathematical reasoning and code generation. For mathematical reasoning,
+we use GSM8K (Cobbe et al.|/2021), which consists of grade-school math word problems, and the
+more challenging MATHS00 (Lightman et al.|/2024), a benchmark of competition-level mathematics
+problems. For code generation, we evaluate on MBPP (Austin et al.|/2021b), which features entry-
+level Python programming tasks, and HumanEval of handwritten coding
+problems for program synthesis. Following prior work, all Instruct models are evaluated under
+the zero-shot setting. For Base models, we follow standard few-shot settings for each benchmark:
+zero-shot for HumanEval, 3-shot for MBPP, 4-shot for MATH500, and 8-shot for GSM8K. For all
+benchmarks, we report accuracy for mathematical reasoning and pass@1 for code generation.
+
+4.3. MAIN RESULTS
+
+Performance on Benchmarks. Table [I]reports the performance of different models and decoding
+methods across four representative benchmarks. Our Latent Refinement Decoding framework
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Table 1: Performance of different models and methods across benchmarks. Speed denotes relative
+runtime (baseline = 1.0x), where larger values indicate faster and more efficient inference. Baseline
+results are shown in grey, and ours LRD improvements in green.
+
+Model Len Method HumanEval MBPP GSM8K MATHS00
+
+Acc Speed Acc Speed Acc Speed Acc Speed
+
+baseline 50.6 1.0x 55.8 1.0x 75.3 Ox 36.9 1.0x
+
+256 Ours 56.9453 1.2K 57.618 23X TB2y29 18K 398,29 LAX
+
+baseline 54.4 1.0x 55.8 10x 76.2 1.0x 37.5 1.0x
+
+Dream-Base-7B 512 Ours 58.8444 26K S84i96 45% 7749 34K 408,535 18x
+1024 baseline 54.8 1.0x 58.0 10x 76.8 1.0x 39.1 Ox
+
+Ours 59.laa3 44x 58.8403 7.6X 77.8410 42x 424433 2.2x
+
+256 baseline 55.4 1.0x 57.4 1.0x 80.8 Ox 37.9 Ox
+
+Ours 61.6462 14x 594,959 24x 83.0;,22 Ax = 40.642.7 1x
+
+baseline 56.1 1.0x 56.7 1.0x 80.2 .Ox 38.6 1.0x
+
+Dream:Ins:7B 512 Ours 60.9,43 2.9x 58.849; 46x 82.7495 3.6x 41.8430 2x
+baseline 56.0 1.0x 57.3 10x 81.3 Ox 40.1 1.0x
+
+1024 Ours 61.0450 9.3K 59.017 106K 83.5.9 5.5K 439.59 LIX
+
+baseline 32.9 1.0x 39.7 1.0x 69.1 1.0x 30.2 1.0x
+
+256 Ours 36.045, 13K 4g SK) Thao) LOX 3249 LAX
+
+baseline 32.8 1.0x 39.8 1.0x 70.8 1.0x 30.8 Ox
+
+LLaDA-Base-8B 512 Ours 36.0459 LIX 4 dag = 9K) 7257 2.2K 324 yg 1.x
+1024 baseline 31.7 10x 39.8 1.0x 1.4 1.0x 30.1 1.0x
+
+Ours 34.8151  2.2x 408.10 3.6x 72dyo7 3.3K 32.2.0; 21x
+
+256 baseline 38.7 1.0x 36.9 1.0x 17.4 1.0x 33.8 1.0x
+
+Ours 43.3446 1.2K 40.043, 1.3K 78.8y1.1 1.5K 35.8429 14x
+
+baseline 43.9 1.0x 38.2 1.0x 81.3 1.0x 37.7 1.0x
+
+LlaDA-Ins8B 512 Ors 48 4ya5 13K © 406424 «15% 84.5459 20x 39840, 14x
+1024 baseline 44.6 1.0x 37.4 1.0x 82.3 1.0x 39.4 1.0x
+
+Ours 49.5449 1.7K 39.6422 3.7K 83.7414 43x 42.2408 2.0x
+
+256 baseline 38.4 1.0x 38.6 1.0x 79.2 1.0x 33.4 1.0x
+
+Ours 44.5464 1.2x 398,12 1.3K 804,12 15x 36.6432 3x
+
+baseline 45.1 1.0x 37.6 10x 82.9 1.0x 38.6 Ox
+
+LLaDA-15-8B 512 Ours 49.6445 1.2K 40.2yo6 «SK 845i | 9K ALO, LAX
+baseline 45.7 1.0x 37.4 1.0x 82.5 1.0x 39.6 1.0x
+
+1024 Ours 50.6445 LX 39.6499 3.5K 83.94 40K ALBio5 1.9
+
+consistently improves accuracy across all settings. For instance, on HumanEval, LRD boosts pass@ 1
+by up to +6.3 points (Dream-Base-7B, 256 tokens) and +6.2 points (Dream-Ins-7B, 256 tokens)
+compared to the baseline. Similar trends are observed for MBPP, GSM8K, and MATHS00, where our
+method outperforms the baseline by margins of +1.0 to +4.8 points in most cases. These results are
+consistent across different sequence lengths (256, 512, 1024), confirming that the benefits of LRD
+are robust to context window size and apply uniformly to both Base and Instruct model families.
+
+Efficiency and Decoding Speed. Beyond accuracy, LRD substantially accelerates inference. As
+shown in Table|I| our method delivers at least 1.2 speedup in all cases, with the largest gains
+observed for longer contexts. For example, Dream-Ins-7B achieves up to 9.3x faster decoding
+at length 1024, while LLaDA models reach up to 4.3 speedup under the same condition. The
+improvement comes from two factors: (i) the mix operation in the latent refinement phase accelerates
+convergence by reducing the number of tokens that need to be generated (see Section|4.5), and (ii)
+the entropy-based early stopping criterion prevents unnecessary refinement steps, especially in long
+sequences. These results indicate that LRD is particularly advantageous in large-context scenarios,
+where traditional parallel decoding incurs significant overhead.
+
+4.4 CONVERGENCE ANALYSIS
+
+KL divergence decreases steadily during refinement and decoding. Figure [2] shows the KL
+divergence between step-wise predictive distributions and the final decoded outputs for LLaDA-1.5
+and Dream-Ins across four benchmarks. For ease of observation, we fix the latent refinement phase
+to 20 steps. The divergence exhibits a clear downward trend: during the latent refinement phase,
+the KL values drop rapidly and stabilise, indicating that the latent belief state quickly converges
+before decoding begins. Once decoding starts, the KL divergence continues to decrease with mild
+fluctuations, reflecting the model’s progressive confidence sharpening. For most benchmarks, the
+divergence approaches zero within about 300 steps, whereas Dream-Ins converges even faster,
+reaching near-zero divergence around 140 steps. The MATH500 benchmark proves more challenging,
+with non-negligible divergence persisting until the full 512-step horizon. Overall, these patterns
+are consistent with our expectations: the refinement phase provides a stable initialisation, and the
+subsequent decoding stage steadily drives the system toward convergence.
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+1 | —— LLaDA-1.5 Humaneval -—-—-: Dream-Ins Humaneval 0.7 \ —— LLaDA-1.5 Humaneval --—-: Dream-Ins Humaneval
+1.0 —— LLaDA-1.5 MBPP == Dream-Ins MBPP \ —— LLaDA-1.5 MBPP ==: Dream-Ins MBPP
+~~ LLaDA-1.5 GSM8K == Dream-Ins GSM8K 0.6 MA ~~ LLaDA-1.5 GSM8K == Dream-Ins GSM8K
+—— LLaDA-1.5 Math500 == Dream-Ins Math500 ‘ —— LLaDA-1.5 Math500 == Dream-Ins Math500
+0.8
+995
+ad
+g é
+& 0.4
+20.6 @ UP
+g 5
+>
+a 20.3
+30.4 2
+x fo}
+00.2
+0.2
+0.1
+0.0 0.0
+0 100 200 300 400 500 2 3 4 5 6 Rs 8 9 10
+Steps Num Hot Start Steps
+
+Figure 2: KL divergence between step-wise pre- Figure 3: Convergence ratios across latent refine-
+dictive distributions and final decoded results for ment steps for LLaDA-1.5 and Dream-Ins on four
+LLaDA-1.5 and Dream-Ins across benchmarks. benchmarks. Since computing the difference in
+The red vertical line marks where decoding be- KL divergence requires at least three consecutive
+gins after a fixed 20-step latent refinement. steps, the curves are plotted starting from step 2.
+
+Most examples converge within the first few latent refinement steps. Figure [3] reports the
+proportion of cases converging at each latent refinement step. Across benchmarks, the majority of
+runs converge within the first few refinement steps. For example, on HumanEval with Dream-Ins,
+68.9% of samples converge by step 2, and more than 85% by step 3. Similar trends hold for GSM8K,
+MBPP, and MATHS500, where over 70% of cases converge within the first three to four steps. These
+results confirm that the latent refinement is highly efficient in practice: most examples stabilize very
+early, reducing the need for excessive refinement iterations and validating the design of our latent
+refinement mechanism.
+
+4.5 ABLATION STUDY
+
+Excessive latent refinement brings no benefit Table 2: Ablation study on decoding variants at
+but slows decoding. Table[2|compares our two-  Jength 512, where Auto uses adaptive latent refine-
+stage strategy (one initial latent refinement fol- ment, and LFxk enforces k latent refinement steps
+lowed by standard decoding) with variants that prior to each token commitment.
+
+enforce latent refinement at every step, either
+
+a fixed number of times (LFxk) or adaptively _Method HumanEval MBPP  GSM8K__MATHS00
+
+(Auto). Results show that while all variants out- Baseline 50.1 207 ule oho
+: Ours 60.9 4.8 58.8491 82.7425 41.843.
+perform the baseline, none surpass our method: auto 59.6135 STlag9 SlSarg, Alger
+enforcing repeated latent refinements (LFx2-5) —_LFx1 60.44.4.3 57.8411 81.6414 40.2416
+generally degrades accuracy, and even adaptive x2 58.3422 57.2105 812410 40.2416
+: LFx3 57.9418 57.8411 81-8416 39.040.
+scheduling (Auto) underperforms compared to ——_[ Fy 60.847 57.205 809.97 39.6410
+ours. The reason is that excessive latent refine- — LFx5 58.842.7 57.640.9 80.7405  39.240.6
+
+ment adds redundant computation without pro-
+
+viding additional guidance once the model has stabilised. In contrast, our two-stage design strikes a
+better balance by leveraging latent refinement only at the beginning, yielding both higher accuracy
+and substantially faster decoding.
+
+Both components contribute, with mixing more critical. Table[3]reports ablation results in accuracy.
+Removing latent refinement or mixed embeddings consistently reduces performance, confirming
+the importance of both. The absence of mixed embeddings causes larger drops (up to —2.9 on
+HumanEval and —2.5 on MATHS00), showing that the predictive feedback loop is the key driver of
+improvements. In contrast, early stopping incurs almost no accuracy loss while providing substantial
+efficiency gains. Overall, latent refinement and mixed embeddings are essential for accuracy, whereas
+early stopping boosts efficiency at virtually no cost.
+
+latent refinement slows generation, mixed embeddings aid convergence, and early stopping is
+the main accelerator. Table [4|reveals several key insights. First, removing the latent refinement
+phase (w/o latent refinement) yields faster decoding, showing that latent refinement introduces extra
+refinement steps and slightly slows down speed, though it improves stability. Second, removing mixed
+embeddings (w/o mix embed) makes decoding slower and increases effective token counts, indicating
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Table 4: Ablation study on decoding variants, reporting Speed and effective token number Fioken,
+where red and green numbers show the change compared to our full method.
+
+Length Method Speed Froken
+HumanEval MBPP GSM8K MATHS00 HumanEval MBPP GSM8K MATHS00
+baseline 1.0x 1.0x 1.0x 1.0x 117.2 53.5 132.4 228.4
+Ours 14x+0.4 24xX414 14x404  Ldx01 108.4_s.8 49.243 128.653  226.0_2.4
+256 Wolatent refinement 1.5X;01  25Xs01 15X01 LlXso9 1087.93 504.2 129915 2268.05
+w/o mix embet 1.3% 94 22x99 1.5X%.01 LOx-o1 U72iss 49.5103 1294.08 2284.94
+w/o early stop 0.8x_0.6 0.7x_1.7  0.8x_o.6 0.9x_o9.2 109.74.4.3 $1449 129.9113 228.0120
+baseline 1.0x 1.0x 1.0x 1.0x 116.2 55.7 135.2 378.9
+Ours 2.9X41.9 4.6X13.6 3.6x42.6 -2X40,2 103.9_193 518-41 125.993  363.5-15.4
+512 Wo latentrefinement 3.1X%,92 4.9X.93  3.8Xs02 12X.00 1063.21 52.6198 1279499 363.005
+w/o mix embe 2.7X_0.2 4.3x_0.3 3.0x_0.6 .OX_9.2 116.24123 51.8400 126.2403  368.915.4
+w/o early stop 08x91 07x39 08X25 08x01 106.2123  53.6i18 1272.15 366.0295
+baseline 1.0x 1.0x 1.0x 1.0x 904 60.5 135.5 189.3
+Ours 9.3xX18.3 10.6x49.6 5.54.5 -7X40.7 84.6_5.8 57.233 123.7-11.3 437.3-45.0
+1024 Wolatent refinement 9.3.9  10.7Xs01 56X91 L7Xi00 839-97. 582u19 1250.15 4554101
+w/o mix embe 9.1x_0.2 10.4x_9.2 5.1x_0.4 3X_0.4 90.4.5.8 61.7445 130.5468  483.5446.2
+wo early stop 08x_s5  0.7X_99 08X47 08X99 86.216 59.2429 126.1i24 4389.16
+
+that mixing embeddings is critical for helping the model converge earlier. Third, early stopping (w/o
+early stop) leads to dramatic slowdowns, with speed dropping from multi-fold acceleration to even
+below baseline, despite only negligible changes in Fioken. This confirms that early stopping is the
+primary driver of speedup. Finally, both latent refinement and mixed embeddings reduce effective
+token usage under the full model, demonstrating that they improve convergence efficiency even
+though their speed impact differs.
+
+——
+
+0.8
+
+——
+thems
+
+Accuracy
+° °
+a o
+
+°
+nN
+
+0.0
+
+Dream-Ins Humaneval
+Dream-Ins GSM8K
+Dream-Ins Math500
+Dream-Ins MBPP
+
+0.0 O21 02 03 04 O05 06
+
+0.7 #08 #09 1.0
+
+Maximum Mix Token Proportion (r¢)
+
+Figure 4: Accuracy of Dream-Ins on four bench-
+marks under different Maximum token propor-
+tion, where r s=0 corresponds to the no mixing.
+
+Full mixing collapses the model, while best at
+intermediate r+. We further investigate the ef-
+fect of the maximum mix ratio rf, which scales
+the interpolation between predicted token em-
+beddings and the [MASK] embedding during
+refinement (Eq. 4). When r ¢=0, the model falls
+back to always using the [MASK] token for un-
+finalised positions, equivalent to the baseline. At
+the other extreme, setting r =1 allows the mix-
+ing weight to fully follow the entropy schedule,
+meaning that in high-entropy cases the [MASK]
+
+embedding may vanish. As shown in Figure [4]
+both extremes are suboptimal: the baseline prop-
+agates information slowly, while overly aggres-
+
+0.9 ee
+—®- Humaneval —®- MBPP —* Token Ratio ¥
+“= GsMsk —* Mathsoo Yr
+0.8 7 10-1
+a”
+x
+0.7 a 2
+= we 10 Ey
+fo x 6
+& x7 =)
+306 s D
+<= SS to
+Pod °
+a”
+2
+0.5 o-
+a
+0.4) Lr sFirst point: 0 10-3
+00 021 O02 03 04 05 06 07 08 O09 1.0
+Top p
+
+Figure 5: Effect of top-p mixing on Dream-Ins
+across four benchmarks. The purple curve shows
+the log fraction of tokens included in the mixture.
+
+Table 3: Ablation study on decoding variants,
+where red and green numbers show the change
+compared to our full method.
+
+Len Method HumanEval MBPP GSM8K MATHS500
+baseline 55.4 57.4 80.8 37.9
+Ours 61.646.2 59.4499 83.0422 40.649.7
+256 w/olatent refinement 60.1_; 5 58.69. 82.397 39.412
+w/o mix embed 59.5 94 58.80. 82.793 38.9-1.7
+w/o early stop 61.8402 59.4+40.0 83.2402 40.60.0
+baseline 56.1 56.7 80.2 38.6
+Ours 60.94.48 58.8491 82.7495 41.8430
+512 w/olatent refinement 59.9_; 9 57.810 82.295 41.0_08
+w/o mix embed 58.029 57.810 80.729 40.8 1.6
+w/o early stop 61.2403 58.840.0 82.9402 41.9401
+baseline 56.0 57.3 81.3 40.1
+Ours 61.0450 59.0417 83-5422 43.9438
+1024 “w/o latent refinement 60.7_ 3 58.892 83.293 42.4 15
+w/o mix embed 59.1_19 58.793 82.996 414-25
+w/o early stop 61.440.4 59.0400 83.7402 44.2403
+
+sive mixing destabilises refinement and leads to collapse. Intermediate values of r+ achieve the best
+trade-off, providing sufficient mask guidance while still leveraging predictive feedback.
+
+Mix matters more than how many tokens are mixed. As shown in Figure [5] when p = 0 no
+mixing occurs and the method degenerates to the baseline, giving the lowest accuracy across all
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+benchmarks. Increasing p quickly improves performance, even though the token ratio curve indicates
+that only a very small fraction of tokens are mixed at p < 0.2. This suggests that the key factor is
+enabling mixing rather than the absolute number of tokens included. Beyond p ~ 0.2, accuracy
+stabilises and fluctuates slightly, showing that adding more low-probability tokens offers little benefit
+while introducing potential noise. These results confirm that top-p mixing provides a good balance:
+minimal mixing is already highly effective, and larger p values do not bring further gains.
+
+5 RELATED WORK
+
+Diffusion LLMs (dLLMs). Diffusion models, as generative models, initially achieved significant
+success in continuous data domains such as image (Song et al.||2020 2020} |Nichol et al.
+2021||Rombach et al.|/2022) and speech generation (Huang et al.||2023 2023). Their
+application in the language domain has been limited due to the discrete nature of text. One promising
+approach is the use of Masked Diffusion Models (MDMs) 2021a 2024
+2024 2023), which represent a particular type of discrete diffusion that works
+
+with sequences through the iterative prediction of masked tokens using contextual information.
+Current research has concentrated on substantially expanding these MDMs. DiffuLLaMA
+let al.|{2025), developed through continual pre-training based on LLaMA parameters, has produced
+diffusion Large Language Models (dLLMs) and demonstrated that (LLMs can achieve performance
+comparable to autoregressive models. Subsequently, higher-performance commercial dLLMs such as
+
+Mercury (Labs et al.|/2025) and Gemini Diffusion (Deepmind}|2025) have been announced, along
+with the introduction of high-quality open-source models such as LLaDA 2025
+2025) and Dream 2025). However, the limitations of dLLMs cannot be overlooked. Due
+
+to the lack of components analogous to KV cache and the requirement to compute results for all
+positions in each step, the deployment of dLLMs has consistently been constrained by inference
+efficiency. While reducing the number of inference steps can improve inference efficiency, this
+severely compromises model performance. Whether it is possible to enhance dLLMs’ performance
+while accelerating inference remains a critical research topic for dLLMs at the current stage.
+
+Efficient dLLMs. To improve dLLM inference speed while maintaining generation quality, recent
+works have proposed efficient dLLMs in two main directions: integrating KV cache and optimising
+computational load. For KV cache integration, dLLM-Cache proposes a training-
+free adaptive caching framework addressing dual computational redundancy, specifically quasi-static
+prompt and dynamic response redundancy, while integrating long-interval prompt caching and V-
+verify mechanisms. Fast-dLLM designs block-wise KV cache reuse mechanisms
+exploiting activation similarity in bidirectional attention, combined with confidence-aware dynamic
+parallel decoding. Sparse-dLLM combines dynamic cache eviction with sparse
+attention, leveraging temporal consistency of token saliency for plug-and-play inference acceleration.
+For computational optimisation, Prophet exploits the finding that 99% of samples
+converge early, proposing confidence-gap-based early commitment decoding to effectively reduce
+decoding steps. DAEDAL implements two-stage dynamic length expansion through
+EOS confidence prediction and low-confidence region identification, thereby enabling adaptive
+generation length allocation. However, all of the current works
+primarily prioritize efficiency over generation quality, largely
+ignoring that existing dLLMs cannot significantly outperform AR models in overall generation quality.
+Inspired by mixed token improvements in AR models
+fet al.|/2024), our work emphasizes enhancing dLLMs’ performance while simultaneously leveraging
+computed KL divergence for reliable early stopping to improve efficiency.
+
+6 CONCLUSION
+
+We introduced Latent Refinement Decoding, a unified two-stage decoding framework for diffusion
+language models that addresses the twin bottlenecks of information loss from hard masking and
+suboptimal convergence speed. By first enabling the model to iteratively refine global beliefs in
+the continuous embedding space, and then entering a predictive feedback loop that progressively
+finalizes confident tokens while adaptively monitoring convergence through KL dynamics, LRD
+preserves more information throughout the generation process and supports principled early stopping
+for greater stability. Extensive experiments on both code generation and mathematical reasoning
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+benchmarks demonstrate that LRD achieves consistent and significant gains in output quality and
+inference efficiency over standard diffusion decoding baselines, particularly as sequence length
+increases and complexity grows. Looking forward, LRD can serve as a flexible drop-in decoding
+module for future diffusion-based LMs, and its efficiency can be further enhanced by integrating with
+systems-level optimizations such as KV caching, speculative decoding, and potentially other hardware-
+aware acceleration techniques. This opens exciting new opportunities to combine architectural and
+algorithmic advances for even faster, more robust, and highly scalable parallel generation.
+
+REPRODUCIBILITY STATEMENT
+
+To ensure the reproducibility of our work, we provide complete source code as supplementary ma-
+terials, including implementations for all five models (LLaDA-base, LLaDA-instruct, LLaDA-1.5,
+Dream-base, and Dream-instruct) evaluated on four datasets (MBPP, GSM8K, HumanEval, and
+MATHS500), accompanied by detailed execution instructions. The model architectures are compre-
+hensively described in Section 3] while hyperparameters for models are specified in Appendix[A]
+
+REFERENCES
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report.
+arXiv preprint arXiv:2303.08774, 2023.
+
+Jacob Austin, Daniel D Johnson, Jonathan Ho, Daniel Tarlow, and Rianne Van Den Berg. Structured
+denoising diffusion models in discrete state-spaces. Advances in neural information processing
+systems, 34:17981-17993, 2021a.
+
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan,
+Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, and Charles Sutton. Program synthesis with large
+
+language models, 2021b. URL|https://arxiv.org/abs/2108.07732
+
+Heli Ben-Hamu, Itai Gat, Daniel Severo, Niklas Nolte, and Brian Karrer. Accelerated sampling from
+masked diffusion models via entropy bounded unmasking. arXiv preprint arXiv:2505.24857, 2025.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models are
+few-shot learners. Advances in neural information processing systems, 33:1877-1901, 2020.
+
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared
+Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri,
+Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan,
+Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian,
+Clemens Winter, and et al. Evaluating large language models trained on code, 2021. URL
+
+https://arxiv.org/abs/2107.03374
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve
+math word problems. arXiv preprint arXiv:2110.14168, 2021.
+
+George Dasoulas, Kevin Scaman, and Aladin Virmaux. Lipschitz normalization for self-attention
+
+layers with application to graph neural networks, 2021. URL https://arxiv.org/abs/
+2103.04886
+
+Deepmind. Gemini diffusion, 2025. URL https://deepmind.google/models/
+gemini-diffusion
+
+Xiang Fei, Jinghui Lu, Qi Sun, Hao Feng, Yanjie Wang, Wei Shi, An-Lan Wang, Jingqun Tang, and
+
+Can Huang. Advancing sequential numerical prediction in autoregressive models. arXiv preprint
+arXiv:2505.13077, 2025.
+
+10
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Shansan Gong, Shivam Agarwal, Yizhe Zhang, Jiacheng Ye, Lin Zheng, Mukai Li, Chenxin An,
+Peilin Zhao, Wei Bi, Jiawei Han, Hao Peng, and Lingpeng Kong. Scaling diffusion language
+models via adaptation from autoregressive models. In The Thirteenth International Conference on
+Learning Representations, ICLR 2025, Singapore, April 24-28, 2025. OpenReview.net, 2025. URL
+https://openreview.net/forum?id=j1tSLYKwg8
+
+Shibo Hao, Sainbayar Sukhbaatar, DiJia Su, Xian Li, Zhiting Hu, Jason Weston, and Yuandong
+Tian. Training large language models to reason in a continuous latent space. arXiv preprint
+arXiv:2412.06769, 2024.
+
+Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Advances in
+neural information processing systems, 33:6840-685 1, 2020.
+
+Xixu Hu, Runkai Zheng, Jindong Wang, Cheuk Hang Leung, Qi Wu, and Xing Xie. Specformer:
+Guarding vision transformer robustness via maximum singular value penalization, 2024. URL
+
+https://arxiv.org/abs/2402.03317
+
+Rongjie Huang, Jiawei Huang, Dongchao Yang, Yi Ren, Luping Liu, Mingze Li, Zhenhui Ye, Jinglin
+Liu, Xiang Yin, and Zhou Zhao. Make-an-audio: Text-to-audio generation with prompt-enhanced
+diffusion models. In International Conference on Machine Learning, pp. 13916-13932. PMLR,
+2023.
+
+Daniel Israel, Guy Van den Broeck, and Aditya Grover. Accelerating diffusion Ilms via adaptive
+parallel decoding. arXiv preprint arXiv:2506.00413, 2025.
+
+Inception Labs, Samar Khanna, Siddhant Kharbanda, Shufan Li, Harshit Varma, Eric Wang, Sawyer
+Birnbaum, Ziyang Luo, Yanis Miraoui, Akash Palrecha, Stefano Ermon, Aditya Grover, and
+Volodymyr Kuleshov. Mercury: Ultra-fast language models based on diffusion, 2025. URL
+https ://arxiv.org/abs/2506.17298
+
+Gen Li and Changxiao Cai. A convergence theory for diffusion language models: An information-
+
+theoretic perspective, 2025. URLjhttps://arxiv.org/abs/2505.21400
+
+Jinsong Li, Xiaoyi Dong, Yuhang Zang, Yuhang Cao, Jiaqi Wang, and Dahua Lin. Beyond fixed:
+Variable-length denoising for diffusion large language models. arXiv preprint arXiv:2508.00819,
+2025a.
+
+Pengxiang Li, Yefan Zhou, Dilxat Muhtar, Lu Yin, Shilin Yan, Li Shen, Yi Liang, Soroush Vosoughi,
+and Shiwei Liu. Diffusion language models know the answer before decoding. arXiv preprint
+arXiv:2508.19982, 2025b.
+
+Yuchen Li, Alexandre Kirchmeyer, Aashay Mehta, Yilong Qin, Boris Dadachev, Kishore Papineni,
+Sanjiv Kumar, and Andrej Risteski. Promises and pitfalls of generative masked language modeling:
+
+Theoretical framework and practical guidelines, 2024. URL https://arxiv.org/abs/
+2407.21046
+
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan
+Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In The Twelfth
+
+International Conference on Learning Representations, 2024. URL https: //openreview
+net/forum?id=v8LOpN6EOi
+
+Zhiyuan Liu, Yicun Yang, Yaojie Zhang, Junjie Chen, Chang Zou, Qingyuan Wei, Shaobo Wang, and
+Linfeng Zhang. dllm-cache: Accelerating diffusion large language models with adaptive caching,
+
+2025. URLihttps://arxiv.org/abs/2506.06295
+
+Aaron Lou, Chenlin Meng, and Stefano Ermon. Discrete diffusion language modeling by estimating
+the ratios of the data distribution. 2023.
+
+Omer Luxembourg, Haim Permuter, and Eliya Nachmani. Plan for speed: Dilated scheduling for
+
+masked diffusion language models, 2025. URL|https://arxiv.org/abs/2506.19037
+
+Xinyin Ma, Runpeng Yu, Gongfan Fang, and Xinchao Wang. dkv-cache: The cache for diffusion
+language models. arXiv preprint arXiv:2505.15781, 2025.
+
+11
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Alex Nichol, Prafulla Dhariwal, Aditya Ramesh, Pranav Shyam, Pamela Mishkin, Bob McGrew,
+Ilya Sutskever, and Mark Chen. Glide: Towards photorealistic image generation and editing with
+text-guided diffusion models. arXiv preprint arXiv:2112.10741, 2021.
+
+Shen Nie, Fengqi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin,
+Ji-Rong Wen, and Chongxuan Li. Large language diffusion models, 2025. URL|https://)
+arxiv.org/abs/2502.09992
+
+Jingyang Ou, Shen Nie, Kaiwen Xue, Fengqi Zhu, Jiacheng Sun, Zhenguo Li, and Chongxuan Li.
+Your absorbing discrete diffusion secretly models the conditional distributions of clean data. arXiv
+preprint arXiv:2406.03736, 2024.
+
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bj6rn Ommer. High-
+resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF confer-
+ence on computer vision and pattern recognition, pp. 10684-10695, 2022.
+
+Jiaxin Shi, Kehang Han, Zhe Wang, Arnaud Doucet, and Michalis Titsias. Simplified and generalized
+masked diffusion for discrete data. Advances in neural information processing systems, 37:
+103131—103167, 2024.
+
+Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben
+Poole. Score-based generative modeling through stochastic differential equations. arXiv preprint
+arXiv:2011.13456, 2020.
+
+Yuerong Song, Xiaoran Liu, Ruixiao Li, Zhigeng Liu, Zengfeng Huang, Qipeng Guo, Ziwei He, and
+Xipeng Qiu. Sparse-dllm: Accelerating diffusion Ilms with dynamic cache eviction. arXiv preprint
+arXiv:2508.02558, 2025.
+
+Tianxiang Sun, Xiaotian Zhang, Zhengfu He, Peng Li, Qinyuan Cheng, Xiangyang Liu, Hang Yan,
+Yunfan Shao, Qiong Tang, Shiduo Zhang, et al. Moss: An open conversational large language
+model. Machine Intelligence Research, 21(5):888—905, 2024.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée
+Lacroix, Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal Azhar, et al. Llama: Open and
+efficient foundation language models. arXiv preprint arXiv:2302.13971, 2023.
+
+Xinyi Wang, Lucas Caccia, Oleksiy Ostapenko, Xingdi Yuan, William Yang Wang, and Alessandro
+
+Sordoni. Guiding language model reasoning with planning tokens, 2024. URL
+org/abs/2310.05707
+
+Chengyue Wu, Hao Zhang, Shuchen Xue, Zhijian Liu, Shizhe Diao, Ligeng Zhu, Ping Luo, Song
+Han, and Enze Xie. Fast-dllm: Training-free acceleration of diffusion llm by enabling kv cache
+
+and parallel decoding, 2025. URL|https://arxiv.org/abs/2505.22618
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang
+Gao, Chengen Huang, Chenxu Ly, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388,
+2025.
+
+Dongchao Yang, Jianwei Yu, Helin Wang, Wen Wang, Chao Weng, Yuexian Zou, and Dong Yu.
+Diffsound: Discrete diffusion model for text-to-sound generation. IEEE/ACM Transactions on
+Audio, Speech, and Language Processing, 31:1720-1733, 2023.
+
+Jiacheng Ye, Zhihui Xie, Lin Zheng, Jiahui Gao, Zirui Wu, Xin Jiang, Zhenguo Li, and Lingpeng
+Kong. Dream 7b: Diffusion large language models. arXiv preprint arXiv:2508.15487, 2025.
+
+Runpeng Yu, Xinyin Ma, and Xinchao Wang. Dimple: Discrete diffusion multimodal large language
+
+model with parallel decoding, 2025. URL|https://arxiv.org/abs/2505.16990
+
+Nikolay Yudin, Alexander Gaponov, Sergei Kudriashov, and Maxim Rakhuba. Pay attention to
+attention distribution: A new local lipschitz bound for transformers, 2025. URL
+
+arxiv.org/abs/2507.07814
+
+12
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+Zhen Zhang, Xuehai He, Weixiang Yan, Ao Shen, Chenyang Zhao, Shuohang Wang, Yelong Shen,
+and Xin Eric Wang. Soft thinking: Unlocking the reasoning potential of lms in continuous concept
+
+space, 2025. URL|https://arxiv.org/abs/2505.15778
+
+Lin Zheng, Jianbo Yuan, Lei Yu, and Lingpeng Kong. A reparameterized discrete diffusion model for
+text generation. In Conference on Language Modeling (COLM), Philadelphia, PA, USA, October
+7-9 2024. 2024a.
+
+Fengqi Zhu, Rongzhen Wang, Shen Nie, Xiaolu Zhang, Chunwei Wu, Jun Hu, Jun Zhou, Jianfei Chen,
+Yankai Lin, Ji-Rong Wen, and Chongxuan Li. Llada 1.5: Variance-reduced preference optimization
+
+for large language diffusion models, 2025. URLhttps://arxiv.org/abs/2505.19223
+
+THE USE OF LLMS
+
+In the preparation of this manuscript, we used Large Language Models (LLMs) in a limited capacity
+for two specific purposes: preliminary literature survey to help identify relevant research directions
+and keywords during the early stages of our work, and limited language polishing to improve the
+clarity and grammatical correctness of certain sections in the paper. All core research ideas, theoretical
+contributions, experimental design, implementation, and analysis were independently conceived and
+conducted by the authors without LLM assistance. The LLM-generated suggestions were carefully
+reviewed, verified, and substantially modified by the authors before incorporation. We take full
+responsibility for all content presented in this paper, including any text that may have been refined
+with LLM assistance.
+
+A EXPERIMENT DETAILS
+
+For Base models, we follow standard few-shot settings for each benchmark: zero-shot for HumanEval,
+3-shot for MBPP, 4-shot for MATHS500, and 8-shot for GSM8K. For all benchmarks, we report
+accuracy for mathematical reasoning and pass@ 1 for code generation. We set the nucleus threshold to
+top-p = 0.9. The hyperparameter r+ is varied between 0.1 and 0.2. The thresholds for stopping latent
+refinement and early decoding are Tyefine = 0.1 and Tgecode = 0.1, respectively. We cap the latent
+refinement stage at a maximum of Trefine = 20 steps. For LLaDA-Instruct and LLaDA-1.5 models,
+generation is conducted under the official semi-AR framework (Nie et al.|/2025), where the sequence
+is divided into blocks and decoded autoregressively at the block level. Within each block, instead
+of the standard hard masking used in the original work, we integrate our Latent Refinement and
+Predictive Feedback Loop, enabling refinement of token distributions before discrete commitment.
+Detailed integration steps are provided in Appendix[C]
+
+B- DERIVATION OF THE TRUE POSTERIOR IN THE MASKING PROCESS
+
+We derive Eq. [5}for the true posterior distribution in the absorbing masking forward process. For each
+position 7, the forward process is defined as
+
+Pr(x\” = al | a) = ay, Pr(a(” = [MASK] | a) =1-ai,
+
+with (a¥)/.9 monotonically decreasing. Thus each token can only either remain as its original value
+
+a or transition to the special token [MASK]. By Bayes’ rule,
+
+i Pr(a\? = [MASK] a) oo Pr a) a)
+= [MASK],2\) = (x; - | T1295 ) ee | 0) (8)
+Pr(x;” = [MASK] | 2’)
+
+(4)
+
+There are two possible values for ao:
+
+¢ The probability of oc, = ai? is aj_,, and transitioning to mask at step ¢ occurs with
+Ore
+oF"
+
+probability 1 —
+
+Hence the joint probability is af_, — af.
+
+13
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+¢ The probability of oe, = [MASK] is 1 — aj_,, and once masked, the token remains
+
+masked with probability 1. Hence the joint probability is 1 — aj_,.
+
+The marginal probability of being masked at step t is Pr(al? = [MASK] | a) = 1- aj. Sowe
+obtain
+1—aj_
+
+1—a;
+
+i i i Of 1 — OF
+g*(@(2, | ay? = [MASK], 25?) = SL 5.9 +
+t
+
+1
+6 [masx] .
+
+C INTEGRATION WITH SEMI-AR FRAMEWORK
+
+In the semi-AR setting in LLaDA 2025), a sequence of length L is partitioned into B
+blocks {61, ba, ..., bg}. While their original work uses standard hard masking within each block, we
+
+apply soft embeddings as follows:
+
+For each block b; conditioned on previously generated blocks {by, ..., b;1}:
+
+1. Soft Refinement: Initialise positions in b; with [MASK] embeddings, then apply soft
+embedding refinement (Equation[3) until convergence.
+
+2. Progressive Decoding: Use the converged soft embeddings to guide token selection within
+the block.
+
+D_ STABILITY ANALYSIS OF MIXED EMBEDDING UPDATES
+
+Our method operates in the embedding space rather than the discrete token space. At each timestep f,
+
+we maintain a set of soft embeddings €; = fal, 136 a} defined as
+6, = (1— af?) -ermoxs tat? S7 Beea(v)-ev, (9)
+veT,”
+
+where €;vasx} denotes the [MASK] embedding, e,, denotes the embedding of token v, Ty is the
+
+top-p nucleus set at position 7, and a, (v) is the renormalised predicted distribution over the nucleus
+set at position 7.
+
+To analyse stability, an ideal approach would be to examine the Jacobian of the update operator through
+its spectral radius. However, in practice this is intractable: transformer structures involve many linear
+and nonlinear components (layer normalisation, residual connections, multi-head attention), making it
+nearly impossible to provide a formal global analysis. The effective Jacobian inherits the complexity
+of the underlying transformer, and its spectral radius (or even its spectral norm) may be large and
+not easily bounded. As a result, although the iteration often stabilises empirically, a rigorous global
+convergence guarantee cannot be obtained.
+
+Therefore, in this section, we follow the discussion from existing work (Yudin et al.|/2025
+2024 2021) and focus on local Lipschitz continuity. This analysis considers only a
+
+single self-attention layer without any other operators and provides intuition to support our method
+and explain empirical results.
+
+Specifically, the local Lipschitz bound suggests that for all soft embedding e, within an e-ball at
+original point (i.e. ||ez|| < ©), where € in fact bounds the maximum norm of embeddings, the following
+inequality holds after one-layer self-attention mapping:
+
+lleti1 — eg lla < Klleezi — e:lle, (10)
+
+where e; is the output of e; after one-layer self-attention mapping, / is the local Lipschitz constant.
+Following|Hu et al.|(2024), we approximate KX in the form
+
+K(e) x €Wh lo |WeWr) "|e, (11)
+depends on the local norm ¢, with query, key, and value matrices Wr, we ; wy, and a scaling
+
+constant c.
+
+14
+
+
+LRD: Enhancing Diffusion-Based Language Models by Refining Belief States
+
+The ideal outcome of such a mapping would be a contraction, i.e. kK < 1, which ensures that
+differences shrink across layers. However, in transformer blocks the large parameter norms often
+make this condition difficult to satisfy. Since wr, wk , and wy are fixed for a pretrained model,
+stability in practice relies on keeping ¢ sufficiently small, which is under our control. This motivates
+us to restrict the update within a small e-ball neighbourhood of the [MASK] embedding, which can
+be taken as a reference point near the origin. For comparison, in Dream (Ye et al.|{2025), while the
+[MASK] embedding has a very small £2 norm of 0.3340 in 3,584 dimensions (corresponding to a per-
+dimension RMS of about 0.0055), regular token embeddings are much larger. For instance, a typical
+token embedding has an @2 norm of about 0.8721, which corresponds to an average per-dimension
+RMS magnitude of approximately 0.0142.
+
+To connect this bound back to the embedding updates, we require and al, to lie within an
+e-ball at origin, which requires a very small €. Since both are formed as weighted sums of the
+[MASK] embedding and candidate token embeddings (Equation. Dp. a straightforward way to reduce
+
+al”
+
+this distance is to bound the mixing coefficient a. Intuitively, this means the search for efficient
+mixed embeddings remains close to the [MASK] token, with exploration constrained to a small
+neighbourhood. In this way, the iterative updates remain within a contraction-like region, which
+empirically yields stable predictive distributions.
+
+To simplify, we introduce a base rate rf and set al? =r: AO, where AO, € [0,1] is the
+normalised entropy. Since max; as) < ry, ensuring the difference is within « reduces to choosing a
+sufficiently small r¢. Empirically, we find that the method is stable and effective when r; is small,
+but fails to converge for large r¢ (see Figure[4}.
+
+We further evaluate the stability of output embeddings before the logit prediction step across adjacent
+timesteps. Since the token space is sparse and high-dimensional, we use the KL divergence as the
+metric. This reveals clear convergence during the latent refinement phase when ry is small, even after
+deep iteration with multi-layer self-attention in a transformer (see Figure[3).
+
+Another observation that implicitly supports our claim is the case of top-p selection. If p is set very
+
+small, only a few candidate tokens contribute to the weighted sum ~) eT) pe, (v)e,. Even without
+t
+
+an explicit scaling factor such as al), restricting the support of the soft embedding effectively yields
+
+a small €, which can help stabilise the updates. This explains why our method maintains reasonable
+
+performance even under extreme top-p settings (see Figure[5).
+
+In summary, although a rigorous global convergence guarantee for mixed embedding iterations is
+intractable due to the nonlinear, high-capacity nature of transformers, our local Lipschitz analysis
+provides useful theoretical insight. Together with empirical validation, this suggests that while strict
+guarantees remain challenging, the proposed method is practically stable and effective for reasoning
+with diffusion LLMs.
+
+15

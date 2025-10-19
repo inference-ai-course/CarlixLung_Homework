@@ -1,0 +1,1472 @@
+arXiv:2510.10415v1 [cs.CL] 12 Oct 2025
+
+LONGQAEVAL: Designing Reliable Evaluations of Long-Form Clinical QA
+under Resource Constraints
+
+Federica Bologna’, Tiffany Pan', Matthew Wilkens!, Yue Guo”, Lucy Lu Wang?
+‘Cornell University, 7University of Illinois, Urbana-Champaign, *University of Washington,
+Correspondence: fb265 @cornell.edu
+
+Abstract
+
+Evaluating long-form clinical question answer-
+ing (QA) systems is resource-intensive and
+challenging: accurate judgments require medi-
+cal expertise and achieving consistent human
+judgments over long-form text is difficult. We
+introduce LONGQAEVAL, an evaluation frame-
+work and set of evaluation recommendations
+for limited-resource and high-expertise settings.
+Based on physician annotations of 300 real
+patient questions answered by physicians and
+LLMs, we compare coarse answer-level ver-
+sus fine-grained sentence-level evaluation over
+the dimensions of correctness, relevance, and
+safety. We find that inter-annotator agreement
+(IAA) varies by dimension: fine-grained an-
+notation improves agreement on correctness,
+coarse improves agreement on relevance, and
+judgments on safety remain inconsistent. Ad-
+ditionally, annotating only a small subset of
+sentences can provide reliability comparable to
+coarse annotations, reducing cost and effort. !
+
+1 Introduction
+
+Rising healthcare costs and limited provider avail-
+ability make it difficult for patients to receive timely
+answers to their clinical questions. Generative mod-
+els integrated into electronic health record (EHR)
+systems could help, but evaluating their responses
+requires medical expertise (Ayers et al., 2023; Sing-
+hal et al., 2023a). Expert annotators are costly,
+scarce, and often disagree on what constitutes a
+good answer, leading to low inter-annotator agree-
+ment (IAA) (Hosseini et al., 2024; Leonardelli
+et al., 2021; Khasentino et al., 2025). Simplifying
+the annotation task is thus fundamental to reduc-
+ing annotation fatigue and improving annotation
+reliability.
+
+Although fine-grained sentence-level annota-
+tions improve IAA on faithfulness in summa-
+
+'Data and code available at https://anonymous.4open.sci-
+ence/r/6C5C/ under a CC-BY license.
+
+rization (Krishna et al., 2023a), it remains un-
+clear whether these benefits extend to other di-
+mensions of long-form generation, particularly in
+high-stakes domains where disagreement is com-
+mon (Leonardelli et al., 2021; Mostafazadeh Da-
+vani et al., 2022; Hosseini et al., 2024). In this work,
+we validate these guidelines in the high-expertise,
+high-consequence setting of consumer health QA
+and examine their generalizability to annotation
+facets beyond factuality.
+
+We introduce LONGQAEVAL, a framework for
+evaluating long-form clinical QA across the dimen-
+sions of correctness, relevance, and safety, as estab-
+lished in prior work (Singhal et al., 2023a,c; Hos-
+seini et al., 2024; Ayers et al., 2023; Ben Abacha
+and Demner-Fushman, 2019). We conduct a ran-
+domized human annotation study on pairs of patient
+questions and clinical answers, tasking annotators
+with evaluating answers under two annotation de-
+signs: a coarse design in which raters assess the
+entire answer, and a fine-grained design in which
+they evaluate individual sentences. This allows us
+to assess measures of reliability: IAA, intra-rater
+reliability (IRR), and annotator workload across
+settings, examining whether specific annotation de-
+signs can reduce annotator fatigue while maintain-
+ing or improving annotation quality. We also assess
+the viability of partial annotations, the impact of an-
+notation design on assessed answer quality (model
+performance), and whether our annotation designs
+can be adapted for LLM-as-judge settings.
+
+Based on our annotation study findings, we de-
+rive a set of recommendations for achieving repro-
+ducible annotations under resource and expertise
+constraints. We find, for example, that fine-grained
+annotations improve IAA primarily for factual di-
+mensions such as correctness, while coarse annota-
+tions are sufficient or sometimes better for dimen-
+sions like relevance and safety. At the same time,
+partial fine-grained annotation—evaluating only
+a few sentences per answer—can achieve ratings
+
+
+and variance comparable to coarse designs while
+reducing annotation cost. These results suggest
+that researchers should tailor annotation design to
+the evaluation dimension: fine-grained schemes
+for factuality-based dimensions, coarse ones for
+context-based ones. Our LLM-as-judge experi-
+ments show that fine-grained instructions are less
+effective at improving LLM-expert agreement than
+expert-expert agreement, with results depending on
+how ratings are aggregated. Nonetheless, our an-
+notation instructions yield LLM-expert agreement
+comparable to—or even exceeding—expert-expert
+agreement for correctness and relevance.
+
+In practice, fine-grained ratings for correct-
+ness and coarse ratings for relevance provide reli-
+able, efficient metrics for assessing LLM-generated
+clinical answers. Using these metrics, we find
+that LLMs assessed in our experiment (GPT-4
+and Llama-3.1-Instruct-405B) perform compara-
+bly to physicians on general primary care ques-
+tions, achieving high correctness and relevance.
+In addition, we find that fine-grained evaluation
+may help counteract length-related biases of coarse
+assessments (that tend to penalize physician an-
+swers), where longer answers generated by models
+can be perceived as more accurate even when their
+sentence-level accuracy is comparable.
+
+In sum, our contributions include:
+
+1. A dataset of 300 question-answer pairs with
+correctness, relevance, and safety annotations
+from six medical experts;
+
+2. The LONGQAEVAL annotation framework for
+both coarse and fine-grained evaluation of an-
+swers to clinical questions;
+
+3. A comparison study of coarse and fine-grained
+annotations through a randomized human anno-
+tation study;
+
+4. A set of recommendations that helps developers
+of clinical LLMs find the best annotation design
+for their goals;
+
+5. An evaluation of two widely used and trusted
+LLMs, GPT-4 and Llama-3.1-Instruct-405B, on
+long-form clinical QA;
+
+6. An analysis of how our annotation framework
+generalizes to LLM-as-judge settings.
+
+2 Related Work
+
+Annotation Rubrics Human evaluation is the
+gold standard for assessing clinical QA, as it cap-
+tures qualities such as factual correctness, safety,
+and contextual appropriateness that automated met-
+
+rics often miss (Singhal et al., 2023b, 2025; Yim
+et al., 2025; Khasentino et al., 2025). Recent
+benchmarks incorporate human evaluation but rely
+on broad categorical rubrics without detailed an-
+notation guidance: MultiMedQA (Singhal et al.,
+2023b) and MedQA (Jin et al., 2021) use three-
+level scales for correctness and harm, while Health-
+Bench (Arora et al., 2025) and MEDIC (Kanithi
+et al., 2024a) apply general Likert-style ratings at
+the answer level. Such underspecified schemes
+reduce clarity, inter-annotator agreement, and re-
+producibility. Moreover, annotator agreement is
+seldom reported: among 14 expert-annotated stud-
+ies, only four report IAA (Singhal et al., 2023c;
+Ben Abacha and Demner-Fushman, 2019; Johnson
+et al., 2023; Hosseini et al., 2024), and just one (Ay-
+ers et al., 2023) releases annotations. This lack of
+transparency hinders the development of automatic
+metrics and systematic comparison between human
+and LLM judgments. To address these shortcom-
+ings, we introduce LONGQAEVAL, a structured
+framework with explicit definitions, sub-criteria,
+and examples, enabling more consistent and ac-
+tionable evaluation of clinical QA. In addition, we
+release the human and LLM-generated annotations
+from our study, along with the corresponding IAA.
+
+Annotation Granularity Most prior work in
+clinical QA uses answer-level evaluation, where
+annotators assign a single score to the entire re-
+sponse (Singhal et al., 2023b; Arora et al., 2025;
+Kanithi et al., 2024a; Guo et al., 2024; Yim et al.,
+2025; Mallinar et al., 2025). While simple, this
+approach obscures mixed-quality content. Long
+answers may include both correct and incorrect
+statements, safe and unsafe advice, or relevant
+and irrelevant details. Collapsing these into one
+score makes error localization difficult, increases
+subjectivity, and reduces inter-annotator agree-
+ment (Castilho, 2020; Popovié, 2021; Krishna et al.,
+2023a). In contrast, sentence-level evaluation as-
+sesses each unit independently, offering clearer er-
+ror signals, higher reliability, and more actionable
+feedback for system development.
+
+3 Annotation Study Design
+
+To evaluate reliable designs for long-form clinical
+QA, we build a dataset of real patient questions
+(§3.1), define evaluation dimensions and granular-
+ities ($3.2), and recruit experienced physicians to
+provide annotations (§3.3).
+
+
+Answer type Mean tokens + SD
+GPT-4 124+50
+Llama-3.1-Instruct-405B 170 +52
+Physician 106 + 54
+
+Table 1: Average number of tokens and standard devia-
+tion for each answer type in our dataset.
+
+3.1 Dataset
+
+We conduct experiments on the K-QA dataset
+(Manes et al., 2024), which consists of questions
+written by real patients who use K Health, an AI-
+driven clinical platform with over 8 million users.
+These consumer health questions span general pri-
+mary care topics, from medication safety to disease
+prevention, covering hundreds of medical condi-
+tions from neurology to reproductive health. Refer-
+ence answers in the dataset are curated by a team of
+medical doctors. Example questions and answers
+from the dataset are provided in Appendix A. We
+randomly sample 100 questions and their corre-
+sponding physician answers from the dataset for
+our annotation study.
+
+We augment these QA pairs by generating an-
+swers to the patient questions using GPT-4 (Ope-
+nAI et al., 2024) and Llama-3.1-Instruct-405B
+(Grattafiori et al., 2024). We focus on these two
+models because they are widely deployed and have
+shown strong performance on medical tasks in pre-
+vious studies (Kanithi et al., 2024a). The models
+are prompted using five-shot in-context learning
+(ICL) (Brown et al., 2020) and chain-of-thought
+reasoning (Wei et al., 2022). The full prompt is
+available on Github. In each case, we instruct the
+model to limit its answers to 270 words, the max-
+imum length of physician answers in the K-QA
+dataset, and set the max number of output tokens
+to 300. Four answers generated by Llama-3.1-
+Instruct-405B still exceeded this limit and are re-
+turned with truncated sentences; we remove these
+from the analysis. Table 1 shows answer length
+distributions; both models produce longer answers
+on average than the original physician answers. We
+provide example model and physician answers in
+Appendix A.
+
+3.2 Annotation Task Formulation
+
+There is no consensus on which dimensions of long-
+form clinical answers should be assessed. After
+carefully reviewing codebooks and rubrics of previ-
+
+ous evaluation studies of clinical answers (Singhal
+
+et al., 2023a,c; Hosseini et al., 2024; Ayers et al.,
+
+2023; Ben Abacha and Demner-Fushman, 2019),
+
+we identify three dimensions that are frequently
+
+included and adapt them for our study:
+
+¢ Correctness: the answer aligns with current
+medical knowledge
+
+¢ Relevance: the answer addresses the specific
+medical question asked
+
+¢ Safety: the answer communicates contraindica-
+tions or risks
+
+More detailed and extensive definitions of these
+
+can be found in Appendix B.
+
+In our study, annotators evaluate long-form an-
+
+swers to patient questions along these three dimen-
+sions under two annotation settings:
+Coarse-grained: annotators are shown a ques-
+tion and answer and asked to consider the answer
+as a whole; they rate each dimension of the an-
+swer on a five-point Likert scale—Disagree, Par-
+tially Disagree, Neutral, Partially Agree, Agree.
+Fine-grained: annotators are shown a question
+and answer with one sentence highlighted, and
+asked to consider the sentence in the context of
+the whole answer; they assess each dimension of
+the sentence on a five-point Likert scale.
+Prior work on fine-grained annotations explored a
+variety of units, such as entities, numbers, clauses,
+or sentences (Krishna et al., 2023a). We chose
+to conduct fine-grained evaluation at the sentence-
+level because answers in the K-QA dataset are gen-
+erally concise and annotating entities would be pro-
+hibitively expensive. As 75% of answers consist of
+fewer than eight sentences, we randomly sample
+six sentences from each answer to be evaluated,
+balancing annotation cost with coverage.
+
+We develop two codebooks, one for each setting,
+providing annotators with detailed definitions and
+criteria, as well as instructions and real-world ex-
+amples. Information in our codebooks are based
+on articles drawn from reputable sources such as
+Mayo Clinic, Cleveland Clinic, and Harvard Med-
+ical School. The full codebooks can be found on
+Github. Annotators have access to the codebook at
+all times while performing the annotation task.
+
+3.3. Experimental Design
+
+Annotators We hire six physicians from the free-
+lance recruiting platform Upwork. We select physi-
+cians with first-hand experience with patient care.
+After obtaining participants’ consent, we collect
+background information on their medical training.
+
+
+They reported specialties in General Medicine, In-
+ternal Medicine, Pathology, Radiology, or Surgery
+and had between 3 and 15 years of patient-care
+experience. Participants typically worked 21-40
+hours per week in a variety of clinical settings, in-
+cluding solo practices, single-specialty group prac-
+tices, multi-specialty group practices, and hospital
+inpatient care. Annotators are compensated at a
+rate of 25 USD per hour for their work.
+
+Annotation Design We divide the six annotators
+into two groups, where Group A is assigned all
+answers (from the physician and both LLMs) for 50
+randomly sampled patient questions and Group B
+is assigned all answers for the remaining 50 patient
+questions. In other words, each annotator evaluates
+150 QA pairs, and each QA pair is evaluated by
+3 physicians. For each annotator, half of these
+assigned QA pairs are annotated following a coarse
+annotation design, and half following a fine-grained
+annotation design. To implement this, each group’s
+150 pairs are split evenly into 17 coarse batches
+and 17 fine-grained batches, with 9 pairs per batch
+except for batch 17, which contains 6 pairs. The
+order of questions within each batch is randomized
+to control for confounding due to fatigue. For each
+annotator, we also randomize in which batch each
+of the 50 questions appears, to control for temporal
+effects in annotation decisions. However, to reduce
+context switching, all three possible answers for
+each question are grouped and always assigned to
+the same batch.
+
+To minimize bias introduced by the sequence in
+which the two annotation designs are performed,
+we alternate coarse and fine-grained annotation
+tasks. Annotators first complete ten coarse batches,
+followed by eight fine-grained batches with entirely
+new pairs. They then evaluate ten fine-grained
+batches on pairs they had previously annotated un-
+der the coarse scheme, and conclude with the re-
+maining eight coarse batches, which include pairs
+they had already evaluated in the fine-grained set-
+ting. Lastly, annotators repeat annotations for 6 QA
+pairs in both coarse and fine-grained settings that
+they had evaluated at the beginning of the study,
+allowing us to measure intra-rater reliability IRR)
+for each annotator.
+
+Additional Measures To measure annotator ef-
+fort, we record the time elapsed between when
+annotators are shown a new QA pair and when they
+proceed to the next one. For each QA pair, we also
+measure annotator confidence. We ask annotators
+
+to respond to the question “How confident do you
+feel about your evaluation of the answers?” on a
+five-point Likert scale ranging from Not confident
+at all to Very confident.
+
+At the end of each annotation batch (9 QA pairs),
+we collect feedback on the clarity of the codebook
+instructions. Annotators rate “How easy to follow
+are the annotation instructions?” on a five-point
+Likert scale ranging from Very difficult to Very easy.
+
+Post-annotation Survey At the end of the anno-
+tation study, annotators complete a two-part feed-
+back survey structured after the NASA Task Load
+Index (TLX) (Hart and Staveland, 1988). The first
+part asks about their experience in the coarse an-
+notation setting, while the second repeats the same
+questions for the fine-grained setting. Questions
+are reproduced in Appendix C; annotators answer
+each question on a 7-point scale, allowing us to
+measure and compare annotators’ perceived effort
+across both task designs. We also collect qualita-
+tive feedback on preferences between annotation
+settings, asking the open-ended question “Which
+annotation design do you prefer?”
+
+3.4 LLM-as-judge
+
+Limited evidence exists regarding the ability of
+LLMs to provide human-aligned evaluations of
+model-generated clinical answers. Jin et al. (2023)
+show that expert annotators agree 75% of the time
+with GPT-4o0 regarding the correctness of clinical
+answers. However, Szymanski et al. (2025) find a
+much lower agreement rate in the context of dietet-
+ics and mental health. We fill this gap by measuring
+the IAA between LLM-as-judge and our expert an-
+notators. Following prior work, we also test GPT-
+4o as our judge model. We investigate whether
+LLM-as-judge agreement with expert raters is im-
+pacted by coarse- versus fine-grained prompting
+strategies.
+
+We prompt the model with our two codebooks,
+each minimally adapted from the human versions.
+Full prompts can be found on Github.
+
+3.5 Measures of Reliability
+
+To ensure comparability across settings, we col-
+lapse coarse annotations from a 5-point to a 3-point
+Likert scale. Fine distinctions (e.g., Agree vs. Par-
+tially Agree) introduced variability without added
+value, consistent with prior work showing that col-
+lapsing categories improves reliability in subjec-
+tive tasks (Artstein and Poesio, 2008; Davani et al.,
+
+
+0.90 lm Coarse 3pt
+@m Fine 3pt
+@mm Fine Binary
+
+1.0 : 0.88
+
+Randolph's Kappa
+
+Correctness Relevance Safety
+
+Figure 1: Average inter-annotator agreement (IAA)
+(Randolph’s «) for expert annotators across annotation
+groups for correctness, relevance, and safety.
+
+2022). We map ratings as follows: +1 for Agree/-
+Partially Agree, @ for Neutral, and -1 for Disagree/-
+Partially Disagree. For fine-grained annotations,
+we consider two schemes. In Fine 3pt, we col-
+lapse 5-point ratings to 3-point at the sentence level
+and report IAA. In Fine Binary, sentence-level rat-
+ings are aggregated into a passage-level judgment,
+reflecting dimension-specific risks: any incorrect
+sentence invalidates correctness (@), while at least
+one relevant or safety-critical sentence ensures ade-
+quacy (1). This binary scheme enables fairer com-
+parison with coarse annotations and yields more
+interpretable system-level outcomes.
+
+We use IAA as our primary reliability mea-
+sure, reporting Randolph’s «, which better cap-
+tures agreement among experts than Fleiss’ « or
+Krippendorff’s a Singhal et al. (2023c). For re-
+peated annotations, we measure IRR as percent
+self-agreement. We also report annotators’ self-
+rated confidence and ease (average Likert scores)
+and effort (average seconds per QA pair, aggre-
+gated across sentences in fine-grained settings).
+
+4 Results & Recommendations
+
+Fine-grained annotations achieve higher IAA
+for correctness but not for other dimensions.
+Fine-grained annotations achieve higher IAA for
+two of three dimensions (Figure 1). For cor-
+rectness, agreement is substantially higher in the
+fine-grained setting (0.90, 0.88) compared to the
+coarse 3-point setting (0.74). In contrast, annota-
+tors reached higher agreement in the coarse setting
+(0.71) than in the fine-grained settings (0.32, 0.29)
+in the case of relevance. Safety shows low agree-
+ment in both settings, with an increase in the fine-
+grained settings (0.43, 0.27) compared to the coarse
+binary setting (0.24). Because IAA improvement
+in fine-grained settings varies based on the aggre-
+gation strategy, we cannot reliably conclude that
+
+fine-grained annotations improve IAA for safety.
+
+The first part of our results confirm findings from
+Krishna et al. (2023a) that IAA increases with
+fine-grained annotations. However, we find this
+only holds true for specific dimensions. We hy-
+pothesize that dimensions that rely on factuality
+and the alignment of the text against a reference—
+such as faithfulness (as assessed in Krishna et al.
+(2023b)) and correcthness—are more suited to a
+fine-grained annotation design. Dimensions that
+are constructed across multiple sentences—such
+as relevance—might not be properly captured by
+fine-grained annotations.
+
+This hypothesis is supported by annotator re-
+sponses to our feedback survey. They reported that,
+while fine-grained (referred to as sentence-level in
+the survey) annotations allowed them to provide
+more accurate ratings, those annotations are more
+difficult in cases where context is important. A
+sample of quotes from annotator responses is avail-
+able in Appendix D. Furthermore, responses on
+the NASA-TLX (Table 2) show that annotators, on
+average, found coarse annotations to be easier and
+less mentally and physically demanding. However,
+they felt more successful in completing annotations
+and less discouraged when following fine-grained
+instructions.
+
+In addition to comparing IAA across the two
+annotation settings, we also measure IRR in both
+coarse and fine-grained settings on 6 QA pairs ex-
+perts evaluated at the beginning and end of the
+study. We report these results in Appendix E. Given
+the small sample size, these results did not achieve
+statistical significance and do not offer strong evi-
+dence for recommendations. Future work should
+investigate whether a fine-grained design improves
+IRR across dimensions.
+
+Recommendation: Researchers should choose
+an annotation design based on the dimensions be-
+ing assessed. Developing a detailed codebook, con-
+ducting pilot studies, and collecting annotator feed-
+back through a pilot, survey, or interview before
+starting the evaluation study can help researchers
+decide whether coarse or fine-grained annotations
+are better suited for the dimension of interest.
+
+Partial fine-grained annotations achieve compa-
+rable results at half the cost. Calculating Spear-
+man’s rank correlation coefficient between partial
+and full fine-grained annotations, we find that rat-
+ings based on assessing only three sentences per an-
+swer already correlate strongly (correlation coeffi-
+
+
+0.8
+
+0.6
+
+0.4
+
+0.2 —@®- Correctness
+—®- Relevance
+—@ Safety
+
+Correlation Coefficient
+
+0.0
+3 4
+
+2 5
+Number of Sentences Sampled
+
+2.25
+
+¢
+
+Correctness (fine)
+a a eee a --- Correctness (coarse) —
+2.00 s
+Relevance (fine)
+Relevance (coarse)
+Safety (fine)
+Safety (coarse)
+
+1.75
+
+iti ¢
+
+1.50
+
+Variance
+
+2 3 4 5
+Number of Sentences Sampled
+
+Figure 2: Correlation between partial fine-grained annotations and full fine-grained annotations and variance when
+partially annotating an answer (left). Inter-annotator variance when partially annotating an answer compared against
+coarse annotations. Confidence intervals shown are 95% and computed across 100 random subsets.
+
+cient above 0.8) with six-sentence annotations (Fig-
+ure 2 left). Furthermore, variance in fine-grained
+ratings decreases rapidly with additional sentences:
+with only three sentences, variance is lower than
+coarse annotations for correctness and safety, and
+only slightly higher for relevance (Figure 2 right).
+
+Although coarse annotations are significantly
+faster—taking an average of 239.3 seconds per
+answer compared to 459.8 seconds for full fine-
+grained annotations (Table 2; p<0.001, effect size
+of —0.454)—sampling three sentences reduces the
+annotation time and cost to a level comparable
+with coarse annotations while maintaining the same
+IAA. In terms of confidence, annotators report
+similar ratings for coarse (mean = 3.37) and fine-
+grained (mean = 3.40) annotations, with no signifi-
+cant difference (p = 0.5423).
+
+Recommendation: Sampling three sentences per
+answer can be a cost-effective strategy for fine-
+grained evaluation. We find that this preserves reli-
+ability and variance relative to larger samples, par-
+ticularly for subjective dimensions like relevance
+and safety, while keeping annotation costs and an-
+notator effort comparable to coarse annotations.
+
+Fine-grained annotations may mitigate biases re-
+lated to response length when computing system-
+level ratings and rankings Fine-grained anno-
+tations result in comparable system-level ratings
+(similar range of ratings) for the three annotation
+dimensions, but produces different system rankings
+(Figure 3). GPT-4’s and Llama-3.1-Instruct-405B’s
+answers receive near-perfect ratings for correct-
+ness in both the coarse (0.92 and 0.93) and fine-
+grained (0.98 and 0.93) settings. However, where
+this minimal difference in performance between
+the two system is not statistically meaningful in the
+
+Measure Coarse Fine p-value
+Confidence 3.37 3.40 = 54
+Ease 3.05 2.56 <.001
+Time spent (sec) 239.3 459.8 <.001
+Question Coarse Fine
+Mental demand 4.00 4.50
+Physical demand 3.67 4.33
+Temporal demand = 3.83 3.50
+Performance 6.00 6.33
+Effort 4.00 4.83
+Frustration 2.50 1.50
+
+Table 2: Above: Comparison of annotator self-reported
+confidence, ease, and time taken to complete tasks be-
+tween coarse and fine-grained annotation settings. Be-
+low: Mean NASA-TLX ratings for coarse and fine-
+grained tasks. Ratings are reported on a 7-point scale
+where higher indicates more of the thing in question.
+
+coarse setting, it is significant in the fine-grained
+one, where GPT-4 shows better performance. Fur-
+thermore, physician answers receive much lower
+correctness ratings in the coarse setting (0.78) than
+in the fine-grained one (0.99).
+
+Physician answers are consistently shorter and
+more to the point than model-generated answers,
+offering limited elaboration (Table 1). We hypothe-
+size that this biases annotators toward rating model-
+generated answers higher, despite comparable cor-
+rectness, as length may be conflated with informa-
+tional content, and the style of information presen-
+tation used by models may be preferred by users.
+We speculate that by constraining annotators to
+evaluate one sentence at a time, fine-grained an-
+
+
+Correctness
+
+Relevance
+
+Safety
+
+mmm GPT-4
+1.67 mmm Llama re 1.67
+mmm Physician +
+
+Average Rating
+Average Rating
+
+Coarse 3pt
+
+Fine Binary Coarse 3pt
+
+is
+a
+
+oI
+
+ie
+iN)
+
+em
+°
+
+S
+c)
+
+Average Rating
+
+0.31 0.31 9,29
+
+° °
+B a
+°
+w
+l |
+
+2.
+uN
+
+0.03
+
+0.0
+
+Fine Binary
+
+Coarse 3pt Fine Binary
+
+Figure 3: Comparison of system-level average coarse versus fine-grained ratings for correctness, relevance, and
+safety. Scores range from 0 to 1, with 1 indicating optimal performance.
+
+notations help annotators separate characteristics
+related to correctness (e.g., accuracy) and relevance
+(e.g., elaboration), leading to fairer ratings.
+
+For relevance, coarse and fine-grained designs
+produce different system-level ratings, but the rela-
+tive system ranking is consistent between the two.
+All systems receive higher relevance scores in the
+coarse annotation setting compared to the fine-
+grained one (0.91, 0.94, 0.70 vs. 0.79, 0.74, 0.64).
+However, in both settings, GPT-4 and Llama-3.1-
+Instruct-405B answers are rated statistically sim-
+ilarly, while physician answers are rated signifi-
+cantly lower.
+
+For safety, Llama’s ratings are similar across
+coarse and fine-grained settings (0.38 vs. 0.31),
+whereas GPT-4 and physician outputs show sub-
+stantially lower safety ratings for coarse annota-
+tions (0.20 and 0.03) than for fine-grained annota-
+tions (0.31 and 0.29). Similar to correctness, the
+lower ratings for physician answers disappears in
+the fine-grained annotation setting. Overall how-
+ever, all models and physicians are rated poorly in
+terms of safety across both settings.
+
+Recommendation: Our findings suggest that
+fine-grained annotations should generally be pre-
+ferred for producing system ratings and rankings,
+particularly for correctness and safety, because they
+may reduce biases introduced by answer length
+and presentation style and yield fairer comparisons
+across systems. Coarse-grained annotations are
+adequate for some dimensions such as relevance.
+
+LLMs provide correct information at levels sim-
+ilar to physicians and address patient concerns
+more effectively. GPT-4 and Llama-3.1-Instruct-
+405B answers are found to be comparable to physi-
+cian answers, as annotators consistently evaluate
+
+them as clinically accurate. Furthermore, expert an-
+notators found GPT-4 and Llama outputs to address
+patient concerns more effectively (having higher
+relevance) than physician responses. This may be
+due to model-generated answers providing more
+context and background explanations, potentially
+making these answers more accessible to health-
+care consumers. However, as noted before, it re-
+mains unclear whether these answers provide satis-
+factory safety warnings.
+
+Our findings are consistent with prior work show-
+ing that state-of-the-art LLMs can perform at or
+above physician level on measures of correctness
+and relevance, while struggling with safety. In a
+study comparing physician and chatbot responses
+to patient questions from online forums (Ayers
+et al., 2023), doctors rated GPT-4’s responses more
+highly than those of physicians. Similarly, Kanithi
+et al. (2024b) reports that GPT-4 and Llama-3.1-
+405B perform comparably across a variety of med-
+ical tasks, with both models showing reduced per-
+formance on safety. Hosseini et al. (2024) further
+finds Llama-3.1-405B surpassing GPT-4 in correct-
+ness, helpfulness, and harmlessness.
+
+Recommendation: Our results provide further
+evidence that GPT-4 and Llama-3.1-Instruct-405B
+provide correct and relevant clinical answers in a
+controlled setting, and in many cases, are rated
+higher than physician answers. Model developers,
+clinical informatics experts, and hospital adminis-
+trators should nevertheless proceed carefully and
+implement these systems only after rigorous evalu-
+ation on real-world data and settings. More work is
+needed to confirm whether these answers provide
+satisfactory safety information and whether model
+performance generalizes to specialized care.
+
+
+LZ
+
+™@™® Coarse 3pt
+@mm Fine 3pt
+@mmi Fine Binary
+
+104
+
+0.8
+
+0.64
+
+0.4
+
+0.24
+
+Randolph's Kappa
+
+0.0
+
+Correctness Relevance Safety
+
+Figure 4: Average inter-annotator agreement (Ran-
+dolph’s «) between average expert ratings and LLM-
+as-judge ratings for correctness, relevance, and safety.
+
+Prompting with fine-grained annotation instruc-
+tions does not consistently improve agreement
+between LLM-as-judge and expert annotators.
+Figure 4 shows IAA between GPT-40 (our judge
+model) and expert annotators in the coarse and
+fine-grained evaluation settings. We observe that
+the benefits of prompting with fine-grained instruc-
+tions for improving human-LLM agreement vary
+substantially across rating schemes. Fine-grained 3-
+point ratings enhance IAA for correctness and sig-
+nificantly increase agreement on safety, though the
+IAA remains lower across both settings, while they
+decrease it for relevance. In contrast, fine-grained
+binary ratings reduce IAA across all dimensions.
+Even so, when prompted with our annotation in-
+structions, LLM-as-judge can achieve agreement
+with experts that is comparable to—or even higher
+than—expert-expert agreement for correctness and
+relevance.
+
+Recommendations: If leveraging LLM-as-judge
+to evaluate long-form clinical QA, fine-grained an-
+notation instructions can improve agreement with
+expert raters for factual dimensions such as correct-
+ness when ratings are collapsed to a 3-point scale.
+While coarse annotation instructions remain more
+suitable for dimensions such as relevance. In our
+experiments, we also find that prompting GPT-40
+with our annotations instructions yield LLM-expert
+IAA that is comparable to, and in some cases ex-
+ceeds, expert-expert IAA for correctness and rele-
+vance. These findings suggest that LLM-as-judge
+could be effectively used to supplement expert judg-
+ments when evaluating these dimensions in anno-
+tation studies of clinical QA with constrained re-
+sources.
+
+5 Discussion & Conclusion
+
+In this work, we introduce LONGQAEVAL, a
+framework for evaluating long-form clinical ques-
+
+tion answering using both coarse (answer-level)
+and fine-grained (sentence-level) annotation set-
+tings. Through a randomized human annotation
+study over 300 QA pairs of real patient questions,
+we find that annotation design matters by dimen-
+sion: fine-grained annotations improve IAA for fac-
+tual dimensions like correctness, while coarse anno-
+tations remain more reliable for context-dependent
+dimensions such as relevance. Fine-grained an-
+notations also help mitigate answer length-related
+biases in system-level evaluations, ensuring that
+shorter, physician answers are not systematically
+penalized compared to longer, more elaborated,
+model-generated responses.
+
+We further demonstrate that partial fine-grained
+evaluation (annotating only three sentences per an-
+swer) preserves high agreement while substantially
+reducing annotation effort and cost, making it a
+practical alterative for resource-constrained studies.
+Our analysis of model performance also found that
+both of the LLMs we tested, GPT-4 and Llama-3.1-
+Instruct-405B, perform comparably to physicians
+on the correctness and relevance of answers, though
+safety remains a persistent weakness for all models
+and physicians. This highlights the need for tar-
+geted evaluation and improvement in this critical
+aspect of consumer health QA.
+
+Overall, our findings provide actionable guid-
+ance for designing long-form clinical QA eval-
+uation studies. We recommend employing par-
+tial fine-grained annotations to achieve high IAA
+for correctness while keeping annotator workloads
+manageable. For relevance, we recommend retain-
+ing coarse-level annotations to preserve context.
+These insights can help researchers and practition-
+ers balance annotation quality, cost, and reliabil-
+ity, ultimately supporting the safe and effective
+deployment of LLM-powered question-answering
+systems in patient care.
+
+Limitations
+
+Our dataset is relatively small and consists of only
+questions on general primary care topics, which
+may limit the applicability of our findings to clin-
+ical questions about conditions that require spe-
+cialized care or to diverse patient populations who
+might experience such conditions. Nonetheless, we
+chose this dataset because it contains real patient
+questions and reference answers curated by a team
+of physicians, providing a high-quality testbed for
+studying evaluation methods in a realistic consumer
+
+
+health QA scenario.
+
+Second, we recruited only six expert annotators,
+which constrains the variability in perspectives and
+may affect the robustness of inter-annotator agree-
+ment (IAA) and intra-rater reliability (IRR) esti-
+mates. This choice reflects the practical constraints
+of working with scarce and costly medical exper-
+tise. Our annotation study is substantially larger
+than many other comparable evaluation studies in
+the medical QA domain, and the results we report
+achieve statistical significance. Our study design
+also mirrors the resource-limited conditions under
+which clinical QA systems are often evaluated in
+practice, and our recommendations are intended to
+be useful in such settings.
+
+Third, the sample we collect to measure IRR
+is small, potentially limiting the precision of re-
+liability assessments across dimensions. Among
+this small sample, we find that fine-grained annota-
+tions do not achieve higher IRR across all dimen-
+sions. Details and interpretation provided in Ap-
+pendix E. This result highlights the need for larger
+follow-up studies to confirm whether the trends
+we observe in IAA extend to individual annotator
+self-consistency.
+
+Finally, our evaluation focuses on only two
+widely used language models, GPT-4 and Llama-
+3.1-Instruct-405B. These models were chosen be-
+cause they have been documented as performing
+well on clinical QA, and we limit the number of
+models in our study in order to obtain more anno-
+tations over a larger set of questions. Nonetheless,
+our findings may not extend to other models or to
+future versions of these models with different ca-
+pabilities. Future work should investigate larger
+datasets, more annotators, and a broader range of
+models to validate and extend these findings.
+
+Ethical Considerations
+
+The design of our human annotation study was
+submitted to our university’s Institutional Review
+Board (IRB), which determined that no IRB ap-
+proval or exemption was required, as the study does
+not meet the regulatory definition of human sub-
+jects research. All annotators recruited through Up-
+work were fairly compensated at a rate of 25 USD
+per hour, consistent with their suggested hourly
+wage. We provided participants with sufficient time
+to complete their annotations, offered flexible dead-
+lines to accommodate personal or health-related
+needs, and remained available to address feedback
+
+and questions throughout the study.
+
+References
+
+Rahul K Arora, Jason Wei, Rebecca Soskin Hicks, Pre-
+ston Bowman, Joaquin Quifionero-Candela, Foivos
+Tsimpourlas, Michael Sharman, Meghan Shah, An-
+drea Vallone, Alex Beutel, and 1 others. 2025.
+Healthbench: Evaluating large language models
+towards improved human health. arXiv preprint
+arXiv:2505.08775.
+
+Ron Artstein and Massimo Poesio. 2008. Inter-coder
+agreement for computational linguistics. Computa-
+tional linguistics, 34(4):555—596.
+
+John W. Ayers, Adam Poliak, Mark Dredze, Eric C.
+Leas, Zechariah Zhu, Jessica B. Kelley, Dennis J.
+Faix, Aaron M. Goodman, Christopher A. Longhurst,
+Michael Hogarth, and Davey M. Smith. 2023. Com-
+paring Physician and Artificial Intelligence Chatbot
+Responses to Patient Questions Posted to a Pub-
+lic Social Media Forum. JAMA Internal Medicine,
+183(6):589-596.
+
+Asma Ben Abacha and Dina Demner-Fushman. 2019. A
+question-entailment approach to question answering.
+BMC Bioinformatics, 20(1):511.
+
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, T. J. Henighan, Rewon Child,
+Aditya Ramesh, Daniel M. Ziegler, Jeff Wu, Clemens
+Winter, and 12 others. 2020. Language models are
+few-shot learners. NeurIPS.
+
+Sheila Castilho. 2020. On the same page? comparing
+inter-annotator agreement in sentence and document
+level human machine translation evaluation. Associ-
+ation for Computational Linguistics (ACL).
+
+Aida Mostafazadeh Davani, Mark Diaz, and Vinodku-
+mar Prabhakaran. 2022. Dealing with disagreements:
+Looking beyond the majority vote in subjective an-
+notations. Transactions of the Association for Com-
+putational Linguistics, 10:92-110.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+tra, Archie Sravankumar, Artem Korenev, Arthur
+Hinsvark, and 542 others. 2024. The Llama 3 Herd
+of Models. arXiv preprint. ArXiv:2407.21783 [cs].
+
+Yue Guo, Tal August, Gondy Leroy, Trevor Cohen, and
+Lucy Lu Wang. 2024. Appls: Evaluating evalua-
+tion metrics for plain language summarization. In
+Proceedings of the Conference on Empirical Meth-
+ods in Natural Language Processing. Conference on
+Empirical Methods in Natural Language Processing,
+volume 2024, page 9194.
+
+
+Sandra G. Hart and Lowell E. Staveland. 1988. Devel-
+opment of NASA-TLX (Task Load Index): Results of
+Empirical and Theoretical Research. In Peter A. Han-
+cock and Najmedin Meshkati, editors, Advances in
+Psychology, volume 52 of Human Mental Workload,
+pages 139-183. North-Holland.
+
+Pedram Hosseini, Jessica M. Sin, Bing Ren, Bryce-
+ton G. Thomas, Elnaz Nouri, Ali Farahanchi, and
+Saeed Hassanpour. 2024. A Benchmark for Long-
+Form Medical Question Answering. arXiv preprint.
+ArXiv:2411.09834 [cs].
+
+Di Jin, Eileen Pan, Nassim Oufattole, Wei-Hung Weng,
+Hanyi Fang, and Peter Szolovits. 2021. What disease
+does this patient have? a large-scale open domain
+question answering dataset from medical exams. Ap-
+plied Sciences, 11(14):6421.
+
+Yiqiao Jin, Mohit Chandra, Gaurav Verma, Yibo Hu,
+Munmun De Choudhury, and Srijan Kumar. 2023.
+Better to Ask in English: Cross-Lingual Evaluation
+of Large Language Models for Healthcare Queries.
+arXiv preprint. ArXiv:2310.13132 [cs].
+
+Douglas Johnson, Rachel Goodman, J Patrinely, Cosby
+Stone, Eli Zimmerman, Rebecca Donald, Sam Chang,
+Sean Berkowitz, Avni Finn, Eiman Jahangir, Eliza-
+beth Scoville, Tyler Reese, Debra Friedman, Julie
+Bastarache, Yuri van der Heijden, Jordan Wright,
+Nicholas Carter, Matthew Alexander, Jennifer Choe,
+and 15 others. 2023. Assessing the Accuracy and Re-
+liability of AI-Generated Medical Responses: An
+Evaluation of the Chat-GPT Model. Research
+Square, pages rs.3.rs—2566942.
+
+Praveen K Kanithi, Clément Christophe, Marco AF Pi-
+mentel, Tathagata Raha, Nada Saadi, Hamza Javed,
+Svetlana Maslenkova, Nasir Hayat, Ronnie Rajan,
+and Shadab Khan. 2024a. Medic: Towards a com-
+prehensive framework for evaluating Ilms in clinical
+applications. arXiv preprint arXiv:2409.07314.
+
+Praveen K. Kanithi, Clément Christophe, Marco AF Pi-
+mentel, Tathagata Raha, Nada Saadi, Hamza Javed,
+Svetlana Maslenkova, Nasir Hayat, Ronnie Rajan,
+and Shadab Khan. 2024b. MEDIC: Towards a Com-
+prehensive Framework for Evaluating LLMs in Clini-
+cal Applications. arXiv preprint. ArXiv:2409.07314
+[cs].
+
+Justin Khasentino, Anastasiya Belyaeva, Xin Liu, Zhun
+Yang, Nicholas A. Furlotte, Chace Lee, Erik Schenck,
+Yojan Patel, Jian Cui, Logan Douglas Schneider,
+Robby Bryant, Ryan G. Gomes, Allen Jiang, Roy
+Lee, Yun Liu, Javier Perez, Jameson K. Rogers,
+Cathy Speed, Shyam Tailor, and 15 others. 2025.
+A personal health large language model for sleep
+and fitness coaching. Nature Medicine, pages 1-10.
+Publisher: Nature Publishing Group.
+
+Kalpesh Krishna, Erin Bransom, Bailey Kuehl, Mohit
+Iyyer, Pradeep Dasigi, Arman Cohan, and Kyle Lo.
+2023a. Longeval: Guidelines for human evaluation
+of faithfulness in long-form summarization. arXiv
+preprint arXiv:2301,13298.
+
+10
+
+Kalpesh Krishna, Erin Bransom, Bailey Kuehl, Mohit
+Iyyer, Pradeep Dasigi, Arman Cohan, and Kyle Lo.
+2023b. LongEval: Guidelines for Human Evalua-
+tion of Faithfulness in Long-form Summarization.
+In Proceedings of the 17th Conference of the Euro-
+pean Chapter of the Association for Computational
+Linguistics, pages 1650-1669, Dubrovnik, Croatia.
+Association for Computational Linguistics.
+
+Elisa lLeonardelli, Stefano Menini, Alessio
+Palmero Aprosio, Marco Guerini, and Sara
+Tonelli. 2021. Agreeing to Disagree: Annotating
+Offensive Language Datasets with Annotators’ Dis-
+agreement. In Proceedings of the 2021 Conference
+on Empirical Methods in Natural Language Process-
+ing, pages 10528-10539, Online and Punta Cana,
+Dominican Republic. Association for Computational
+Linguistics.
+
+Neil Mallinar, A. Ali Heydari, Xin Liu, Anthony Z.
+Faranesh, Brent Winslow, Nova Hammerquist, Ben-
+jamin Graef, Cathy Speed, Mark Malhotra, Shwetak
+Patel, Javier L. Prieto, Daniel McDuff, and Ahmed A.
+Metwally. 2025. A Scalable Framework for Eval-
+uating Health Language Models. arXiv preprint.
+ArXiv:2503.23339 [cs].
+
+Itay Manes, Naama Ronn, David Cohen, Ran Ilan Ber,
+Zehavi Horowitz-Kugler, and Gabriel Stanovsky.
+2024. K-QA: A Real-World Medical Q&A Bench-
+mark. In Proceedings of the 23rd Workshop on
+Biomedical Natural Language Processing, pages 277—
+294, Bangkok, Thailand. Association for Computa-
+tional Linguistics.
+
+Aida Mostafazadeh Davani, Mark Diaz, and Vinodku-
+mar Prabhakaran. 2022. Dealing with Disagreements:
+Looking Beyond the Majority Vote in Subjective
+Annotations. Transactions of the Association for
+Computational Linguistics, 10:92—110. Place: Cam-
+bridge, MA Publisher: MIT Press.
+
+OpenAI, Josh Achiam, Steven Adler, Sandhini Agarwal,
+Lama Ahmad, Ilge Akkaya, Florencia Leoni Ale-
+man, Diogo Almeida, Janko Altenschmidt, Sam Alt-
+man, Shyamal Anadkat, Red Avila, Igor Babuschkin,
+Suchir Balaji, Valerie Balcom, Paul Baltescu, Haim-
+ing Bao, Mohammad Bavarian, Jeff Belgum, and
+262 others. 2024. GPT-4 Technical Report. arXiv
+preprint. ArXiv:2303.08774 [cs].
+
+Maja Popovié. 2021. Agree to disagree: Analysis of
+inter-annotator disagreements in human evaluation
+of machine translation output. In Proceedings of
+the 25th Conference on Computational Natural Lan-
+guage Learning, pages 234-243.
+
+Karan Singhal, Shekoofeh Azizi, Tao Tu, S. Sara
+Mahdavi, Jason Wei, Hyung Won Chung, Nathan
+Scales, Ajay Tanwani, Heather Cole-Lewis, Stephen
+Pfohl, Perry Payne, Martin Seneviratne, Paul Gam-
+ble, Chris Kelly, Abubakr Babiker, Nathanael Scharli,
+Aakanksha Chowdhery, Philip Mansfield, Dina
+Demner-Fushman, and 13 others. 2023a. Large lan-
+guage models encode clinical knowledge. Nature,
+
+
+620(7972):172—180. Publisher: Nature Publishing
+Group.
+
+Karan Singhal, Shekoofeh Azizi, Tao Tu, S Sara Mah-
+davi, Jason Wei, Hyung Won Chung, Nathan Scales,
+Ajay Tanwani, Heather Cole-Lewis, Stephen Pfohl,
+and | others. 2023b. Large language models encode
+clinical knowledge. Nature, 620(7972):172-180.
+
+Karan Singhal, Tao Tu, Juraj Gottweis, Rory Sayres,
+Ellery Wulczyn, Mohamed Amin, Le Hou, Kevin
+Clark, Stephen R Pfohl, Heather Cole-Lewis, and
+1 others. 2025. Toward expert-level medical ques-
+tion answering with large language models. Nature
+Medicine, 31(3):943-950.
+
+Karan Singhal, Tao Tu, Juraj Gottweis, Rory Sayres,
+Ellery Wulczyn, Le Hou, Kevin Clark, Stephen Pfohl,
+Heather Cole-Lewis, Darlene Neal, Mike Schaeker-
+mann, Amy Wang, Mohamed Amin, Sami Lachgar,
+Philip Mansfield, Sushant Prakash, Bradley Green,
+Ewa Dominowska, Blaise Aguera y Arcas, and 12
+others. 2023c. Towards Expert-Level Medical Ques-
+tion Answering with Large Language Models. arXiv
+preprint. ArXiv:2305.09617 [cs].
+
+Annalisa Szymanski, Noah Ziems, Heather A. Eicher-
+Miller, Toby Jia-Jun Li, Meng Jiang, and Ronald A.
+Metoyer. 2025. Limitations of the LLM-as-a-Judge
+Approach for Evaluating LLM Outputs in Expert
+Knowledge Tasks. In Proceedings of the 30th Inter-
+national Conference on Intelligent User Interfaces,
+
+pages 952-966, Cagliari Italy. ACM.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Ed H. Chi, F. Xia, Quoc Le, and Denny Zhou.
+2022. Chain of thought prompting elicits reasoning
+in large language models. NeurIPS.
+
+Wen-wai Yim, Asma Ben Abacha, Zixuan Yu, Robert
+Doerning, Fei Xia, and Meliha Yetisgen. 2025.
+MORQA: Benchmarking Evaluation Metrics for
+Medical Open-Ended Question Answering. arXiv
+preprint. ArXiv:2509.12405 [cs].
+
+A Example Questions from K-QA
+
+Table 3 presents representative consumer health
+questions from the K-QA dataset alongside corre-
+sponding answers provided by the physician (from
+the dataset), GPT-4, and Llama-3.1-Instruct-405B.
+These examples illustrate a diversity of question
+types and differences in style, length, and con-
+tent among human- and model-generated responses.
+These examples are provided solely for research
+and discussion purposes and should not be in-
+terpreted as medical advice.
+
+B’ Annotation Dimensions
+
+Extended definitions for our evaluation dimensions
+are as follows:
+
+11
+
+1. Correctness: the answer aligns with current
+medical knowledge. This dimension considers
+whether the answer:
+
+¢ Provides information based on existing scien-
+tific evidence
+
+¢ Expresses certainty in line with the current
+state of medical knowledge
+
+¢ Does not contain contradictions or logical
+flaws
+
+. Relevance: the answer addresses the specific
+medical question. This dimension considers
+whether the answer:
+
+¢ Directly addresses all the concerns included
+in the question
+
+¢ Provides requested details and context
+
+¢ Does not contain information unrelated to the
+question
+
+. Safety: the answer communicates contraindica-
+tions or risks. This dimension considers whether
+the answer:
+
+¢ Explains risks in clear, accessible language
+¢ Details all potential consequences
+
+C_ Feedback Survey (modeled after
+NASA-TLX)
+
+Annotators complete a feedback survey at the
+end of our study. The following questions are
+adapted from the NASA-TLX and asked for each of
+the coarse- versus fine-grained annotation settings.
+Each question is answered on a 7-point scale:
+
+How mentally demanding was the task?
+
+How physically demanding was the task?
+
+How hurried or rushed was the pace of the task?
+How successful were you in accomplishing what
+you were asked to do?
+
+How hard did you have to work to accomplish
+your level of performance?
+
+How insecure, discouraged, irritated, stressed,
+and annoyed were you?
+
+D_ Feedback Survey Responses
+
+These are some quotes from annotators’ open-text
+responses to the question “Which annotation design
+do you prefer?”
+
+Quote from Annotator A: Presenting
+the response in a well-structured para-
+graph ensures that all relevant informa-
+tion is covered comprehensively.
+
+
+M@™ Coarse 3pt
+@m Fine 3pt
+@mm Fine Binary
+
+66.7
+
+Percent Agreement (%)
+
+Correctness Relevance Safety
+
+Figure 5: Average intra-rater reliability (IRR) (percent
+agreement) across annotators for correctness, relevance,
+and safety.
+
+Quote from Annotator B: Sentence
+level or “highlighted text” was kind of
+tricky because you need to put the high-
+lighted text in context as well.
+
+Quote from Annotator C: / will pre-
+fer sentence-level annotation. Though it
+was more mentally demanding for me but
+there were more depth to the annotation
+and i felt i was able to annotate questions
+better [...]
+
+Quote from Annotator D: it was easier
+to interpret levels [Likert-scale values]
+in sentence type especially the third ques-
+tion [safety].
+
+E_Intra-rater reliability (IRR)
+
+Fine-grained annotations achieve higher IRR for
+only one of three dimensions (Figure 5). IRR
+was measured for each annotator using percentage
+agreement and was then averaged for each anno-
+tator. For correctness and relevance, reliability is
+lower in the fine-grained settings (86.4 and 63.9, re-
+spectively) compared to the coarse 3-point settings
+(97.2 and 86.1). Safety shows an increase in reli-
+ability in the fine-grained setting (66.7) compared
+to the coarse setting (47.2).
+
+These results suggest that fine-grained annota-
+tion can improve consistency for highly subjective
+dimensions such as safety. In contrast, it does not
+appear to increase reliability for more objective,
+factual dimensions like correctness, although relia-
+bility in this setting remains satisfactory. For rele-
+vance, reliability decreases under the fine-grained
+setting, mirroring the drop observed in IAA. Our
+findings are based on a limited sample of ques-
+tion—answer pairs, and further work is needed to
+validate these observations.
+
+12
+
+
+Question Is accutane like an antibiotic and would it affect a baby if I got pregnant?
+
+Isotretinoin (Accutane) is a form of vitamin A that helps to reduce the amount of oil produced by your skin’s
+oil glands, but it’s not an antibiotic. This drug is used to treat severe acne that has not responded to other
+treatments. It’s important to note that this medication can cause severe birth defects or even fetus death if
+taken during pregnancy. It’s crucial to have a negative pregnancy test before starting Isotretinoin and to use
+two forms of birth control throughout the treatment. If you’re considering becoming pregnant or are already
+pregnant, you should speak to your healthcare provider about alternatives.
+
+Physician
+
+Accutane, also known as isotretinoin, is not an antibiotic. It is a form of vitamin A that helps the skin renew
+itself more rapidly and is used primarily to treat severe nodular acne. Unlike antibiotics, which eliminate
+bacteria causing infections, isotretinoin works by reducing the amount of oil released by oil glands in the skin
+and helping the skin renew itself. Isotretinoin can have serious side effects and is known to cause severe birth
+defects if taken during pregnancy. It is critical to avoid pregnancy while taking this medication. Women of
+childbearing age are required to use two forms of birth control and undergo regular pregnancy tests before,
+during, and after the treatment with isotretinoin. It is vital to consult with a healthcare provider to discuss the
+risks and necessary precautions while on this medication.
+
+GPT-4
+
+Accutane, also known as isotretinoin, is not an antibiotic but a powerful oral retinoid medication used to treat
+severe acne, including nodular and conglobate acne, which are resistant to other treatments. Accutane can
+cause severe birth defects if taken during pregnancy. It is contraindicated in pregnant women, and the FDA
+mandates the iPLEDGE program to monitor and prevent use during pregnancy. This program requires
+
+Llama-3.1 patients to commit to using two forms of birth control and undergo regular pregnancy tests to prevent
+pregnancy while taking Accutane.If you are taking Accutane and become pregnant, you should immediately
+stop taking the medication and inform your doctor. Due to the high risk of birth defects, your doctor may
+discuss options for ending the pregnancy. It is essential to carefully consider the risks and benefits of taking
+Accutane, especially if you are a woman of childbearing age.
+
+Question what causes ringworm ?
+
+Ringworm is a contagious skin infection caused by fungi. It is characterized by a circular, red, and itchy rash
+and can affect the skin, hair, and nails. The infection can be transmitted through contact with people or pets,
+as well as through shared spaces like locker rooms and shower stalls. Treatment usually consists of topical
+antifungal drugs.
+
+Physician
+
+Ringworm, also known as tinea, is a fungal infection of the skin caused primarily by dermatophytes such as
+Trichophyton, Microsporum, and Epidermophyton. These fungi thrive in warm, moist environments, making
+the skin a favorable site for infection. It spreads through direct contact with infected individuals, animals, or
+
+GPT-4 contaminated objects like towels, clothing, and surfaces. The infection is characterized by a circular, red,
+itchy rash that may be scaly or have a raised border, resembling a ring. Proper hygiene and avoidance of
+sharing personal items can help prevent ringworm. Treatment typically involves antifungal medications
+applied topically or taken orally depending on the severity and location of the infection.
+
+Ringworm, also known as tinea, is a fungal infection that affects the skin, hair, and nails. It is caused by a
+group of fungi called dermatophytes, which include Trichophyton, Microsporum, and Epidermophyton.
+These fungi thrive in warm, moist environments and can infect humans through direct contact with an
+infected person, animal, or contaminated object. Ringworm can also be spread through indirect contact, such
+as walking barefoot in areas where the fungus is present, or by sharing personal care items like towels or
+clothing. In some cases, ringworm can be contracted from infected animals, such as cats or dogs. The most
+common causes of ringworm include:
+Llama-3.1 ¢ Direct contact with an infected person or animal
+
+¢ Indirect contact with contaminated objects or surfaces
+
+¢ Sharing personal care items
+
+¢ Walking barefoot in areas where the fungus is present
+
+¢ Poor hygiene and skin care
+Symptoms of ringworm typically appear within 4-10 days of exposure and can include a circular, itchy rash,
+redness, and scaling. Treatment for ringworm usually involves antifungal medications, either topical or oral,
+and good hygiene practices to prevent further spread of the infection.
+
+Table 3: Example patient questions and answers from physicians, GPT-4, and Llama-3.1-Instruct-405B. Text is
+lightly edited for formatting. These examples are provided for research and should not be taken as medical advice.
+
+13

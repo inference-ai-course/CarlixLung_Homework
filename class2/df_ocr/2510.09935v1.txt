@@ -1,0 +1,1337 @@
+2510.09935v1 [cs.CL] 11 Oct 2025
+
+arXiv
+
+Unpacking Hateful Memes:
+Presupposed Context and False Claims
+
+Weibin Cai
+Syracuse University
+Syracuse, NY, USA
+weibin44 @data.syr.edu
+
+Abstract
+
+While memes are often humorous, they are frequently used to dis-
+seminate hate, causing serious harm to individuals and society.
+Current approaches to hateful meme detection mainly rely on pre-
+trained language models. However, less focus has been dedicated to
+what make a meme hateful. Drawing on insights from philosophy
+and psychology, we argue that hateful memes are characterized by
+two essential features: a presupposed context and the expression
+of false claims. To capture presupposed context, we develop PCM
+for modeling contextual information across modalities. To detect
+false claims, we introduce the FACT module, which integrates ex-
+ternal knowledge and harnesses cross-modal reference graphs. By
+combining PCM and FACT, we introduce SHIELD, a hateful meme
+detection framework designed to capture the fundamental nature
+of hate. Extensive experiments show that SHIELD outperforms
+state-of-the-art methods across datasets and metrics, while demon-
+strating versatility on other tasks, such as fake news detection.
+
+Disclaimer: This paper contains discriminatory content that may be
+disturbing to some readers.
+
+CCS Concepts
+- Computing methodologies — Artificial intelligence.
+
+Keywords
+Hateful Meme Detection, Presupposed Context, False Claims, LLMs
+
+ACM Reference Format:
+
+Weibin Cai, Jiayu Li, and Reza Zafarani. 2018. Unpacking Hateful Memes:
+Presupposed Context and False Claims. In Proceedings of Make sure to en-
+ter the correct conference title from your rights confirmation email (Confer-
+ence acronym ’XX). ACM, New York, NY, USA, 11 pages. https://doi.org/
+XXXXXXX.XXXXXXX
+
+1 Introduction
+
+Meme, a term introduced by Richard Dawkins in 1976 from the
+Greek mimeme (“imitation”), refers to units of cultural information,
+such as ideas and behaviors. With the rise of the internet, “meme”
+
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+
+Conference acronym ‘XX, Woodstock, NY
+
+© 2018 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+ACM ISBN 978-1-4503-XXXX-X/2018/06
+
+https://doi.org/XXXXXXX.XXXXXXX
+
+Jiayu Li
+Syracuse University
+Syracuse, NY, USA
+jli221@data.syr.edu
+
+Reza Zafarani
+Syracuse University
+Syracuse, NY, USA
+reza@data.syr.edu
+
+leer in
+. em young
+Yee
+
+Figure 1: An example of a hateful meme. Meme text: good guy police
+officer, capturing them young.
+
+now often refers to humorous or satirical image-text combinations
+that convey individual ideologies and rapidly evolve online.
+
+However, in some cases, the rapid spread of memes has been
+exploited to disseminate hate, reinforcing societal biases and threat-
+ening social harmony [44]. At the individual level, exposure to
+hate speech has been shown to harm mental health [7, 45, 49, 56].
+At the societal level, hate speech can deepen social divisions [5],
+and studies have shown its association with real-world criminal
+behavior [2, 29, 37]. To mitigate these risks, internet companies are
+legally required to comply with national regulations [1, 3, 4, 6, 8];
+for instance, France mandates the removal of hateful content within
+24 hours or imposes fines of up to €1.25 million [1]. Figure 1 shows
+an example of a hateful meme, implicitly reflecting the stereotype
+that Black people are inherently more violent and criminal, and the
+resulting hate toward the Black community.
+
+To combat the spread of hateful memes, Facebook launched
+Hateful Meme Challenge’ to promote research on hateful meme
+classification. Most existing methods rely on pretrained models,
+especially pretrained language models [13, 15, 28, 43, 66]. These
+methods leverage the unique reasoning capabilities of different
+models, and optimize hateful meme classification task according
+to each model’s design principles. For instance, PromptHate [16]
+employs image-to-text techniques [30, 42] to convert the visual part
+of memes into captions. This transforms the multimodal task into
+a pure text classification, enabling the use of pretrained language
+models [36]. Since Large Language Models (LLMs) tend to interpret
+hateful memes as non-hateful, ExplainHM [32] addresses this lim-
+itation by generating multi-perspective explanations to improve
+detection. These methods adapt the detection task to pretrained
+
+‘https://ai.meta.com/blog/hateful-memes-challenge-and-data-set/
+
+
+Conference acronym ’XX, June 03-05, 2018, Woodstock, NY Weibin Cai, Jiayu Li, and Reza Zafarani
+
+baked potatoes
+
+= p
+
+Ui" ot "
+
+(a) Presupposed context + false claims
+
+for everyone
+
+(c) Only false claim
+
+(b) Only presupposed context
+
+Figure 2: Examples illustrating how memes express hate through presupposed context and false claims. Text in Figure 2a and 2b: “good guy
+police officer, capturing them young.” Blue boxes mark elements reflecting the presupposed context; green boxes mark entities portrayed as
+“good”, while red boxes denote those portrayed as “bad”; yellow boxes indicate referential links between text and image. In Figure 2a and
+Figure 2b, “capturing” reflects a presupposed evaluative context where the white police officer is framed as the “good guy”, while “them young”
+refers to Black kid as the bad group. Figure 2a also contains false claims: (1) Incorrectness—“capturing” contradicts the friendly handshake in
+the image; (2) Deliberately misleading—it perpetuates the stereotype that Black kids are inherently criminal. These elements make the meme
+hateful. In contrast, Figure 2b lacks explicit false claims; the presupposed context alone is insufficient to classify it as hateful. Figure 2c, though
+
+containing a false claim, i.e., “baked potatoes” for a volcanic eruption, lacks a presupposed context and is better seen as dark humor.
+
+models’ characteristics, achieving strong performance. Despite in-
+creasing attention, few studies have explored the fundamental na-
+ture of hateful memes—that is, what renders a meme hateful from a
+psychological and philosophical perspectives?
+
+In contrast to prior approaches, our goal is to uncover the essence
+of hateful memes through the lens of how hate is expressed, and
+to design a model informed by these insights. Viewed from this
+perspective, hateful meme classification faces three key challenges:
+© Variation in hate intensity and rhetorical forms (e.g., dehuman-
+izing or an ethnic slur); @ Limited textual context and intricate
+interaction between text and image; @) The need for cultural and
+historical knowledge to recognize hate. To address the above chal-
+lenges, we ground our modeling in philosophical and psychological
+theories of hate and hate speech. For @, we draw on Marques’
+interpretation of hate speech [38], which posits that all forms of
+hate share a presupposed evaluative context, i.e., assumptions
+about who is considered good or bad. For @ and ©), we refer to
+Vendrell, who argues that malicious and ideological hate often relies
+on vague or false reasoning [55]. Accordingly, we identify false
+claims as a means of expressing hate, manifested in two ways: (i)
+Incorrectness: The text misrepresent the image, creating a mismatch
+detectable through referential links between textual tokens and
+visual patches; (ii) Deliberately misleading: Embedding stereotypes
+within text-image interactions to induce biased beliefs, recognition
+of which requires broader societal knowledge.
+
+To better understand these concepts, consider Figure 2a as an
+example: (1) The presupposed context is often conveyed through
+verbs, adjectives or actions depicted in the image. For example, the
+words “capturing” and “good” reflect an implicit value judgment:
+the white police officer is framed as the “good”, while “them’—the
+individuals being captured—are implicitly “bad”. Furthermore, the
+contrast between “capturing” and the friendly atmosphere in the
+image suggests irony as a means of expressing hate. (2) Multiple
+referential links exist between the text and the image. The three
+colored boxes correspond to three types of referential mappings:
+the red box links “them young” and the Black child, the green box
+connects the “good guy police officer” to the white officer, and
+
+the blue box links “capturing” to the friendly handshake. The mis-
+match between “capturing” and the amicable interaction reveals the
+incorrectness inherent in the false claim. However, while the pre-
+supposed context and the referential links suggest an oppositional
+relationship between the Black child and the white police officer,
+this alone is insufficient to determine that the meme is hateful. We
+also need (3) an understanding of the potential stereotypes under-
+lying this relationship. Referring to the Black community as “them”
+deliberately conveys the impression that the entire group is inher-
+ently violent or criminal. When combined with societal tension
+between Black individuals and White police officers, these elements
+render the meme interpretable as hateful. Such societal knowledge
+is critical: if the Black child were replaced with a white child, or the
+white officer with a Black officer, the oppositional structure might
+still remain, but its connotation would be unclear, and the perceived
+level of hate would likely be reduced. It is important to note that
+the presence of either a presupposed context or false claims alone does
+not suffice to indicate a hateful meme. When only a presupposed
+context exists without a false claim, the meme may simply express
+a legitimate viewpoint—for example, Figure 2b suggests that police
+action against young offenders is justified. Conversely, when false
+claims appear without a presupposed context, the meme often re-
+sembles dark humor or fake news, as in Figure 2c, which describes
+a volcanic eruption as handing out “baked potatoes”
+
+Present work. We unpack the problem from the perspective of how
+hate is expressed. We propose that hate in memes is often conveyed
+through presupposed context and false claims, and we design
+corresponding modules to model these two aspects: (1) Presup-
+posed Context Module (PCM) encodes intra-modal context and
+fuses cross-modal contextual information to determine whether a
+meme conveys an implicit value judgment. (2) False Claims Mod-
+ule (FACT) addresses falsehoods in memes via two sub-modules:
+Social Perception Module (SPM) introduces external societal
+knowledge to identify deliberately misleading content. Building
+on this, we further propose the Cross-modal Reference Mod-
+ule (CRM), which explicitly constructs the reference relations be-
+tween image and text to detect semantic incorrectness. Integrating
+PCM and FACT, we propose SHIELD (Speech Hate Identification
+
+
+Unpacking Hateful Memes:
+Presupposed Context and False Claims
+
+through Evaluative context and FalsehooD), a framework that en-
+hances hateful meme classification by capturing the core features
+of hate in memes. Our contributions can be summarized as follows:
+e We draw on philosophy and psychology to examine the
+essence of hateful memes via the lens of the expression of
+hate, arguing that a meme is perceived as hateful primarily
+because it exhibits two expressive characteristics: presup-
+posed context and false claims. (See Section 1 and 4)
+Based on these characteristics, we design the PCM and
+FACT modules, and integrate them into the SHIELD frame-
+work, whose effectiveness is validated against multiple base-
+lines. (See Section 4 and 5.2)
+We further evaluate existing models for their specialization
+and generalization across different hate targets, and assess
+the performance of SHIELD on a fake news classification
+
+task, demonstrating its generalization and versatility.(See
+Section 5.4 and 5.5)
+
+2 Related Work
+
+Hate is an enduring sentiment that views others as evil and can
+be acutely experienced in certain contexts. Following Vendrell’s
+definition of hate [55], we adopt a framework that clarifies the
+challenges in distinguishing different forms of hate and provides
+a practical basis for application design. Hate can be classified into
+four types according to two dimensions: (1) whether its focus is
+determinate, and (2) whether its target is replaceable. Most existing
+studies on hate speech detection concentrate on malicious hate and
+ideological hate, both characterized by an indeterminate focus. In
+this work, we primarily focus on these two types of hate.
+
+Hate speech is commonly defined by organizations [20, 53] and
+platforms [41, 58, 59] as any medium that conveys negative senti-
+ment to attack a target group. It is typically characterized by three
+key properties: medium, negative sentiment, and the target. The
+hateful memes studied in this work are a form of hate speech that
+uses memes as the medium. This study does not restrict the types
+of negative sentiment expressed or the targets being attacked.
+
+Hateful Meme Detection. Hateful meme classification task has
+recently gained attention, drawing considerable interest from ma-
+jor internet companies. Facebook’s Hateful Meme Challenge [26]
+established a benchmark dataset (see Section 5.1.1) and provided
+valuable baselines for comparison. Results from this competition re-
+vealed that simple unimodal models, such as BERT [19] and Faster-
+RCNN [48], performed poorly, whereas multimodal models like
+VisualBERT [31] achieved significant improvements, motivating
+further research on multimodal fusion. Subsequent studies explored
+various techniques for integrating text and image features, such
+as attention-based fusion mechanism, to fuse multimodal features,
+followed by downstream classifiers [28, 51, 61]. Because detect-
+ing hateful memes often requires societal context—such as knowl-
+edge of race, gender, or public figures—many works have focused
+on fine-tuning pre-trained multimodal models [33, 47, 54, 66, 68].
+Other approaches [16, 24] concatenated meme text with image cap-
+tions generated by CLIP-based models [42], forming textual inputs
+for the pre-trained language models (PLMs) like RoBERTa [36],
+and reformulating image classification task as a mask prediction
+task. However, as noted by Pro-Cap [15], these methods rely heav-
+ily on caption quality—often generic and missing critical details,
+
+Conference acronym XX, June 03-05, 2018, Woodstock, NY
+
+such as race or gender. To mitigate this, targeted questions spe-
+cific to the nature of hateful memes were introduced as inputs to
+BLIP-2 [30], producing more informative textual representations
+for downstream PLMs. Beyond caption generation, ISSUES [13]
+employed a pre-trained textual inversion network [11] to map im-
+ages into single-word tokens. Nevertheless, approaches based on
+CLIP embeddings face challenges: RGCL [40] observed that memes
+with different labels but similar textual or visual content tend to
+cluster closely. To address this, contrastive learning was applied to
+enhance the distinction between memes with similar content. The
+emergency of LLMs and the growing demand for explainability fur-
+ther advanced this domain. ExplainHM [32] built on LLaMA [52],
+generates textual explanations for hateful memes. Moreover, Mod-
+HATE [17] tackles low-resource scenarios by training task-specific
+LoRAs based on related tasks such as hate speech detection.
+
+MLIMs for image classification. Multimodal large language mod-
+els (MLLMs) [10, 30, 34, 35] represent a broad category of models
+that integrate visual information into language models. Leveraging
+the extensive knowledge acquired during pre-training, MLLMs have
+been applied to image classification tasks. One research line em-
+ploys the decoded text from MLLMs: instead of directly predicting
+labels, the models generate image captions or infer descriptive state-
+ments, which are then processed by another language model [32]
+for prediction. Another direction explores the latent representa-
+tion of MLLMs. Prior work [62] revealed that, although key visual
+information for classification is retained in the latent space, it is
+not effectively decoded by the model. In this work, we leverage the
+latent features of MLLMs to address hateful meme classification.
+
+3 Problem Statement
+
+Definition. Hateful Meme Detection. Given a multimodal meme
+M ={I,T7}, where J denotes an image and J a text sequence, the
+goal of hateful meme detection is to determine whether M conveys
+hate by jointly leveraging visual and textual information.
+
+We approach this task from the perspective of how hate is ex-
+pressed. Drawing on insights from psychology and philosophy, we
+seek to identify the expressive mechanisms through which a meme
+M communicates hate, and to design models that capture features
+aligned with these mechanisms. However, this expression-oriented
+view introduces three major challenges:
+
+C1 Diversity of hateful expression. Hate can be conveyed
+explicitly or implicitly, encompassing varied rhetorical strate-
+gies and affective tones, such as vilification or mockery;
+
+C2 Dependence on sociocultural knowledge. Hate speech
+often reinforces stereotypes about specific groups, requiring
+background knowledge to distinguish legitimate commen-
+tary from distorted or exaggerated attacks; and
+
+C3 Complexity of meme representation. Meme text is typi-
+cally brief and relies on the accompanying image for inter-
+pretation, demanding effective fusion of multimodal cues.
+
+4 SHIELD: Presupposed Context & False Claim
+Hateful Meme Detection Framework
+
+To tackle these three challenges, we construct SHIELD based on
+the essential characteristics that distinguish hateful memes. The
+key distinction between hateful memes and humorous or satirical
+
+
+Conference acronym ’XX, June 03-05, 2018, Woodstock, NY
+
+Image Encoder
+
+IEC)
+
+Text Text Encoder
+
+i oO
+
+False Claims Module (FACT):
+
+Presupposed Context Module (PCM):
+
+Hy Hy
+
+‘ ‘
+
+Image Context Text Context
+Encoder Encoder
+
+Prompt P
+
+|
+
+officer
+
+| | LLM —¥ capturing
+Context Fusion them
+| young
+
+|
+
+hsp
+hpc
+
+Weibin Cai, Jiayu Li, and Reza Zafarani
+
+Presupposed Context
+
+Module (PCM)
+
+& Hateful
+
+Classifier
+False Claims Non-hateful
+Hy, H
+. ane ™ officer SN.
+capturing
+
+0.1 0.2 05 |p| , GNN —> her
+o1 | 06 | o1 " i
+|) a |) as young
+o4 | o2 | on
+
+Cross-modal Reference Graph
+When K = 1
+
+Attention matrix
+
+Figure 3: SHIELD Framework. Given a meme image and its text, we first obtain patch and token embeddings H, and H; from IE(-) and
+TE(-). (1) Input H, and H; into PCM, where image and text context encoders perform intra-modal interactions to extract modality-specific
+context embeddings. These are further fused via a context fusion module to produce hpc, which contain context information of the meme. (2)
+Meanwhile, H, and H; and a prompt Ff are passed to the FACT module. The LLM, guided by ?, produces a last hidden state hsp and attention
+matrix. Based on this attention matrix, a cross-modal reference graph is constructed, which is subsequently processed by a GNN to generate the
+reference graph embedding hcp. Here, flame icons indicate modules with trainable parameters, while snowflakes indicate frozen parameters.
+
+memes lies in intent: hateful memes aim to amplify and dissem-
+inate negative stereotypes or prejudices against a specific group,
+contributing to their social exclusion. Creators of hateful memes
+employ various strategies, which, from philosophical and psycho-
+logical perspectives, these expressions in hateful memes typically
+manifest as presupposed context and false claims:
+
+Hateful meme contains presupposed context. From a philo-
+sophical viewpoint, Marques [38] argues that hate speech is not
+merely the expression of negative emotions such as anger or con-
+tempt, but rather a normative emotional stance (such as the claim
+that a certain group ought to be excluded). By presupposing the ap-
+propriateness of such emotions, hate speech injects value judgments
+into the context. Social psychology provides a complementary ex-
+planation, Tajfel’s Social Identity Theory [39] posits that individuals
+categorize others into in-groups and out-groups, generally viewing
+their own in-group more positively while perceiving out-groups
+as neutral or negative, thereby enhancing self-image and gaining
+psychological satisfaction. Linguistically, this aligns with the con-
+cept of ’othering language’ [9], ie., using language to construct
+difference, exclusion, and denigration, exemplified by ’capturing
+them young’ in Figure 2a. Therefore, for C1, despite variations in
+degree and rhetorical form, all types of hate share a common key
+feature: the presence of a presupposed evaluative context. In SHIELD,
+this is modeled via PCM in Section 4.1.
+
+Hateful meme contains false claims. Presupposed context alone
+is insufficient to determine hate. For example, Figure 2b merely il-
+lustrates an act of justice. To legitimize hate, memes often ascribe
+unfounded accusations or misrepresentations against the targeted
+group. Vendrell [55] classifies hate into different types. In prac-
+tice, hateful memes mostly fall under malicious and ideological
+hate, where the focus is indeterminate, and reasoning is driven by
+ideology or bias rather than facts. Consequently, the logic behind
+hateful messages is often vague or false. Therefore, false claims
+often function as a strategy of attack. False claims in memes pri-
+marily manifest in two ways: (1) Incorrectness: incorrect references
+between the image and textual content. (2) Deliberately misleading:
+false guidance about target groups, requiring societal knowledge to
+recognize (C2). This is implemented via the SPM in Section 4.2.1. To
+capture the incorrectness(C3), we introduce CRM in Section 4.2.2,
+which explicitly models the associations between image and text.
+
+4.1 Presupposed Context Module
+
+A meme’s context comprises both image and text, and capturing the
+presupposed context requires fusing information across modalities.
+Prior work has shown that PLMs implicitly encode syntactic struc-
+tures [22], which can capture the presupposed context in certain
+degree [9, 14]. We first encode the image J and text 7 using an
+image encoder JE(-) and a text encoder TE(-), producing patch and
+token embeddings H, and H;. Mean pooling over these embeddings
+
+
+Unpacking Hateful Memes:
+Presupposed Context and False Claims
+
+(b) Inconsistent expression
+
+(a) Consistent expression
+
+Figure 4: Examples of two context types of hateful memes. In Fig-
+ure 4a, Islam is framed as the bad group. The words “violent” and
+“kill” are reinforced by the image, which portrays a defiant, con-
+frontational crowd——amplifying the negative portrayal through
+visual alignment. In contrast, in Figure 4b uses positive term “respect”
+to refer to an execution scene featuring nooses and guillotines. The
+opposing sentiment between text and image conveys ironic humor.
+
+yields the final image embedding h, and text embedding h;:
+
+H, =IE(Z), H, = TE(T) (1)
+
+hy = Mean(H,), hy = Mean(H;), (2)
+
+where H, € R*¢, H, € R™™*4 h, € R%,h, € RY. n, and n;
+denote the number of patches and tokens; d, and d; are dimensions
+of patch embedding and token embedding, respectively.
+
+To obtain the meme’s context embedding, we first apply sepa-
+rate context encoders for the image and text to capture intra-modal
+contextual information. The context embeddings from both modal-
+ities are then fused to generate the final context representation of
+the meme. For two context encoders, we use two separate linear
+layers to model intra-modal interactions for each modality. The
+fusion strategy is guided by the contextual characteristics of hate-
+ful memes. Based on how hate is expressed, we categorize meme
+contexts into two types: (1) Consistent expression, the image and
+text convey aligned emotions, often delivering hate more explic-
+itly (e.g., Figure 4a, where a defiant image amplifies the tone of
+the text); (2) Inconsistent expression, the image and text convey
+contrasting emotions, often expressing hate more implicitly (e.g.,
+Figure 4b, where the text says “respect” but the image depicts a dark
+execution scene, forming a stark emotional contrast). Therefore,
+we adopt the Hadamard product of linear transforms of image and
+text embeddings for fusion:
+
+hpc = (Wihy + b1) © (Woh; + ba), (3)
+
+where W, € R¢*%, Wy, € R¢X4, by by € R4, and Apc € R®. This
+approach offers two key advantages: (1) it aligns information across
+corresponding dimensions of the two modalities, and (2) it enables
+both intra-modal feature interaction and cross-modal information
+integration. The Hardamard product is particularly effective in cap-
+turing the two context types discussed above. When the modalities
+express consistent semantics, their aligned dimensions are ampli-
+fied via multiplication. When they diverge, the resulting negative
+values highlight the inconsistency. Both effects are preserved and
+emphasized through this fusion method.
+
+Conference acronym XX, June 03-05, 2018, Woodstock, NY
+
+4.2 False Claim Module
+
+In addition to presupposed context, another common feature of
+hateful memes is the presence of false claims. These can be identified
+from two perspectives: (1) Whether the meme deliberately promotes
+negative stereotypes based on social knowledge, and (2) whether the
+reference between image and text is accurately aligned. To address
+these aspects, we successively propose the Social Perception Module
+(SPM) and the Cross-modal Reference Module (CRM).
+
+4.2.1 Social Perception Module (SPM). To enable the model to
+detect factual distortions or bias amplification in memes, incorpo-
+rating external knowledge is crucial. LLMs trained on diverse social
+media data, possess a certain level of social awareness that can help
+address this challenge. However, leveraging LLMs introduces two
+key issues: (1) LLMs inherently exhibit cognitive bias and often
+under-identify hateful content, which may impair classification
+performance if used directly [32]. (2) Critical knowledge is often
+retained in the latent space and is difficult to decode effectively [62].
+
+To overcome these challenges, we first design a prompt template
+f as input to the LLM: “<H,> <J > Are there false claims?” where
+angle brackets indicate placeholders. Specifically, <H,> denotes the
+placeholder for the patch embeddings. We encode “<7 > This meme
+is hateful or not?” using the LLM’s embedding layer and concatenate
+it with H, before feeding the combined representation into the LLM.
+To mitigate the inherent bias of the LLM toward regarding memes
+as non-hateful, we fine-tune it to adapt it to the hateful meme
+detection task. To fully exploit the knowledge encoded in the LLM,
+we extract the last hidden state hsp for downstream classification:
+
+hsp, A = LLMgne-tuned (P) (4)
+
+where hsp € R4S?: A € R"*” is the attention matrix with n tokens
+in total. LLMgne—tunea denotes the LLM fine-tuned during training,
+without restricting the specific fine-tuning method. In our imple-
+mentation, we adopt LoRA [23] for fine-tuning.
+
+4.2.2 Cross-modal Reference Module (CRM). To identify incorrect
+referential relations between image and text in memes, such as the
+example in Figure 2a, where the word “capturing” incorrectly refers
+to a friendly handshake highlighted in the blue boxes. We propose
+the cross-modal reference graph to explicitly model the referential
+links between image patches and text tokens, thereby supporting
+the hateful meme detection task.
+
+Cross-modal Reference Graph. The cross-modal reference graph
+consists of two types of nodes: text tokens v, and image patches dp,
+with three types of undirected edges capturing their relationships:
+(1) Token-Token edges E,; follow the natural token order in the
+text. (2) Patch-Patch edges Ep, connect adjacent image patches
+to preserve spatial structure. (3) Token-Patch edges E,) represent
+interactions between text tokens and image patches.
+
+Constructing token-patch edges E,,. In SPM, both image and
+text are included in the prompt P, and the resulting output hsp is
+used for hateful meme detection. During fine-tuning, the LLM learns
+the associations between image and text, which are reflected in its
+attention scores. We therefore leverage the attention matrix A €
+R"*" to construct referential relationships between two modalities,
+where n denotes the total number of tokens. The index range for
+text tokens in J is [ij, iz], and for image patch tokens is [ jy, j2].
+
+
+Conference acronym ’XX, June 03-05, 2018, Woodstock, NY
+
+For each text token i, its patch token neighbors are defined as:
+5; = Top — K Indices(A; j,:;,, K). (5)
+
+Where 5; € [j1, j2] denotes the indices of the top-K image patch
+token with the highest attention scores for token i. The hyperpa-
+rameter K controls the number of token-patch connections per text
+token. We then construct the edge set E;» as:
+
+ig
+Exp =| J{GA lie Si}. (6)
+i=hy
+E;p connects each text token i to its most relevant patch tokens
+j € S;. The initial features of v; and vp are H; and Hy computed
+from Eq 1.
+
+Harnessing Cross-modal Reference Graph. The constructed
+cross-modal reference graph G = (V = {0;, 0p}, E = {Ev Epp, Erp})
+is then fed into a Graph Neural Network (GNN), which gives node
+embeddings. These node embeddings are aggregated via mean
+pooling to produce the graph embedding hcp:
+
+hcr = Mean(GNN(G, Hy, H;)), (7)
+
+where hor € R2CR, dcr is the dimension of the node embedding.
+
+4.3 Classifier
+
+To apply the above three modules to the hateful meme classification
+task, we combine their embeddings by directly concatenating them
+to form the final representation h:
+
+h = [hpc, hsp, her], (8)
+
+where h € R¢*4sp+4cr_ Then, h is fed into a downstream classifier
+
+to predict whether the meme is hateful:
+
+¥ = 16(Classifier(h))>=0.5 > (9)
+
+where o represents the sigmoid function; 7 is the predicted label,
+with a value of 1 indicating a hateful meme and 0 otherwise.
+
+4.4 Analysis of the Reference Graph
+
+While constructing an explicit reference graph can improve de-
+tection performance, its effectiveness may be limited in certain
+cases. In the false claim detection scenario, the label of a graph may
+change drastically with only minor node-level modifications. For
+example, in Figure 3, replacing the word “capturing” with “helping”
+results in a non-false statement, implying that the corresponding
+graph embedding should ideally be entirely different. Understand-
+ing whether such sensitivity is achievable, and to what extent, is
+crucial for evaluating the applicability of this module.
+
+Suppose flipping the sign of a node embedding changes the
+graph’s meaning. Let L € R”™ denote the Laplacian matrix of
+the reference graph, where n is the number of nodes, and node v9
+with feature h,, is switched to —h,,. Assume a K-layer GCN with
+mean-pooling readout and no nonlinear activation for analytical
+simplicity. The binary classification result is ! = u™s, where u is
+the classifier weight and s is the graph embedding. We claim the
+following:
+
+THEOREM 4.1. The reference graph is discriminative if:
+nl|
+
+lS|l2 > TWi®e Pile
+TTL“) e,, || Pulle
+
+(10)
+
+Weibin Cai, Jiayu Li, and Reza Zafarani
+
+where ey, is a one-hot vector indicating node vy, 6 = —2h,,, and
+P=[],W™ denotes the product of layer-wise GCN weights W“).
+
+Proor. The initial feature difference can be expressed as AH) =
+€,,6'. After K propagation layers, the difference in node embed-
+dings becomes AH) = (EXe,,)(6™P). The resulting change in the
+graph embedding is:
+
+ix TL ®e,,) (STP
+As = — » An) = ( Cm (OP) (11)
+nS n
+Accordingly, the change in the classification result is:
+Tie )(5"P
+Al=uTas =‘ ig MOE) (12)
+n
+
+Assume ! > 0. An ideal model should flip the original prediction, i.e.,
+(1) sign(Al) # sign(1), and (2) |Al| > |l|. By the Cauchy—Schwarz
+inequality, we have:
+
+Tp (kK)
+
+1° Leg
+| < [Al] < —— [6 la||Pull. (13)
+
+Hence, the reference graph can achieve the ideal discriminative
+property if
+nil
+
+[le + Sa
+
+5 Experiments
+
+In this section, we detail the experiments conducted to evaluate the
+performance and capabilities of SHIELD. We aim to address the
+following research questions:
+
+RQ1: How effective is SHIELD for hateful meme classification, and
+how does it compare to existing models?
+
+RQ2: How effective are the two proposed modules?
+
+RQ3: How well does SHIELD capture the essential characteristics
+of hateful memes? How does it perform across scenarios
+targeting different hate subjects?
+
+RQ4: How does SHIELD perform on other multimodal social media
+tasks such as fake news detection?
+
+Table 1: Summary of hateful meme datasets.
+
+FHM Harm-C  Harm-P
+
+Train #Hateful 3019 1064 621
+#Non-hate 5481 1949 616
+
+fai: #Hateful 247 61 79
+Validation yNon-hate 253 116 80
+Test #Hateful 1380 124 156
+#Non-hate 1760 230 163
+
+5.1 Experimental Setup
+
+5.1.1 Datasets. We evaluate models on three publicly available
+meme datasets: (1) FHM [26], released by Facebook as part of a
+multimodal hateful meme classification challenge. It is worth not-
+ing that many existing studies test models using different splits of
+the data (e.g., omitting the validation set [16, 32], or using different
+test sets [13, 28]). As labels for the entire dataset are available we
+use the full set for fair comparison and consistent comparison: the
+train set used for training, the dev_seen set used for validation, and
+
+
+Unpacking Hateful Memes:
+Presupposed Context and False Claims
+
+Conference acronym XX, June 03-05, 2018, Woodstock, NY
+
+Table 2: Hateful Meme Classification results. The best and runner-up results are in bold and underlined, respectively.
+
+Dataset FHM Harm-C Harm-P
+Model AUC Accuracy Macro-F1 AUC Accuracy Macro-F1 AUC Accuracy Macro-F1
+CLIP Text-Only 63.0120.25  63.1740.19 56.45+1.20 | 86.70+0.25 78.99+0.82 76.96+0.91 | 67.87+2.27  61.3241.51 —60.70+1.73
+CLIP Image-Only | 79.57+0.14 75.10+0.57  70.75+0.94 | 92.36+0.25 84.19+0.84 82.87+0.92 | 68.53+1.63  62.14+0.76 61.68+0.88
+PromptHate 81.7620.68 = 75.34+0.83 73.66+0.88 | 87.50+4.85  81.3023.78 79.7644.40 | 52.67+3.60  49.3540.88 33.04+0.40
+HateCLIPper 80.8220.31 76.4640.55 72.75+0.91 | 91.61+0.30 83.9341.03 82.67+1.04 | 70.6241.21 63.89+0.97 63.720.99
+ISSUES 81.66+0.27.  77.3340.37 74.06+0.52 | 92.39+0.21 81.98+0.85  80.85+0.85 | 71.06+1.38  64.08+1.17 63.79+1.29
+ExplainHM 79.03+0.33 72.70+0.42 70.37+0.23 | 89.3142.33  82.7343.20 81.8243.45 | 62.9721.57 58.9741.85 58.62+2.10
+Zero-Shot 50.05+0.00 39.62+0.00  28.72+0.00 | 50.44+0.00  35.60+0.00  26.92+0.00 | 50.00+0.00  48.91+0.00 32.85+0.00
+Fine-tuned MLP 70.13+1.13 63.63+1.13 62.98+0.83 | 91.43+0.81 86.39+1.27 85.45+1.32 | 63.6340.34 57.502113 = 57.42+1.15
+SHIELD 87.51+0.40 80.12+0.66 79.14+0.71 | 93.81+0.22 89.36+0.44 88.74+0.37 | 72.58+0.30 67.60+0.85 67.42+1.01
+Table 3: Ablation studies by using different modules.
+
+Dataset FHM Harm-C Harm-P
+
+Model AUC Accuracy Macro-F1 AUC Accuracy Macro-F1 AUC Accuracy Macro-F1
+
+SPM 86.68+0.49 79.25+0.68 78.25+0.58 | 93.32+0.14  88.78+0.49  88.07+0.50 | 60.61+2.85  56.7543.18  56.72+3.17
+
+SPM+PCM | 87.26+0.25  79.41+0.49 78.33+0.67 | 93.74+0.17 88.33+0.44 87.63+0.36 | 71.74+0.35  66.97+1.38 66.85+1.45
+
+SHIELD 87.51+0.40 80.12+0.66 79.14+0.71 | 93.81+0.22 89.36+0.44 88.74+0.37 | 72.58+0.80 67.60+0.85 67.42+1.01
+
+the remaining sets (dev_unseen, test_seen and test_unseen) used for
+testing. (2) Harm-C [46], consisting of COVID-19-related memes.
+(3) Harm-P [47], containing US politics-related memes. Both were
+collected from various web resources, including Reddit, Facebook,
+and Instagram, but mainly Google Images. The training, validation,
+and testing sets follow the splits defined in the original paper. How-
+ever, original Harm-P contains large number of duplicate memes,
+which appear in both the training, validation, and testing sets, has
+sometimes been overlooked, leading to inaccurate model evalua-
+tion. We remove duplicates by prioritizing samples in the order of
+train > valid > test, since the latter two contain fewer samples. The
+cleaned data statistics are summarized in Table 1.
+
+5.1.2 Baselines. We compare with several state-of-the-art uni-
+modal and multimodal hateful meme detection models, includ-
+ing CLIP, PromptHate [16], HateCLIPper [28], ISSUES [13], Ex-
+plainHM [32], and both zero-shot and fine-tuned MLP versions of
+Llama [52]. Detailed descriptions are provided in Appendix A.1.
+
+5.1.3 Evaluation. We adopt the most commonly used evaluation
+metrics for the hateful meme classification task [13, 16, 26, 28, 32]:
+Area Under the Receiver Operating Characteristic Curve (AUC),
+Accuracy, and Macro-F1 score. To obtain more reliable results, all
+models were trained and evaluated multiple times, and we report
+the mean and standard deviation. In all tables, the best and runner-
+up results are in bold and underlined, respectively. Details about
+experimental settings can be seen in Appendix A.2.
+
+5.2 RQ1: Hateful Meme Classification
+
+Table 2 compares the performance of SHIELD with baselines on
+FHM, Harm-C, and Harm-P. The main findings are as follows: (1)
+Unimodal vs. Multimodal. Unimodal models, such as CLIP Text-
+Only, which uses only meme text, perform significantly worse than
+multimodal models, showing that visual information is crucial. In
+addition, CLIP Image-Only outperforms CLIP Text-Only by a large
+
+margin and achieves results comparable to some multimodal mod-
+els. This is because meme text is visually embedded within the
+image, allowing the visual encoder to capture textual information.
+Moreover, CLIP demonstrates implicit Optical Character Recogni-
+tion (OCR) ability [60], enabling it to perform competitively even
+without explicit text input. (2) Performance of multimodal mod-
+els. ISSUES benefits from a pre-trained textual inversion network
+that incorporates external knowledge and enhances multimodal fu-
+sion, achieving the best baseline performance across many metrics.
+HateCLIPper also performs strongly through effective cross-modal
+interaction, confirming the effectiveness of using CLIP as a back-
+bone model for addressing the hateful meme classification task. In
+contrast, PromptHate and ExplainHM underperform mainly due
+to their lack of a validation set: both select models directly on the
+test set after each epoch, risking overfitting and inflated results. To
+ensure a more practical and fair evaluation, we use a validation set
+to select the best-performing model, which explain the slight gap
+from their reported results. (3) Necessity of fine-tuning LLMs.
+To explore LLM potential in hateful meme detection, we investigate
+their possible applications by addressing the following questions:
+Q1. How effective is a pre-trained LLM on its own? Is the further train-
+ing necessary? Q2. If yes, can we train only a downstream classifier
+(e.g., an MLP) instead of fine-tuning the LLM? To answer these ques-
+tions, we conducted experiments with Zero-Shot and Fine-tuned
+MLP. For Q1, we prompted the LLM directly and checked whether
+its output contained the word “hateful”. The experimental results is
+poor, likely due to LLM’s inherent bias in conceptualizing hateful or
+the hallucinations leading to misinterpretations of memes [25, 32].
+For Q2, we design the Fine-tuned MLP approach, where the last
+hidden state of LLM is fed into an MLP for binary classification.
+This approach shows some improvements in performance, indicat-
+ing that the LLM has some capabilities for reasoning about hateful
+content. However, the textual output in Zero-Shot provides less pre-
+cise information than vector-based representations. Even with this
+improvement, the performance still lags behind other multimodal
+
+
+Conference acronym ’XX, June 03-05, 2018, Woodstock, NY
+
+models, highlighting inherent limitations of the LLM itself and the
+necessity to fine-tune the LLM for better results. (4) Effectiveness
+of SHIELD. After incorporating the proposed modules, SHIELD
+surpasses the best baseline models by 5.75%, 1.56%, and 1.52% in
+terms of AUC on FHM, Harm-C, and Harm-P, respectively. It also
+achieves the highest Accuracy and Macro-F1 across all datasets,
+confirming its superiority. The smaller gains on Harm-C and Harm-
+P may stem from their limited sample sizes, making it difficult to
+effectively distinguish between models’ performances.
+
+5.3 RQ2: Module Performance Analysis
+
+We conduct ablation experiments to evaluate module effectiveness:
+
+(1) SPM: Using only the SPM, that is, using only hsp in Eq. 8.
+
+(2) SPM+PCM: Using both of SPM and PCM, that is, incorpo-
+rating hsp and hep in Eq. 8.
+
+(3) SHIELD: Using all modules by feeding the complete repre-
+sentation h into the classifier.
+
+As shown in Table 3, we observe that the complete SHIELD model
+outperforms others. With the introduction of each module, the
+model performance improves progressively on most metrics, par-
+ticularly on FHM and Harm-P. However, the improvement is less
+evident on Harm-C due to its small test set and simpler task, as most
+attacks primarily target “China” and are expressed more explicitly
+(e.g., “Chinese virus”). Overall, the results across most of metrics
+validate the effectiveness of the proposed modules.
+
+5.4 RQ3: Specificity and Generalization
+
+In real-world hateful memes detection, the targets and topics of
+attack vary widely. Thus, two key aspects must be considered: (1)
+Specificity—whether a model overfits to certain hate targets; and
+(2) Generalization—whether it captures invariant properties of hate,
+such as presupposed context and false claims. A model capable
+of identifying such invariants should generalize across different
+domains of hate. To evaluate these points, we use Harm-C (focused
+on COVID-19) and Harm-P (focused on politics). We combine them
+into a unified dataset, Harm-C + Harm-P, train models on this
+mixture, and test them separately on the test splits of Harm-C,
+Harm-P, and the combined dataset.
+
+As shown in Table 4, several findings emerge: (1) Compared with
+Table 2, training on a more heterogeneous dataset, i.e., one that
+includes a broader and more diverse range of hate targets, generally
+reduces performance on individual domains, suggesting a trade-off
+between specialization and generalization. CLIP-based models such
+as ISSUES and HateCLIPper experience smaller performance drops
+on Harm-P, indicating a stronger specialization in detecting politi-
+cal hate. (2) SHIELD performs competitively with ISSUES on both
+datasets, achieving a 0.85 higher AUC on Harm-C but 0.97 lower
+on Harm-P. However, on the combined dataset, SHIELD surpasses
+ISSUES by 2.12 AUC, demonstrating that SHIELD is better captures
+transferable hate-related features and maintains higher discrimina-
+tive ranking across diverse targets. Overall, these findings suggest
+that SHIELD achieves a more balanced and robust trade-off between
+specificity and generalization.
+
+Weibin Cai, Jiayu Li, and Reza Zafarani
+
+5.5 RQ4: Versatility
+
+Presupposed context and false claims are not exclusive to hate-
+ful memes, they also appear in other social media data, such as
+fake news. If SHIELD framework indeed captures these features, it
+should generalize to broader social media tasks. To verify this, we
+applied SHIELD to multimodal fake news classification task. For
+baseline models, we selected several of the most recently released
+and widely adopted open-source models, including SAFE [65],
+MCAN [57], and CAFE [18]. For datasets, we used ReCOVery [64]
+and GossipCop [50]. More details about results and implementation
+can be seen in Appendix C.
+
+The results reveal the following insights: (1) Among the base-
+lines, although MCAN and CAFE were proposed after SAFE, their
+performance does not surpass it. This can be attributed to the ab-
+sence of a validation set in their original training pipelines, which
+likely led to overfitting and suboptimal generalization. In contrast,
+SAFE demonstrates more robust performance across both datasets.
+(2) Despite text truncation, SHIELD outperforms baselines on most
+metrics. On the one hand, this confirms the broad applicability
+and adaptability of SHIELD, suggesting its potential for various
+multimodal social media tasks. On the other hand, it highlights the
+prevalence of presupposed context and false claims in social media.
+
+6 Conclusion
+
+We unpack hateful memes by examining how hate is expressed,
+drawing on insights from philosophy and psychology to identify
+two key features: a presupposed context and stating false claims.
+Based on these two features, we propose two modules, PCM and
+FACT, which together form the SHIELD framework. PCM captures
+the meme’s context by modeling intra-modal interactions and fus-
+ing contextual information across modalities. FACT enhances the
+model’s understanding of hateful content by introducing exter-
+nal knowledge through SPM, and explicitly constructs image-text
+referential relations via CRM to detect false claims. Experimental
+comparisons with multiple baselines demonstrate the effectiveness,
+generalizability, and versatility of SHIELD.
+
+References
+
+1] [n.d]. France online hate speech law to force social media sites to act
+quickly. https://www.theguardian.com/world/2019/jul/09/france-online-hate-
+speech-law-social-media?utm_source=chatgpt.com
+
+(2] [n.d.]. Hate Crimes Case Examples. https://www.justice.gov/hatecrimes/hate-
+crimes-case-examples?utm_source=chatgpt.com
+
+[3] [n.d.]. How the EU Digital Services Act (DSA) Affects Online Free Speech in
+2025. https://adfinternational.org/commentary/eu-digital-services-act-one-year
+4] [n.d.]. Internet giants could be fined up to 12 million under Austrian hate speech
+aw. https://www.reuters.com/article/world/internet-giants-could-be-fined-up-
+o- 12-million- under-austrian-hate-speech-law-idUSKBN25U1R8/
+
+5] [n.d.]. Italian opposition file complaint over far-right party’s use of ‘racist’
+AI images. _https://www.theguardian.com/technology/2025/apr/18/italian-
+opposition-complaint-far-right- matteo-salvini-lega-racist-ai-images?utm_
+source=chatgpt.com
+
+{6] [n.d.]. Network Enforcement Act. https://en.wikipedia.org/wiki/Network_
+Enforcement_Act?utm_source=chatgpt.com
+
+(7] [n.d]. Qualitative research into the impact of online hate. https:
+//www.ofcom.org.uk/siteassets/resources/documents/research-and-
+data/online-research/impact-of-online-hate/qualitative-research-into-the-
+impact- of- online-hate?utm_source=chatgpt.com&v=329170
+
+8] [n.d]. UK’s new online safety law adds to crackdown on Big Tech com-
+panies. https://apnews.com/article/online-safety-bill- uk-tech-regulation-
+4371 bbb0d7442eed0f44bf7839443268
+
+9] Wafa Alorainy, Pete Burnap, Han Liu, and Matthew L Williams. 2019. “The enemy
+among us” detecting cyber hate speech with threats-based othering language
+
+
+
+Unpacking Hateful Memes:
+Presupposed Context and False Claims
+
+Conference acronym XX, June 03-05, 2018, Woodstock, NY
+
+Table 4: Model specificity and generalization across hate targets. Harm-C + Harm-P denotes the combined dataset. Models are trained on
+Harm-C + Harm-P and then evaluated separately on the test sets of Harm-C, Harm-P, and Harm-C + Harm-P.
+
+10
+
+{11
+
+[12
+
+[13
+
+14
+
+[15
+
+16
+
+[17
+
+[18
+
+19
+
+[20
+
+21
+
+[22
+
+23
+
+Dataset Harm-C Harm-P Harm-C + Harm-P
+Model AUC Accuracy Macro-F1 AUC Accuracy Macro-F1 AUC Accuracy Macro-F1
+PromptHate | 86.01+0.75  78.11+2.88 73.85+5.72 | 61.2441.85  58.08+1.16 56.70+2.90 | 75.93+0.59  67.8141.57 65.36+4.24
+HateCLiPper | 89.56+0.73 82.0441.35 80.07+1.44 | 68.13+0.49  60.32+0.76 57.2541.27 | 79.44+0.41 71.74+0.88 69.36+1.01
+ISSUES 91.01+0.47 82.94+0.43 8 1.08+0.40 | 68.55+0.57  58.56+1.13 54.10+2.02 | 80.37+0.44  71.3940.71 68.43+0.98
+ExplainHM 87.5123.38 80.3443.29 79.40+3.63 | 62.3442.88 59.224251 58.2543.46 | 77.8021.92 70.2740.69 70.02+0.82
+SHIELD 91.86+059 85.32+189 84.5421.67 | 67.5841.18 61.7421.47 60.84+3.19 | 82.48+0.21 73.96+1.52 73.46+1.81
+Table 5: Performance on the Fake News Classification. language models. arXiv preprint arXiv:2106.09685 (2021).
+24] Junhui Ji, Wei Ren, and Usman Naseem. 2023. Identifying creative harmful
+Dataset Model Accuracy Macro-F1 memes via prompt based approach. In Proceedings of the ACM Web Conference
+25] Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan Su, Yan Xu, Etsuko Ishii,
+SAFE 93.9520.72 85.72.29 Ye Jin Bang, “andrea Madotto, and Pascale Fung 2023. Survey of hallucination in
+MCAN 85.72+0.00  56.99+5.34 natural language generation. Comput. Surveys 55, 12 (2023), 1-38.
+ReCOVery CAFE 88.70+0.91 67.68+5.45 26] Douwe Kiela, Hamed Firooz, Aravind Mohan, Vedanuj Goswami, Amanpreet
+, : , . Singh, Pratik Ringshia, and Davide Testuggine. 2020. The hateful memes chal-
+SHIELD  97.6130.91  95.00:1.75 lenge: Detecting hate speech in multimodal memes. Advances in neural informa-
+tion processing systems 33 (2020), 2611-2624.
+SAFE 87.67+0.18  78.68+0.12 27, Thomas N Kipfand Max ela 2016. Semi-supervised classification with graph
+; MCAN 81.49+0.14 9 51.1241.11 convolutional networks. arXiv preprint arXiv:1609.02907 (2016).
+GossipCop CAFE 82.624+0.34  66.13+0.72 28] Gokul Karthik Kumar and Karthik Nandakumar. 2022. Hate-clipper: Multimodal
+—— , . hateful meme classification based on cross-modal interaction of clip features.
+SHIELD —89.00+0.51  81.60+0.59 arXiv preprint arXiv:2210.05916 (2022).
+29] Ruth Lewis, Mike Rowe, and Clare Wiper. 2019. Online/offline continuities:
+Exploring misogyny and hate in online abuse of feminists. Online othering:
+Exploring digital violence and discrimination on the Web (2019), 121-143.
+embeddings. ACM Transactions on the Web (TWEB) 13, 3 (2019), 1-26. 30] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. 2023. Blip-2: Bootstrapping
+Jinze Bai, Shuai Bai, Shusheng Yang, Shijie Wang, Sinan Tan, Peng Wang, Junyang language-image pre-training with frozen image encoders and large language
+Lin, Chang Zhou, and Jingren Zhou. 2023. Qwen-vl: A frontier large vision- models. In International conference on machine learning. PMLR, 19730-19742.
+language model with versatile abilities. arXiv preprint arXiv:2308.12966 (2023). 31] Liunian Harold Li, Mark Yatskar, Da Yin, Cho-Jui Hsieh, and Kai-Wei Chang.
+Alberto Baldrati, Lorenzo Agnolucci, Marco Bertini, and Alberto Del Bimbo. 2023. 2019. Visualbert: A simple and performant baseline for vision and language.
+Zero-shot composed image retrieval with textual inversion. In Proceedings of the arXiv preprint arXiv:1908.03557 (2019).
+IEEE/CVF International Conference on Computer Vision. 15338-15347. 32] Hongzhan Lin, Ziyang Luo, Wei Gao, Jing Ma, Bo Wang, and Ruichao Yang.
+Parishad BehnamGhader, Vaibhav Adlakha, Marius Mosbach, Dzmitry Bahdanau, 2024. Towards explainable harmful meme detection through multimodal debate
+Nicolas Chapados, and Siva Reddy. 2024. Llm2vec: Large language models are between large language models. In Proceedings of the ACM on Web Conference
+secretly powerful text encoders. arXiv preprint arXiv:2404.05961 (2024). 2024. 2359-2370.
+Giovanni Burbi, Alberto Baldrati, Lorenzo Agnolucci, Marco Bertini, and Alberto 33] Phillip Lippe, Nithin Holla, Shantanu Chandra, Santhosh Rajamanickam, Geor-
+Del Bimbo. 2023. Mapping memes to words for multimodal hateful meme clas- gios Antoniou, Ekaterina Shutova, and Helen Yannakoudakis. 2020. A multimodal
+sification. In Proceedings of the IEEE/CVF International Conference on Computer framework for the detection of hateful memes. arXiv preprint arXiv:2012.12871
+Vision. 2832-2836. (2020).
+Pete Burnap and Matthew L Williams. 2016. Us and them: identifying cyber hate 34] Haotian Liu, Chunyuan Li, Yuheng Li, Bo Li, Yuanhan Zhang, Sheng Shen, and
+on Twitter across multiple protected characteristics. EP} Data science 5, 1 (2016), Yong Jae Lee. 2024. Llava-next: Improved reasoning, ocr, and world knowledge.
+11. 35] Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. 2024. Visual instruc-
+Rui Cao, Ming Shan Hee, Adriel Kuek, Wen-Haw Chong, Roy Ka-Wei Lee, and Jing tion tuning. Advances in neural information processing systems 36 (2024).
+Jiang. 2023. Pro-cap: Leveraging a frozen vision-language model for hateful meme 36] Yinhan Liu. 2019. Roberta: A robustly optimized bert pretraining approach. arXiv
+detection. In Proceedings of the 31st ACM International Conference on Multimedia. preprint arXiv:1907.11692 (2019).
+5244-5252. 37] Kara Manke. [n.d.]. | Study finds persistent spike in hate speech on
+Rui Cao, Roy Ka-Wei Lee, Wen-Haw Chong, and Jing Jiang. 2023. Prompting for X. https://news.berkeley.edu/2025/02/13/study-finds-persistent- spike-in-hate-
+multimodal hateful meme classification. arXiv preprint arXiv:2302.04156 (2023). speech-on-x/?utm_source=chatgpt.com
+Rui Cao, Roy Ka-Wei Lee, and Jing Jiang. 2024. Modularized Networks for Few- 38] Teresa Marques. 2023. The expression of hate in hate speech. Journal of Applied
+shot Hateful Meme Detection. In Proceedings of the ACM on Web Conference Philosophy 40, 5 (2023), 769-787.
+2024. 39] Saul Mcleod. 2023. Social identity theory in psychology (Tajfel & Turner, 1979).
+Yixuan Chen, Dongsheng Li, Peng Zhang, Jie Sui, Qin Lv, Lu Tun, and Li Shang. Simply psychology (2023).
+2022. Cross-modal ambiguity learning for multimodal fake news detection. In 40] Jingbiao Mei, Jinghong Chen, Weizhe Lin, Bill Byrne, and Marcus Tomalin. 2024.
+Proceedings of the ACM web conference 2022. 2897-2905. Improving Hateful Meme Detection through Retrieval-Guided Contrastive Learn-
+Jacob Devlin. 2018. Bert: Pre-training of deep bidirectional transformers for ing. In Proceedings of the 62nd Annual Meeting of the Association for Computational
+language understanding. arXiv preprint arXiv:1810.04805 (2018). Linguistics (Volume 1: Long Papers). 5333-5347.
+eu2008 [n. d.]. Framework Decision on combating certain forms and expressions 41] meta2025 [n. d.]. Hateful Conduct. https://transparency.meta.com/en-us/policies/
+of racism and xenophobia by means of criminal law. https://eur-lex.europa.eu/ community-standards/hateful-conduct/
+legal- content/EN/TXT/?uri=LEGISSUM:133178 42] Ron Mokady, Amir Hertz, and Amit H Bermano. 2021. Clipcap: Clip prefix for
+Rinon Gal, Yuval Alaluf, Yuval Atzmon, Or Patashnik, Amit H Bermano, Gal image captioning. arXiv preprint arXiv:2111.09734 (2021).
+Chechik, and Daniel Cohen-Or. 2022. An image is worth one word: Personalizing 43] Niklas Muennighoff. 2020. Vilio: State-of-the-art visio-linguistic models applied
+text-to-image generation using textual inversion. arXiv preprint arXiv:2208.01618 to hateful memes. arXiv preprint arXiv:2012.07788 (2020).
+(2022). 44] Delfina Sol Martinez Pandiani, Erik Tjong Kim Sang, and Davide Ceolin. 2024.
+John Hewitt and Christopher D Manning. 2019. A structural probe for finding Toxic Memes: A Survey of Computational Perspectives on the Detection and
+syntax in word representations. In Proceedings of the 2019 Conference of the Explanation of Meme Toxicities. arXiv preprint arXiv:2406.07353 (2024).
+North American Chapter of the Association for Computational Linguistics: Human 45] Agnieszka Pluta, Joanna Mazurek, Jakub Wojciechowski, Tomasz Wolak, Wiktor
+
+Language Technologies, Volume 1 (Long and Short Papers). 4129-4138.
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean
+Wang, Lu Wang, and Weizhu Chen. 2021. Lora: Low-rank adaptation of large
+
+Soral, and Michat Bilewicz. 2023. Exposure to hate speech deteriorates neurocog-
+nitive mechanisms of the ability to understand others’ pain. Scientific Reports 13,
+
+
+Conference acronym ’XX, June 03-05, 2018, Woodstock, NY
+
+1 (2023), 4127.
+[46] Shraman Pramanick, Dimitar Dimitrov, Rituparna Mukherjee, Shivam Sharma,
+Md Shad Akhtar, Preslav Nakov, and Tanmoy Chakraborty. 2021. Detecting
+harmful memes and their targets. arXiv preprint arXiv:2110.00413 (2021).
+[47] Shraman Pramanick, Shivam Sharma, Dimitar Dimitrov, Md Shad Akhtar, Preslav
+Nakov, and Tanmoy Chakraborty. 2021. MOMENTA: A multimodal framework
+for detecting harmful memes and their targets. arXiv preprint arXiv:2109.05184
+(2021).
+[48] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun. 2016. Faster R-CNN: To-
+wards real-time object detection with region proposal networks. IEEE transactions
+on pattern analysis and machine intelligence 39, 6 (2016), 1137-1149.
+[49] Koustuv Saha, Eshwar Chandrasekharan, and Munmun De Choudhury. 2019.
+Prevalence and psychological effects of hateful speech in online college commu-
+nities. In Proceedings of the 10th ACM conference on web science. 255-264.
+[50] Kai Shu, Deepak Mahudeswaran, Suhang Wang, Dongwon Lee, and Huan Liu.
+2020. Fakenewsnet: A data repository with news content, social context, and
+spatiotemporal information for studying fake news on social media. Big data 8,
+3 (2020), 171-188.
+[51] Shardul Suryawanshi, Bharathi Raja Chakravarthi, Mihael Arcan, and Paul Buite-
+laar. 2020. Multimodal meme dataset (MultiOFF) for identifying offensive content
+in image and text. In Proceedings of the second workshop on trolling, aggression
+and cyberbullying. 32-41.
+52] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne
+Lachaux, Timothée Lacroix, Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal
+Azhar, et al. 2023. Llama: Open and efficient foundation language models. arXiv
+preprint arXiv:2302.13971 (2023).
+[53] un [n.d.]. Understanding hate speech. https://www.un.org/en/hate-speech/
+understanding-hate-speech/what-is-hate-speech
+54] Riza Velioglu and Jewgeni Rose. 2020. Detecting hate speech in memes using
+multimodal deep learning approaches: Prize-winning solution to hateful memes
+challenge. arXiv preprint arXiv:2012.12975 (2020).
+(55] Ingrid Vendrell Ferran. 2021. Hate: Toward a four-types model. Review of
+Philosophy and Psychology (2021), 1-19.
+[56] Sebastian Wachs, Manuel Gamez-Guadix, and Michelle F Wright. 2022. Online
+hate speech victimization and depressive symptoms among adolescents: The
+protective role of resilience. Cyberpsychology, Behavior, and Social Networking
+25, 7 (2022), 416-423.
+[57] Yang Wu, Pengwei Zhan, Yunjian Zhang, Liming Wang, and Zhen Xu. 2021. Mul-
+timodal fusion with co-attention networks for fake news detection. In Findings
+of the association for computational linguistics: ACL-IJCNLP 2021. 2560-2569.
+[58] x2023 [n.d.]. Hateful Conduct. https://help.x.com/en/rules-and-policies/hateful-
+conduct-policy
+59] youtube2025 [n. d.]. Hate Speech Policy. https://support.google.com/youtube/
+answer/2801939
+[60] Wenwen Yu, Yuliang Liu, Wei Hua, Deqiang Jiang, Bo Ren, and Xiang Bai. 2023.
+Turning a clip model into a scene text detector. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. 6978-6988.
+61] Weibo Zhang, Guihua Liu, Zhuohua Li, and Fuqing Zhu. 2020. Hateful memes
+detection via complementary visual and linguistic networks. arXiv preprint
+arXiv:2012.04977 (2020).
+(62] Yuhui Zhang, Alyssa Unell, Xiaohan Wang, Dhruba Ghosh, Yuchang Su, Ludwig
+Schmidt, and Serena Yeung-Levy. 2024. Why are Visually-Grounded Language
+Models Bad at Image Classification? arXiv preprint arXiv:2405. 18415 (2024).
+[63] Xinyi Zhou, Jiayu Li, Qinzhou Li, and Reza Zafarani. 2023. Linguistic-style-aware
+neural networks for fake news detection. arXiv preprint arXiv:2301.02792 (2023).
+64] Xinyi Zhou, Apurva Mulay, Emilio Ferrara, and Reza Zafarani. 2020. Recovery:
+A multimodal repository for covid-19 news credibility research. In Proceedings of
+the 29th ACM international conference on information & knowledge management.
+3205-3212.
+[65] Xinyi Zhou, Jindi Wu, and Reza Zafarani. 2020. : Similarity-aware multi-modal
+fake news detection. In Pacific-Asia Conference on knowledge discovery and data
+mining. Springer, 354-367.
+66] Yi Zhou, Zhenhao Chen, and Huiyuan Yang. 2021. Multimodal learning for
+hateful memes detection. In 2021 IEEE International conference on multimedia &
+expo workshops (ICMEW). IEEE, 1-6.
+[67] Yangming Zhou, Yuzhou Yang, Qichao Ying, Zhenxing Qian, and Xinpeng Zhang.
+2023. Multimodal fake news detection via clip-guided learning. In 2023 IEEE
+International Conference on Multimedia and Expo (ICME). IEEE, 2825-2830.
+(68] Ron Zhu. 2020. Enhance multimodal transformer with external label and in-
+domain pretrain: Hateful meme challenge winning solution. arXiv preprint
+arXiv:2012.08290 (2020).
+
+A Details of Evaluation
+
+In this section, we provide details of baselines and implementation.
+
+Weibin Cai, Jiayu Li, and Reza Zafarani
+
+A.1_ Baselines
+
+The detailed description of the comparison baseline is as follows:
+
+e CLIP Text-Only: We use the CLIP text encoder as a uni-
+modal text-only model, without additional visual informa-
+tion. After obtaining the text embedding, it is fed into an
+MLP to directly predict the binary classification task.
+
+e CLIP Image-Only: We only use the CLIP image encoder
+to extract image embeddings as input for the downstream
+multilayer perceptron (MLP) classifier.
+
+e PromptHate [16]: Leverages PLMs to reframe multimodal
+detection as masked token prediction task.
+
+e HateCLIPper [28]: Uses CLIP to extract multimodal fea-
+tures, combined with various feature fusion methods.
+
+e ISSUES [13]: Relies on Textual Inversion [21] to enhance
+multimodal features, while a two-stage training strategy
+adapts the pre-trained model to hateful meme classification.
+
+e ExplainHM [32]: An explainable harmful meme detection
+approach where LLMs generate contradictory rationales, and
+a tunable language model judges meme harmfulness based
+on these rationales.
+
+e Zero-Shot: We use the same JE(-) and LLM to directly de-
+code without training. Given the prompt “<M> This meme
+is hateful or not?”, the prediction depends on whether the
+response includes “hateful” or “benign.”
+
+e Fine-tuned MLP: The SPM variant without a fine-tuned
+LLM. The obtained hsp is used as the input to a downstream
+MLP classifier, with only the classifier being trained.
+
+A.2 Implementation Details
+
+We use the GCN [27] as the GNN model in CRM. The LLM back-
+bone is meta-llama/Llama-2-7b-chat-hf; the image encoder IE(-)
+is openai/clip-vit-large-patch 14-336, combined with the pre-trained
+LLaVA projection layer; and the text encoder TE(-) uses the same
+LLM with pre-trained LoRA [12]; The downstream classifier is an
+MLP. The hyperparameter K in Eq. 5 is tuned based on performance,
+as detailed in the Parameter Sensitivity Analysis (Appendix B). Mod-
+els are evaluated on the validation set after each epoch, and the best
+one on the validation set is used for testing. The reported results
+are based on this test evaluation. All experiments are conducted on
+10 Quadro RTX 6000 GPUs.
+
+B_ Parameter Sensitivity Analysis
+
+In this section, we examine the sensitivity of the hyperparameter
+K in CRM, which determines the number of patch nodes connected
+to each token node. All experiments share the same configuration
+except for the value of K, which we vary among (1, 4, 8, 16} to assess
+its influence on model performance across the three datasets.
+
+As shown in Table 6, the model exhibits noticeable sensitivity to
+K. When K is larger, each token may connect to more irrelevant
+patches, introducing noise that degrades performance. Conversely,
+when K is small, fewer patches are connected to each token, which
+may lead to incomplete token-patch associations, making it diffi-
+cult for the model to capture their relationships. Additionally, the
+optimal choice of K varies across different datasets, depending on
+
+
+Unpacking Hateful Memes:
+Presupposed Context and False Claims
+
+Conference acronym XX, June 03-05, 2018, Woodstock, NY
+
+Table 6: Sensitivity of model performance on the parameter K
+
+Dataset FHM Harm-C Harm-P
+K AUC Accuracy Macro-F1 AUC Accuracy Macro-F1 AUC Accuracy Macro-F1
+i 87.64+0.10  80.09+0.41 78.95+0.29 | 93.42+0.22 88.3341.28  87.30+1.62 | 70.36+0.37 64.0642.63 63.4343.13
+4 87.51+0.40 80.12+0.66  79.14+0.71 | 93.9540.24 89.61+0.76 88.89+0.89 | 72.58+0.830 67.60+0.85 67.42+1.01
+8 87.69+0.49 80.39+0.15 79.28+0.30 | 93.60+0.31  87.68+4.00  86.28+45.09 | 69.8340.55  66.16+3.30  63.68+0.42
+16 83.354+6.91 76.0645.71 74.2846.94 | 93.45+0.02  89.37+0.44  88.67+0.43 | 68.80+3.78 64.0641.11 63.344+1.57
+Table 7: Performance on the Fake News Classification Task.
+Fake N Real N
+Dataset Model Accuracy Macro-F1 ae NEWS ca NWS
+Precision Recall Fi-score Precision Recall F1-score
+SAFE 93.95+0.72 85.7742.29  86.2443.20  66.67+7.64 74.97+4.20 94.91+1.10 98.29+0.61 96.56+0.39
+ReCOVer MCAN 85.72+0.00  56.99+5.34 100+0.00 11.67+6.30  20.52+10.24 87.71+0.77 100+0.00 93.45+0.44
+y CAFE 88.70+0.91 67.6845.45 75.80+15.20 30.84412.59 41.63+10.89  89.96+1.46 97.89+2.33 93.73+0.57
+SHIELD  97.61+0.91 95.0041.75 91.3947.54 91.6741.45 91.38+2.96 98.68+0.21 98.55+41.28 98.61+0.54
+SAFE 87.67+0.18  78.6840.12 74.1041.64 57.6541.32  64.82+0.28 90.15+0.23 95.04+0.53 92.53+0.14
+GossipC MCAN 81.4940.14 9 51.1241.11 91.33+7.53 6.79+1.28 12.60+2.17 81.36+0.19 99.82+0.16 89.65+0.06
+OSSIPOP CAFE —82.6240.34 66.1340.72 61.044159 32.5941.11 42.4941.25 85.1640.22 94.9040.24 89. 760.20
+“SHIELD = 89.00+0.51 81.602059 76.012434 65.0343.92 69.9421.08 91.7220.75 94.8841.41 93.26+0.37_
+
+factors such as meme complexity and image quality. Overall, per-
+formance consistently peaks when K lies between 4 and 8, striking
+a balance between coverage and noise suppression.
+
+Table 8: Summary of Fake News datasets.
+
+ReCOVery GossipCop
+
+Train #Real 867 6311
+#Fake 158 1627
+
+. #Real 126 905
+Valid guiice 20 229
+Test #Real 249 1821
+#Fake 43 447
+
+C Details of Fake News Classification
+
+In this section, we provide details of fake news dataset and results.
+
+C.1 Dataset
+
+The description of the fake news datasets are as follows:
+
+e ReCOVery [64] is a collect of COVID-related fake news. The
+authors first identify reliable and unreliable news sources,
+and then crawl COVID-19 news articles from these sites to
+construct the dataset.
+
+e GossipCop [50] is a fact-checking website for entertainment
+news aggregated from multiple media outlets. It provides
+rating scores on a scale of 0-10 to assess the degree of truth-
+fulness, where lower scores indicate more deceptive content.
+In constructing the dataset, the authors selected fake news
+items with scores below 5 and paired them with real news
+sampled from E! Online, a reputable and verified entertain-
+ment source.
+
+The summary for datasets is shown in Table 8
+
+C.2 Implementation Details
+
+Here, there are three key points to note: (1) MCAN and CAFE did not
+include a validation set in their original paper; their reported results
+were the best performance on the test set after each training epoch.
+In this paper, to ensure a fair and effective comparison of the model,
+we introduced a validation set. The best-performing model on the
+validation set was then used for testing. (2) When using SHIELD,
+we truncated the text in the ReCOVery and GossipCop datasets to
+the first 150 and 50 words, respectively, to fit the local GPU memory
+capacity. (3) These datasets only provide image links, many of which
+have become invalid over time. As a result, the dataset statistics
+differ from those reported in previous works [63, 67].
+
+Received 20 February 2007; revised 12 March 2009; accepted 5 June 2009

@@ -1,0 +1,875 @@
+arX1v:2510.10560v1 [cs.CL] 12 Oct 2025
+
+BitMar: Low-Bit Multimodal Fusion with Episodic Memory for Edge
+Devices
+
+Euhid Aman
+NTUST Taiwan
+M11315803@mail.ntust.edu. tw
+
+Giovanni Beltrame
+Polytechnique Montréal
+
+giovanni.beltrame@polymtl.ca
+
+Abstract
+
+Cross-attention transformers and other multi-
+modal vision-language models excel at ground-
+ing and generation; however, their extensive,
+full-precision backbones make it challenging
+to deploy them on edge devices. Memory-
+augmented architectures enhance the utilization
+of past context; however, most works rarely
+pair them with aggressive edge-oriented quan-
+tization. We introduce BitMar, a quantized
+multimodal transformer that proposes an ex-
+ternal human-like episodic memory for effec-
+tive image-text generation on hardware with
+limited resources. BitMar utilizes 1.58-bit en-
+coders, one for text (BitNet-style) and one for
+vision (DiNOv2-based), to create compact em-
+beddings that are combined and used to query a
+fixed-size key-value episodic memory. Dur-
+ing vector retrieval, the BitNet decoder ap-
+plies per-layer conditioning, which increases
+the contextual relevance of generated content.
+The decoder also employs attention sinks with
+a sliding-window mechanism to process long
+or streaming inputs under tight memory bud-
+gets. The combination of per-layer condition-
+ing and sliding-window attention achieves a
+strong quality—speed trade-off, delivering com-
+petitive captioning and multimodal understand-
+ing at low latency with a small model footprint.
+These characteristics make BitMar well-suited
+for edge deployment.
+
+Keywords: TinyVLM, Episodic memory, EdgeAI,
+Quantization.
+
+1 Introduction
+
+Visual Language Models (VLMs) have made rapid
+progress in recent years, excelling at tasks such as
+image captioning (Chen et al., 2015), visual ques-
+tion answering (Anderson et al., 2018; Li et al.,
+2022). Large-scale architectures such as BLIP-
+2 (Li et al., 2023), Flamingo (Alayrac et al., 2022),
+and Kosmos-2 (Peng et al., 2023) demonstrate
+that cross-attention transformers can synchronize
+
+Esteban Carlin
+NTUST Taiwan
+M11302809@mail.ntust.edu.tw
+
+Ghaluh Indah Permata Sari
+NTUST Taiwan
+d11115804@mail.ntust.edu.tw
+
+Hsing-Kuo Pao
+NTUST Taiwan
+
+pao@mail.ntust.edu. tw
+
+Yie-Tarng Chen
+NTUST Taiwan
+
+ytchen@mail.ntust.edu. tw
+
+modalities for grounded language generation. How-
+ever, their full-precision, extensive backbones incur
+significant computational and memory expenses,
+which restricts their implementation on devices
+with resource limitations.
+
+A growing body of work targets efficient mul-
+timodal processing, such as low-bit quantiza-
+tion (Dettmers et al., 2021; Frantar et al., 2022)
+and compact language models (Wang et al., 2023),
+to reduce memory/latency. Quantized ViTs (Jacob
+et al., 2018; Stock et al., 2019), and self-supervised
+vision encoders, such as DiNOv2 (Oquab et al.,
+2024), lower the cost of vision. Multimodal fu-
+sion ranges from early concatenation (Lu et al.,
+2019) to learned query transformers (Li et al.,
+2023) to bridge frozen vision and language models.
+Memory-augmented transformers (Graves et al.,
+2016; Borgeaud et al., 2022) retrieve past context
+to improve coherence. Yet no existing tiny lan-
+guage model effectively unifies low-bit multimodal
+encoding with an episodic memory system for edge
+deployment.
+
+To fill this gap, we propose a compact four-stage
+pipeline optimized for efficient on-device execu-
+tion: (1) 1.58-bit text and vision encoders gener-
+ate lightweight, quantized embeddings; (2) a cross-
+modal fusion module aligns the modalities within
+a shared latent space; (3) an episodic memory with
+512 key-value slots retrieves relevant multimodal
+context; and (4) a BitNet-based decoder condi-
+tions each transformer layer on the retrieved mem-
+ory for context-aware generation. Both encoders
+output 128-dimensional representations, and Di-
+NOv2’s original 768-D vision features are com-
+pressed to 128-D before fusion. The fused embed-
+ding queries an episodic memory of size K = 512,
+C = 128, whose retrieved vectors condition each
+decoder layer. This architecture maintains all mod-
+ules in a consistent 768-dimensional space, simpli-
+fying integration and minimizing projection over-
+head while ensuring low-latency, memory-efficient
+
+
+operation on edge hardware.
+Our main contributions are summarized as fol-
+lows:
+
+¢ Low-bit multimodal encoding framework.
+
+We propose a unified architecture that inte-
+grates a 1.58-bit quantized BitNet text encoder
+with a quantized ViT-based vision encoder,
+enabling efficient and compact multimodal
+feature extraction.
+
+Memory-augmented decoding mechanism.
+We design a lightweight episodic memory
+module that retrieves contextual representa-
+tions and injects them into each transformer
+layer through per-layer conditioning, enhanc-
+ing coherence and contextual relevance during
+generation.
+
+Edge-efficient multimodal reasoning. We
+demonstrate that BitMar achieves competitive
+performance in image captioning and multi-
+modal understanding under extreme compres-
+sion, maintaining low latency and a minimal
+memory footprint suitable for on-device de-
+ployment.
+
+2 Related Work
+
+Different VLMs and Tiny LLM architectures have
+emerged that enable deployment and applications
+of multimodal AI on resource-constrained de-
+vices. Recent developments in small VLMs, such
+as H2OVL-Mississippi (0.8B parameters) (Galib
+et al., 2024), TinyGPT-V (Yuan et al., 2024),
+and MiniCPM-V (Yao et al., 2024), demonstrate
+that compact multimodal models can achieve
+competitive performance while maintaining effi-
+cient deployment characteristics. Similarly, Tiny
+LLMs, such as MobileLLM (Liu et al., 2024) and
+TinyLLM (Zhang et al., 2024), have shown that
+sub-billion parameter models can be quantized and
+optimized for their deployment on edge devices.
+These highlight the feasibility of on-device multi-
+modal processing, with models providing meaning-
+ful performance while addressing security, latency,
+and connectivity constraints.
+
+Furthermore, memory-augmented neural net-
+works and language models inspired by cognitive
+thinking, such as humans, have also garnered signif-
+icant attention for their ability to store and retrieve
+contextual information related to specific things
+across certain short periods of time. Memory-
+augmented neural networks (MANNSs) (Graves
+
+et al., 2016), use decoupled key-value structures to
+store and retrieve contextual information. Recent
+works, such as EGO (Mattar and Daw, 2024) and
+selective episodic memory strategies (Mattar and
+Daw, 2022), have extended these ideas for flexi-
+ble knowledge transfer and context-based memory
+access. However, these models face limitations
+in combining memory systems with low-bit quan-
+tized multimodal encoders, often sacrificing either
+memory capacity or model precision.
+
+BitMar overcomes these challenges by integrat-
+ing 1.58-bit quantization across text and vision en-
+coders, alongside a cross-modal memory retrieval
+system. The design enables BitMar to store and
+retrieve both textual and visual context, improving
+memory interactions and enhancing multimodal
+generation tasks, all while maintaining computa-
+tional efficiency for edge deployment.
+
+3 Method
+
+We introduce BitMar, a deployable quantized mul-
+timodal LM for efficient image-text generation
+under tight resources. The four-stage pipeline
+is: (1) parallel low-bit text/vision encoders; (2)
+cross-modal fusion in a shared latent space; (3)
+context augmentation via external episodic mem-
+ory; (4) autoregressive decoding conditioned on
+fused and retrieved signals. Text uses a BitNet
+transformer at 1.58-bit precision; vision uses Di-
+NOv2 features plus quantization-aware compres-
+sion. Fusion aligns 768-D modality latents via
+lightweight attention. A fixed-size episodic mem-
+ory stores prior multimodal contexts and injects
+retrieved vectors into the decoder per layer. Un-
+like classic MANNSs (Graves et al., 2016), BitMar
+integrates cross-modal retrieval under low-bit con-
+straints. The decoder is a BitNet-based autoregres-
+sive transformer with streaming attention via atten-
+tion sinks for low-latency, long-context generation.
+
+3.1 Text Encoders
+
+Architecture. A 4-layer quantized Transformer
+(d=128, h=4) supports up to 256 tokens, balanc-
+ing expressiveness and efficiency.
+
+Quantization. Weights: all MHSA/FEN pro-
+jections use ternary {—1,0, +1} with learned per-
+layer scales (1.58-bit). Activations: token-wise 8-
+bit using per-token max-abs scaling to [—127, 127],
+preserving local detail and stable training/infer-
+ence.
+
+Attention sinks (streaming). With S=4 sink
+
+
+@
+1.58Bit Quantization Corpbined Vein airedinens ots
+Hn See eo
+- 4 $ $ .
+VE _image Encoder blockn
+rd Encoder block n | Image Encoder block n
+—. Encoder block 1 | Image Encoder block 1
+
+1.58-bit Quantization }
+
+1.58-bit Quantization
+DINOV? I
+
+Eafe. Fs
+Read operation m ‘
+(Readopeaton JQ] fi 7
+.
+Wr ms es
+Se —
+Sliding Window
+[1020 Tokens}
+as !
+Kx C memory matrix ee ———
+/
+Write operation Wo ‘
+MOO toss the of | Per |
+Y % Y % Ws
+x: Soft Pears are Green in color
+x color.
+
+Data Episode of length n/
+
+Figure 1: BitMar Architecture. The model processes multimodal inputs: text tokens and DiNOv2-compressed
+image features. Quantized encoders (1.58-bit) generate compact text and vision embeddings (z, v), which are fused
+via cross-modal attention into shared query representations (Q, Q query). A Sliding-window attention mechanism
+enables long-context processing. A fixed episodic memory matrix ( x C’) stores and retrieves multimodal context
+vectors through quantized read/write weights (W, Wo), supporting optional SD-card offloading for edge deployment.
+
+tokens (never evicted) and window W =1020, the
+KV cache maintains persistent anchors + recent
+tokens. On each new token, the oldest in-window
+token is evicted; sink and window sets are merged;
+positions are clamped to [0, S-++-W—1]. This yields
+fixed-memory, long-context attention under low-bit
+compute.
+
+3.2 Vision Encoders
+
+We use frozen DiNOv2 (Oquab et al., 2024) to ex-
+tract 768-D patch features offline, avoiding heavy
+vision backbones at inference. 22 average pool-
+ing reduces the number of patches 4x while keep-
+ing 768-D per patch. 2-layer MLP bottleneck then
+compresses 768— 128 with ReLU and dropout be-
+tween layers (parameters W1 € R°*4*76 Wo
+IR128x384) all subsequent fusion/memory/decoder
+paths operate in 128-D.
+
+3.3. Cross-Modal Fusion
+
+Given pooled text tokens Z € R”**!?8 and vision
+tokens Vimg € IR” *128 we apply standard cross-
+attention (Vaswani et al., 2017) (text queries, vision
+keys/values; cf. Transformer attention) to obtain
+the fused sequence F € R™*8. All Q/K/V
+and fusion projections use 1.58-bit ternary weights
+with learned scales; softmax and residual/LN are in
+FP32. We then pool F (mean or learned) to a single
+vector mem € R!?° to query episodic memory.
+
+3.4 Episodic Memory
+
+We maintain a learnable matrix M ¢ R**©
+(default K=512, C=128) that stores multimodal
+episode vectors.
+
+Writing. At step t, we compute a pooled query
+qt € R© and learned write weights W,, € R*,
+
+We perform soft multi-slot writes with rate a=0.2
+via an outer product:
+
+M+M+awW,q/. (1)
+Reading. We use content-based addressing
+(Graves et al., 2016):
+
+W,. = softmax(M q) € R*,
+
+M,=W/MeR!*¢. ¥)
+Regularization. To avoid thrashing, we penalize
+abrupt updates to the store with a Frobenius penalty,
+Lreg = A||AM||,. AM := M® — Me),
+We additionally apply usage-based forgetting to
+down-weight stale slots.
+
+3.4.1 Decoder with Attention Sinks
+
+A 4-layer causal Transformer (d=128, h=4, max
+length 256) conditions on fused inputs and re-
+trieved memory.
+
+Long-context generation. Each layer, similarly
+as the text encoder, maintains KV caches of S sink
+tokens and a window of W recent tokens.
+
+Memory integration. M, € R!*!?8 is pro-
+jected and combined with token embeddings via
+either concatenation [x,; M,] (then projected) or
+residual addition 7;+M,.
+
+Output projection. BitNet-quantized linear
+layer (128-450,257) maps to GPT-2 vocab logits;
+logits computed in FP32.
+
+3.4.2 Training Objectives
+
+We complement standard Language Modeling
+cross-entropy (Vaswani et al., 2017) and an In-
+foNCE cross-modal (Oord et al., 2018) term with
+a memory-consistency regularizer Equation 3 that
+
+
+penalizes changes between successive writes to the
+episodic store, which discourages oscillatory up-
+dates and helps retain slot semantics. The total
+loss integrates these factors as Equation 4. We set
+Lom = 1.5 to prioritize cross-modal alignment, and
+Lmem = 0.1 as a light stabilizer.
+Memory consistency.
+Livem = [Mire ~ Myre’ 133)
+
+write write
+
+Total objective.
+L= Lim “P 1.5£Lom + 0.1Lmem (4)
+
+Adaptive Training Controller. When a 200-
+step EMA of cross-modal cosine similarity drops
+by > 0.12 from its recent max (with an >800-step
+cooldown), we randomly freeze one encoder or
+upweight Lom for 1,500 steps to prevent modality
+collapse.
+
+4 Experimental Setup
+
+Our experimental framework systematically eval-
+uates the proposed 14M-parameter BitMar model
+across several critical dimensions. We first bench-
+mark its performance against established compact
+and low-bit baselines to assess overall viability (Ta-
+ble 1). We then conduct an analysis of its capabili-
+ties across a suite of language understanding and
+multimodal tasks to identify specific strengths and
+limitations (Table 2). Beyond task performance, we
+also investigate the internal dynamics of the model,
+examining how the episodic memory evolves from
+diffuse to structured activation patterns during train-
+ing (Figure 2). Finally, we track the progression of
+quantization efficacy throughout the training pro-
+cess to validate our low-precision approach (Fig-
+ure 3).
+
+4.1 Dataset
+
+The corpus comprises 100M tokens, split evenly
+between multimodal captions and text-only data.
+
+Multimodal (50M). From CC3M (Sharma et al.,
+2018) and Localized Narratives (Pont-Tuset et al.,
+2020), aligned with precomputed DiNOv? features
+(frozen backbone, reused across training).
+
+Text-only (50M). From BabyLM (Charpen-
+tier et al., 2025), spanning six domains (BNC,
+CHILDES, Gutenberg, OpenSubtitles, Simple En-
+glish Wikipedia, Switchboard).
+
+Mixture. Uniform 50:50 sampling; a 1M-token
+hold-out tracks cross-modal alignment (cosine sim-
+ilarity) and perplexity.
+
+Preprocessing. GPT-2 BPE tokenizer, max 256
+tokens (truncate/pad). Visual features stored as
+memory-mapped “.npy” with on-the-fly compres-
+sion for efficient batching.
+
+4.2 Training Configuration
+
+We trained on an NVIDIA A6000 GPU using FP16
+and gradient checkpointing. Each step processed
+64 sequences, with two-step gradient accumula-
+tion yielding an effective batch size of 128. Op-
+timization used AdamW8bit (2 x 10~*) with co-
+sine restarts (To=1000, Tinut=2; Nmin=0.1lr) for
+10 epochs. We logged to Weights & Biases ev-
+ery 500 steps, including losses (Lim, Lem, mem);
+cross-modal alignment metrics, episodic-memory
+utilization, attention maps, and FLOPs per step.
+
+4.3 Hyperparameters
+
+The model architecture employs a four-layer text
+encoder with 128-dimensional hidden states. The
+episodic memory module comprises 512 slots, each
+with 128 dimensions, balancing memory footprint
+with recall capacity. For long-context streaming,
+we maintain four sink tokens with a sliding window
+of 1020 tokens. Training utilizes weighted losses
+with cross-modal and memory consistency coef-
+ficients of 1.5 and 0.1, respectively. An adaptive
+controller triggers memory freezing when align-
+ment metrics drop by 0.12 from their recent maxi-
+mum, applying 1,500-step freezes with a minimum
+interval of 800 steps between interventions.
+
+4.4 Benchmarks and Baselines
+
+We evaluate on six language benchmarks: ARC-
+Easy, BoolQ, HellaSwag, WinoGrande, Com-
+monsenseQA, and MMLU, plus multimodal tasks
+aligned with DiNOv2 features. Outputs are evalu-
+ated by accuracy and compared against baselines
+(Bonsai 0.5B, OLMo-BitNet 1B, Falcon3-1.58bit
+7B, LLAMA3-SB-1.58, and BitNet b1.58 2B). Be-
+yond benchmarks, we track the effectiveness of
+quantization and episodic activations to assess rep-
+resentational efficiency and memory use.
+
+5 Results and Discussion
+
+5.1 BitMar’s performance
+
+Figure 2 shows episodic memory slot activations
+over training. Early on Figure 2(a), activations are
+weak and scattered, with minor specialization or
+proper storage. By late training Figure 2(b), acti-
+vations strengthen and differentiate, indicating se-
+
+
+lective storage of contextual features. This progres-
+sion demonstrates that extended joint optimization
+enables the memory to evolve into a more struc-
+tured, capacity-efficient component for long-term
+context integration.
+
+Epoch 0
+
+Steo one
+
+La
+
+i f | ‘i i 1 |
+tant
+
+WiLL A ni eh ila
+
+{tt |!
+OU ey
+
+1 al iy it
+in I \ |
+
+tr jaa B ithe) ht "ih
+1 UU Tn ah A ih i} ee
+
+ht i
+a) i {I 1 |
+tele caked ate by Ey!
+al WEE | fh I! :
+DA a
+
+VP Bl | i WM ee ly.
+Tl
+| | mani |
+ul iit ui if
+
+(a) (b)
+
+Figure 2: Episodic Memory Activation Patterns. (a)
+Early training shows scattered and weak activations
+with minimal specialization. (b) Late training exhibits
+stronger and more differentiated activations, reflecting
+the emergence of structured memory representations.
+
+i His
+
+We measure the quantization effectiveness Ey,
+inspired by (Zhu et al., 2016), as the zero-weight
+fraction in ternary weights across BitNet-quantized
+layers, where a higher value means more compres-
+sion.
+
+As training progresses (Figure 3), E, gradually
+increases and stabilizes at 42.8%, demonstrating ef-
+fective compression without degrading downstream
+performance.
+
+Quantization/Compression_Effectiveness
+
+Figure 3: Quantization effectiveness over training
+epochs.
+
+Table 1 compares BitMar-14M with low-bit
+baselines. Despite its small size (14M param-
+eters), it achieves competitive performance on
+Bool@Q (42.8) and WinoGrande (54.6), demonstrat-
+ing strength in binary reasoning and coreference.
+
+On ARC-Easy (28.3) and HellaSwag (30.0), it lags
+larger models, reflecting limits in multi-step reason-
+ing. CommonsenseQA (24.6) and MMLU (27.9) re-
+main challenging due to restricted factual coverage.
+Still, BitMar achieves non-trivial accuracy across
+all tasks, confirming that extreme compression
+can yield usable models for targeted workloads,
+though with expected trade-offs in knowledge-
+heavy benchmarks.
+
+As shown in Table 2, BitMar achieves an
+average 60.5% across finetuned NLP bench-
+marks, with strong results on paraphrase (QQP:
+70.2%, MRPC: 69.1%) and reading comprehension
+(BoolQ: 66.5%), but weaker performance on infer-
+ence (MNLI: 42.3%, RTE: 54.0%). Multimodal
+tasks yield modest scores (21-25%), with the best
+results on EWoK (24.9%), likely benefiting from
+episodic memory. Linguistic analysis shows rea-
+sonable syntax (BLIMP: 48.7%) and compositional
+reasoning (51.5%), but poor morphological pro-
+ductivity (WUG: -0.16/-0.22). Overall, BitMar bal-
+ances extreme efficiency with usable performance,
+excelling in lightweight reasoning while struggling
+on complex multimodal and morphological tasks.
+
+5.2 Ablation Study: Episodic Memory
+
+Evaluated under BabyLM 2025 evaluation pipeline
+(same as Table 2).
+
+Efficiency. As Table 3 reports, a fixed retrieved
+vector supplies context each step, reducing long-
+range attention while keeping 1.58-bit compute.
+
+Zero-shot accuracy in A (pp). Table 4 reports
+the performance differences on zero-shot tasks.
+Overall, the results suggest that incorporating addi-
+tional contextual information generally enhances
+task accuracy.
+
+Regressions. We observe two regressions. First,
+regarding WUG morphology, correlations are nega-
+tive, —0.36 for adjectives and —0.16 for past tense,
+indicating reduced morphological productivity un-
+der extreme quantization. Second, reading align-
+ment scores are lower with memory (0.44/0.11)
+than without (1.11/0.66), suggesting that episodic
+conditioning can dampen psycholinguistic align-
+ment. Tuning memory capacity or injection strat-
+egy may mitigate this.
+
+Fine-tuning. No _ significant changes on
+BoolQ/MNLI/MRPC/MultiRC/QQP/RTE/WSC,
+suggesting memory mainly affects generation, not
+supervised heads.
+
+
+Model Native 1-bit ARC-Easy BoolQ  HellaSwag WinoGrande CommonsenseQA MMLU
+Bonsai 0.5B v 58.25 58.44 48.01 54.46 18.43 25.74
+OLMo-BitNet 1B v 25.38 52.48 25.88 51.54 19.49 25.47
+Falcon3-1.58bit 7B x 65.03 72.14 59.46 60.14 67.08 42.79
+LLaMA3-8B-1.58 8B x 70.71 68.38 68.56 60.93 28.50 35.04
+BitNet b1.58 2B v 74.79 80.18 68.44 71.90 71.58 53.17
+BitMar-14M (Ours) v 28.32 42.83 30.04 54.57 24.57 27.90
+
+Table 1: Benchmark performance on language understanding tasks. A V indicates models trained natively with
+1-bit precision. All reported values correspond to task accuracy (%), illustrating BitMar’s competitive performance
+under extreme compression.
+
+Category Task Primary Metric Score
+Finetune NLP BoolQ Accuracy 66.5%
+MNLI Accuracy 42.3%
+MRPC Accuracy 69.1%
+MultiRC Accuracy 57.6%
+QQP Accuracy 710.2%
+RTE Accuracy 54.0%
+WSC Accuracy 63.5%
+Multimodal DevBench Visual Vocab Acc. 21.2%
+VORA Accuracy 21.4%
+Winoground Accuracy 23.8%
+World Knowledge EWOK Accuracy 24.9%
+Linguistic BLIMP Accuracy 48.7%
+Reasoning Compositional Accuracy 51.5%
+Entity Tracking Accuracy 31.2%
+Psycholing. Reading Comp. Score 0.44
+Morphology Wug Adj. Corr. -0.16
+Wug Past Corr. -0.22
+
+Table 2: BitMar results on BabyLM evaluation tasks.
+
+Metric Mem. On Mem. Off Task A (pp)
+Throughput (tok/s) 57.3 Ted Entity Tracking (Split 1) 42.9
+Latency/token (ms) 17.3 129.8 Entity Tracking (Split 2) +4.1
+Energy (J) 1.90 9.17 COMPS +3.4
+RAM (MB) 956 1,076 BLiMP +0.6
+VQA +3.4
+Table 3: Inference ablation metrics. Comparison of EWokK (Split 1) 16
+throughput, latency, energy consumption, and memory EWoK (Split 2) 41.0
+meas’: Winoground —1.6
+DevBench No effect
+
+Ablation Summary. Episodic Memory is ~7.5 x
+faster, using 79% less energy and 11% less VRAM
+in our tests. It delivers 3 — 4 percentage point
+gains on entity/property reasoning and multimodal
+QA, though morphology and some psycholinguis-
+tic alignment metrics can degrade. Overall, combin-
+ing attention sinks with episodic memory enables
+
+Table 4: Ablation results on episodic memory. Per-
+formance differences (A, in percentage points), positive
+values indicate improvements when memory is enabled.
+
+reasoning, and an external episodic latent memory
+for deployment on resource-constrained edge de-
+
+efficient long-context use under tight resource bud-
+gets.
+
+6 Conclusion
+
+BitMar-14M is a compact 1.58-bit multimodal
+language model using BitNet quantization, Di-
+NOv?2 vision compression, cross-modal fusion, an
+attention-sink decoder for efficient long-context
+
+vices. With adaptive training, it maintains stable
+alignment and memory use despite its tiny size.
+Though less accurate than larger low-bit models on
+knowledge-heavy tasks, it performs competitively
+on binary reasoning and coreference, showing that
+1.58-bit compression and efficient design can en-
+able multimodal reasoning with drastically reduced
+compute and storage.
+
+
+References
+
+Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, An-
+toine Miech, Iain Barr, Yana Hasson, Karel Lenc,
+Arthur Mensch, Katie Millicah, Malcolm Reynolds,
+Roman Ring, Eliza Rutherford, Serkan Cabi, Tengda
+Han, Zhitao Gong, Sina Samangooei, Marianne
+Monteiro, Jacob Menick, Sebastian Borgeaud, An-
+drew Brock, Aida Nematzadeh, Sahand Sharifzadeh,
+Mikolaj Binkowski, Ricardo Barreira, Oriol Vinyals,
+Andrew Zisserman, and Karen Simonyan. 2022.
+Flamingo: a visual language model for few-shot
+learning. In Proceedings of the 36th International
+Conference on Neural Information Processing Sys-
+tems, NIPS ’22, Red Hook, NY, USA. Curran Asso-
+ciates Inc.
+
+Peter Anderson, Xiaodong He, Chris Buehler, Damien
+Teney, Mark Johnson, Stephen Gould, and Lei Zhang.
+2018. Bottom-Up and Top-Down Attention for Im-
+age Captioning and Visual Question Answering . In
+2018 IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 6077-6086, Los
+Alamitos, CA, USA. IEEE Computer Society.
+
+Antoine Borgeaud, Arthur Mensch, Jordan Hoff-
+mann, Trevor Cai, Sebastian Rutherford, Matthew
+Botvinick, Jean-Baptiste Sifre, and Stan Clark. 2022.
+Improving language models by retrieving from tril-
+lions of tokens. International Conference on Ma-
+chine Learning (ICML), 162:2209-2226.
+
+Lucas Charpentier, Leshem Choshen, Ryan Cotterell,
+Mustafa Omer Gul, Michael Hu, Jaap Jumelet, Tal
+Linzen, Jing Liu, Aaron Mueller, Candace Ross,
+Raj Sanjay Shah, Alex Warstadt, Ethan Wilcox, and
+Adina Williams. 2025. BabyLM turns 3: Call for
+papers for the 2025 BabyLM workshop. In BabyLM
+Turns 3: Call for papers for the 2025 BabyLM work-
+shop, pages 2—3, Suzhou, China.
+
+Xinlei Chen, Hao Fang, Tsung-Yi Lin, Ramakr-
+ishna Vedantam, Saurabh Gupta, Piotr Dollar, and
+C. Lawrence Zitnick. 2015. Microsoft coco cap-
+tions: Data collection and evaluation server. CoRR,
+abs/1504.00325.
+
+Tim Dettmers, Mike Lewis, Sam Shleifer, and Luke
+Zettlemoyer. 2021. 8-bit optimizers via block-wise
+quantization. CoRR, abs/2110.02861.
+
+Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and
+Dan Alistarh. 2022. GPTQ: accurate post-training
+quantization for generative pre-trained transformers.
+CoRR, abs/2210.17323.
+
+Shaikat Galib, Shanshan Wang, Guanshuo Xu, Pascal
+Pfeiffer, Ryan Chesler, Mark Landry, and Sri Satish
+Ambati. 2024. H2ovl-mississippi vision language
+models technical report.
+
+Alex Graves, Greg Wayne, Malcolm Reynolds,
+Tim Harley, Ivo Danihelka, Agnieszka Grabska-
+Barwinska, Sergio Gé6mez Colmenarejo, Edward
+Grefenstette, Tiago Ramalho, John Agapiou,
+Adria Puigdoménech Badia, Karl Moritz Hermann,
+
+Yori Zwols, Georg Ostrovski, Adam Cain, Helen
+King, Christopher Summerfield, Phil Blunsom, Ko-
+ray Kavukcuoglu, and Demis Hassabis. 2016. Hybrid
+computing using a neural network with dynamic ex-
+ternal memory. Nature, 538(7626):47 1-476.
+
+Benoit Jacob, Skirmantas Kligys, Bo Chen, Meng-
+long Zhu, Matthew Tang, Andrew Howard, Hartwig
+Adam, and Dmitry Kalenichenko. 2018. Quanti-
+zation and training of neural networks for efficient
+integer-arithmetic-only inference. In Proceedings of
+the IEEE Conference on Computer Vision and Pat-
+tern Recognition (CVPR).
+
+Junnan Li, Dongxu Li, Silvio Savarese, and Steven
+Hoi. 2023. Blip-2: bootstrapping language-image
+pre-training with frozen image encoders and large
+language models. In Proceedings of the 40th Interna-
+tional Conference on Machine Learning, ICML’23.
+JMLR.org.
+
+Junnan Li, Dongxu Li, Caiming Xiong, and Steven C. H.
+Hoi. 2022. BLIP: bootstrapping language-image pre-
+training for unified vision-language understanding
+and generation. In International Conference on Ma-
+chine Learning, ICML 2022, 17-23 July 2022, Balti-
+more, Maryland, USA, volume 162 of Proceedings
+of Machine Learning Research, pages 12888-12900.
+PMLR.
+
+Zechun Liu, Changsheng Zhao, Forrest Iandola, Chen
+Lai, Yuandong Tian, Igor Fedorov, Yunyang Xiong,
+Ernie Chang, Yangyang Shi, Raghuraman Krish-
+namoorthi, et al. 2024. Mobilellm: Optimizing sub-
+billion parameter language models for on-device use
+cases. arXiv preprint arXiv:2402.14905.
+
+Jiasen Lu, Dhruv Batra, Devi Parikh, and Stefan Lee.
+2019. ViLBERT: pretraining task-agnostic visiolin-
+guistic representations for vision-and-language tasks.
+Curran Associates Inc., Red Hook, NY, USA.
+
+Marcelo G. Mattar and Nathaniel D. Daw. 2022. A
+neural network model of when to retrieve and encode
+episodic memories. eLife, 11:e74445.
+
+Marcelo G. Mattar and Nathaniel D. Daw. 2024. To-
+ward the emergence of intelligent control: Episodic
+generalization and optimization. Open Mind.
+
+Aaron van den Oord, Yazhe Li, and Oriol Vinyals. 2018.
+Representation Learning with Contrastive Predic-
+tive Coding. arXiv:1807.03748 [cs, stat]. ArXiv:
+1807.03748.
+
+Maxime Oquab, Timothée Darcet, Théo Moutakanni,
+Huy Vo, Marc Szafraniec, Vasil Khalidov, Pierre Fer-
+nandez, Daniel Haziza, Francisco Massa, Alaaeldin
+El-Nouby, Mahmoud Assran, Nicolas Ballas, Woj-
+ciech Galuba, Russell Howes, Po-Yao Huang, Shang-
+Wen Li, Ishan Misra, Michael Rabbat, Vasu Sharma,
+Gabriel Synnaeve, Hu Xu, Hervé Jegou, Julien
+Mairal, Patrick Labatut, Armand Joulin, and Piotr
+Bojanowski. 2024. Dinov2: Learning robust visual
+features without supervision.
+
+
+Zhiliang Peng, Wenhui Wang, Li Dong, Yaru Hao,
+Shaohan Huang, Shuming Ma, and Furu Wei. 2023.
+Kosmos-2: Grounding multimodal large language
+models to the world.
+
+Jordi Pont-Tuset, Jasper Uijlings, Soravit Changpinyo,
+Radu Soricut, and Vittorio Ferrari. 2020. Connect-
+ing vision and language with localized narratives.
+In Computer Vision — ECCV 2020: 16th European
+Conference, Glasgow, UK, August 23-28, 2020, Pro-
+ceedings, Part V, page 647-664, Berlin, Heidelberg.
+Springer-Verlag.
+
+Piyush Sharma, Nan Ding, Sebastian Goodman, and
+Radu Soricut. 2018. Conceptual captions: A cleaned,
+hypernymed, image alt-text dataset for automatic im-
+age captioning. In Proceedings of the 56th Annual
+Meeting of the Association for Computational Lin-
+guistics (Volume 1: Long Papers), pages 2556-2565,
+Melbourne, Australia. Association for Computational
+Linguistics.
+
+Pierre Stock, Armand Joulin, Rémi Gribonval, Ben-
+jamin Graham, and Hervé Jégou. 2019. And the
+bit goes down: Revisiting the quantization of neural
+networks. CoRR, abs/1907.05686.
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz
+Kaiser, and Illia Polosukhin. 2017. Attention is all
+you need. In Advances in neural information pro-
+cessing systems, pages 5998-6008.
+
+Hongyu Wang, Shuming Ma, Li Dong, Shaohan Huang,
+Huaijie Wang, Lingxiao Ma, Fan Yang, Ruiping
+Wang, Yi Wu, and Furu Wei. 2023. Bitnet: Scal-
+ing 1-bit transformers for large language models.
+
+Yuanhan Yao, Qinghao Yu, Ao Zhang, Xiaoyi Wang,
+Zhiyang Xu, Chendong Yuan, Ying Wang, Yaoyao
+Liu, Kunchang Wang, Yunhai Yu, et al. 2024.
+Minicpm-v: A gpt-4v level mllm on your phone.
+arXiv preprint arXiv:2408.01800.
+
+Zhengqing Yuan, Zhaoxu Ren, Lichao Feng, Zhi Zhao,
+Kai Cui, and Shiliang Jiang. 2024. Tinygpt-v: Ef-
+ficient multimodal large language model via small
+backbones. arXiv preprint arXiv:2312.16862.
+
+Wei Zhang, Xiaoming Liu, Hao Chen, and Yifan Wang.
+2024. Tinyllm: A framework for training and deploy-
+ing language models at the edge computers. arXiv
+preprint arXiv:2412. 15304.
+
+Chenzhuo Zhu, Song Han, Huizi Mao, and William J.
+Dally. 2016. Trained ternary quantization. CoRR,
+abs/1612.01064.

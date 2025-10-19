@@ -1,0 +1,832 @@
+arXiv:2212.09682v1 [cs.CL] 19 Dec 2022
+
+Multilingual Sequence-to-Sequence Models for Hebrew NLP
+
+Matan Eyal
+Idan Szpektor
+
+Hila Noga
+
+Roee Aharoni
+Reut Tsarfaty
+
+Google Research
+{matane, hilanoga, roeeaharoni, szpektor, reutt }@google.com
+
+Abstract
+
+Recent work attributes progress in NLP to
+large language models (LMs) with increased
+model size and large quantities of pretraining
+data. Despite this, current state-of-the-art LMs
+for Hebrew are both under-parameterized and
+under-trained compared to LMs in other lan-
+guages. Additionally, previous work on pre-
+trained Hebrew LMs focused on encoder-only
+models. While the encoder-only architecture
+is beneficial for classification tasks, it does not
+cater well for sub-word prediction tasks, such
+as Named Entity Recognition, when consid-
+ering the morphologically rich nature of He-
+brew. In this paper we argue that sequence-
+to-sequence generative architectures are more
+suitable for LLMs in the case of morphologi-
+cally rich languages (MRLs) such as Hebrew.
+We demonstrate that by casting tasks in the
+Hebrew NLP pipeline as text-to-text tasks, we
+can leverage powerful multilingual, pretrained
+sequence-to-sequence models as mT5, elimi-
+nating the need for a specialized, morpheme-
+based, separately fine-tuned decoder. Us-
+ing this approach, our experiments show sub-
+stantial improvements over previously pub-
+lished results on existing Hebrew NLP bench-
+marks. These results suggest that multilin-
+gual sequence-to-sequence models present a
+promising building block for NLP for MRLs.
+
+1 Introduction
+
+In recent years, large pretrained language models
+showed impressive results in a variety of NLP tasks
+(Devlin et al., 2019; Raffel et al., 2020), domains
+(Beltagy et al., 2019; Araci, 2019), and languages
+(Antoun et al., 2020; Chan et al., 2020). These
+models were trained in a self-supervised fashion on
+large corpora with language modeling objectives.
+By doing this, models are taking advantage of in-
+formation available in the training data without any
+access to explicit labels (Petroni et al., 2019). Re-
+cent works (Kaplan et al., 2020; Hoffmann et al.,
+2022) argue that language models capabilities scale
+
+yey pt
+
+Token-level NER
+| 2xw'? :GPE $$ a7'xnn :GPE
+
+Question Answering
+q1027 Yay 7INn :context
+TuyynNa , 77 FW TIN Ww
+7'T N'wWIN Ao Vw INVaYn
+m mora :question "1""'y
+pina yay
+
+Morpheme-level NER
+
+| Txw' :GPE $$ t7'xn :GPE
+NER
+ora nNwy
+
+Positive mT5 TaTRNN O'VAN
+
+Segmentation Tw"?
+( YN@@N@@? o'vrn@@n
+POS tagging
+
+Sentiment Analysis
+ANRW ANNW NX
+“nw NWI
+Annn?72xyyANAAAA
+
+NOUN<<0'y'"8n@@DET<<n
+PROPN<<y1N@@DET<<n@@ADP<<7
+
+Morpho syntactic
+Tow? ovann
+
+Lemmatization
+
+yan<<p'yaun@@n<<n
+yon<<y1N@@n<<n@@7<<?
+
+Figure 1: Finetuning mT5 on Hebrew tasks in text-to-
+text settings
+
+as a power-law with model size, dataset size, and
+the amount of compute used for training.
+
+After the success such models achieved on En-
+glish benchmarks, analogous language-specific
+models were developed to improve benchmark re-
+sults in a variety of languages such as Arabic and
+French to name a few (Antoun et al., 2020; Martin
+et al., 2020). Hebrew NLP was no different with
+a number of BERT variations (Devlin et al., 2019)
+proposed: HeBERT (Chriqui and Yahav, 2022),
+AlephBERT (Seker et al., 2022), and recently Ale-
+phBERTGimmel (ABG) a variation of AlephBERT
+with a larger vocabulary (Guetta et al., 2022).
+
+Contrary to the scaling laws proposed in Kaplan
+et al. (2020), all of the Hebrew variations of BERT
+are both trained with a relatively small pretrain-
+ing data, and are under-parameterized. In terms
+of training data, HEBERT and AlephBERT (and
+similarly ABG) were trained on 10.5GB and 16GB
+of Hebrew pretraining data respectively. mT5 (Xue
+et al., 2021) in comparison, was trained on mC4,
+where its public replica! is a 27TB collection of
+natural text in 101 languages drawn from the pub-
+lic Common Crawl, 66GB of which is Hebrew
+(4.125x more Hebrew training data compared to
+
+‘https://github.com/allenai/allennlp/discussions/5265
+
+
+AlephBERT). In terms of the model size, ABG, the
+largest Hebrew LM, has 60x and 945x fewer param-
+eters compared to English T5 XXL (Raffel et al.,
+2020) and GPT3 (Brown et al., 2020), respectively,
+language models that were released two years ear-
+lier. Although English T5 is a much larger model
+than available Hebrew language models, it can still
+be fine-tuned on common GPUs. See Appendix A
+for more details.
+
+In addition to scale differences, all previous He-
+brew LMs use an encoder-only architecture, even
+though the morphological complexity of Hebrew
+and other morphologically rich languages (MRLs)*
+pose challenges for the effectiveness of this model.
+Consider the task of POS tagging: Assigning POS
+tags for the phrase “babayit halavan”? requires
+to initially segment the phrase to its morphemes
+and only then assign each morpheme its match-
+ing POS tag. Since the number of input tokens
+does not match the number of output tags (2 input
+words and 5 output tags, one for each morpheme), a
+one-to-one token-to-tag classification head, as com-
+monly employed in encoder-only models, is not fea-
+sible. The same problem appears in semantic tasks
+like Question-Answering (QA) and Named Entity
+Recognition (NER). For example, the named entity
+for “babayit halavan” is “habayit halavan”.
+This goes beyond what encoder-only models can
+do by requiring the model to label a string that is
+not part of the input text.
+
+To overcome this architectural obstacle in
+encoder-only models, AlephBERT authors used
+Brusilovsky and Tsarfaty (2022) three-step seg-
+mentation and tagging approach: Contextualize
+the input, pass resulting embeddings to LSTM de-
+coder that generates the segmentation separated by
+a space symbol, finally pass the white space repre-
+sentation to a classification head. While effective
+for morpho-syntactic tasks, these additional archi-
+tecture components do not enable full generartive
+capabilities and are not pretrained, therefore cannot
+benefit from some of pretrained LMs advantages.
+
+In contrast, sequence-to-sequence models can
+simply take the raw text as input and, for POS
+tagging for example, generate the morphemes and
+tags in sequence, for example:
+
+°MRLs, in contrast configurational languages (e.g. En-
+glish), express grammatical functions at the word level via
+phenomena such as inflectional affixes, pronominal clitics, etc.
+
+Hebrew transcribed to English. Translated as “In the
+White House". The phrase is made of the morphemes be-
+
+ha-bayit ha-lavan (in-the-house the-white), but written and
+pronounced as “babayit halavan" without explicit boundaries.
+
+be»ADP@@ha»DET@@bayit»NOUN
+
+ha»DET@@lavan»NOUN
+“@@” acts as a morpheme delimiter within a word
+and “»" is the morpheme-tag delimiter. See
+Sec. 3 for more details. For NER and Question-
+Answering we can simply generate the target word
+forms without explicitly going through a segmen-
+tation phase. This change in approach to using
+sequence-to-sequence modeling is relevant for all
+MRLs, and in this paper we demonstrate its effec-
+tiveness specifically for Hebrew.
+
+This work thus identifies the challenge of current
+Hebrew NLP as a three-faceted problem: Under-
+parameterization, limited training data, as well
+as the use of a suboptimal pre-training architec-
+ture.4 To address these three challenges at once,
+we propose using mT5 (Xue et al., 2021), a large
+multilingual sequence-to-sequence model that was
+pretrained on a vast amount of multilingual data
+including a significant amount of Hebrew data.°
+To adapt classification, span prediction, and to-
+ken/morpheme classification tasks to mTS’s text-
+to-text paradigm, we propose the text-only formu-
+lations illustrated in Figure 1. Subsequently, we re-
+port here that this paradigm change produces empirt-
+ical improvements on all tasks evaluated compared
+to previous state-of-the-art, some of which are dra-
+matic, as 27.9 Fl increase in Hebrew Question-
+Answering.
+
+2 Modeling
+
+We use mT5 (Xue et al., 2021), a multilingual
+generative text-to-text version of T5 (Raffel et al.,
+2020), trained simultaneously on 101 languages.
+We evaluate mT5 on all its available sizes - Small,
+Base, Large, XL and XXL ranging from 300M to
+13B parameters. Subsequently, we propose casting
+all Hebrew NLP tasks for which evaluation bench-
+marks exist as text-to-text tasks: The input text is
+fed into the model and targets are produced in a
+generative manner.
+
+In contrast to text-to-text formulations of clas-
+sification and span prediction, token classification
+is not as common in the literature, and specifically
+when the tokens consist of multiple morphemes,
+as is the case in MRLs. For example, in POS tag-
+ging for MRLs, each morpheme is assigned a POS
+
+4So far we mentioned encoder-only models as an example
+for suboptimal modeling choices for MRLs, but this is also
+the case when using poor tokenization, small vocabularies etc.
+
+>It is beyond the scope of this paper to examine the factors
+that contributed to its improved performance, see Sec. 7.
+
+
+Param NEMO Sentiment
+Model Count Farashoot Token Morph. BMe Analysis
+EM Fl Fl Fl Fl FI
+mBERT 178M | 32 56.1 | 79.11 69.78 | 87.77 84.21
+HeBERT 110M | 18.2 36.7 | 81.13 77.29 | 89.41 87.13
+
+AlephBERT | 126M | 26 49.6 | 83.62 77.55 | 91.12 89.02
+ABG 185M - - 86.26 80.39 - 89.51
+mT5 - Small | 300M | 24.52 48.71 | 66.74 62.08 | 77.7 87.55
+mT5- Base | 580M | 36.65 62.97 | 74.7 69.12 | 85.5 87.25
+mT5-Large | 1.2B | 42.6 70.13 | 84.33 81.85 | 90.77 88.73
+mTS5 - XL 3.7B | 46.15 73.27 | 88.65 84.43 | 93.01 88.9
+mTS5 - XXL 13B_ | 50.37 77.5 | 89.86 88.65 | 93.29 89.61
+
+Table 1: mT5 outperforms previous encoder-only LMs
+on a variety of semantic Hebrew downstream tasks.
+
+tag, unlike in non-MRLs, where tagging is a word-
+level task. As a result, a generative model cannot
+simply generate tag predictions one after the other
+but it requires to first segment the text and only
+then label it accordingly. e.g., An unsatisfactory
+generation for “habayit" is DET;NOUN as we can-
+not recover which morpheme belongs to which tag.
+An acceptable model output, on the other hand, is
+ha-DET,lavan-NOUN as we can recover that ha
+was tagged with a DET and lavan with a NOUN.
+Throughout our experiments we tested a number of
+different text-to-text formulations. The best candi-
+dates are depicted in Figure 1.
+
+3 Experiments
+
+Goal The goal of this study is to assess the perfor-
+mance of a sequence-to-sequence large language
+model, specifically mT5, that was trained on a large
+quantity of multilingual data, compared to existing
+Hebrew language models, in order to showcase
+the efficacy of larger, well trained and thoughtfully
+designed models on Hebrew tasks.
+
+Models We fine-tuned different sizes of mT5
+(Small-XXL) on all Hebrew tasks in a single-task
+fashion for 4096 steps, with a constant learning
+rate of le-3. For test set evaluation, we used the
+best-performing checkpoint from the development
+set, as tasks usually converge earlier. We compared
+the mT5 models against YAP (More et al., 2019),
+mBERT (Devlin et al., 2019), HeBERT (Chriqui
+and Yahav, 2022), AlephBERT (Seker et al., 2022)
+and ABG (Guetta et al., 2022). We compare against
+YAP as it’s the only available model trained on the
+lemmatization task. YAP’s scores are produced
+by us. mMBERT, HeBERT, AlephBERT and ABG
+scores are all from Guetta et al. (2022). ParaShoot
+scores are from Keren and Levy (2021). Summary
+of the results can be found in Tables 1, 2.
+
+3.1 Tasks
+
+We assembled an evaluation suite of Hebrew bench-
+marks composed of the following tasks: QA (Keren
+and Levy, 2021), NER (Bareket and Tsarfaty, 2021;
+Mordecai and Elhadad, 2005), Sentiment Analysis
+(Amram et al., 2018), and the morpho-syntactic
+tasks of segmentation, POS tagging and lemmati-
+zation from Sade et al. (2018), where we used the
+the latest dataset version, compatible with ABG.
+
+3.1.1 Question-Answering
+
+Keren and Levy (2021) introduced ParaShoot,
+an Hebrew Question-Answering dataset which
+was created using the format and crowdsourcing
+methodology of SQUAD (Rajpurkar et al., 2016).
+We report token-level F1 and Exact Match scores
+as no morpheme boundaries are available. The in-
+put is constructed by concatenating the context and
+question, with the output being the answer.
+
+We conducted manual evaluation of different
+mTS5 models on this dataset to evaluate the impact
+of model sizes, see details in B.
+
+3.1.2 Named Entity Recognition
+
+Bareket and Tsarfaty (2021) created NEMO, an
+NER annotation for the Hebrew UD corpus (Sade
+et al., 2018). As entities in Hebrew can corre-
+spond to only a subset of a word’s morphemes
+(See “habayit halavan" example in Sec. 1), the au-
+thors proposed two dataset versions: token-level,
+where entities correspond to white-space bound-
+aries, similarly to BMC (Mordecai and Elhadad,
+2005), and morpheme-level, with morpheme-based
+boundaries. The authors additionally revised the
+common NER evaluation procedure by compar-
+ing predicted and target entities on the surface
+form, boundaries, and entity types, but not posi-
+tions. Thus, we train the sequence-to-sequence
+model to simply generate all of the sentence enti-
+ties and tags one after the other in the input text.
+
+3.1.3 Sentiment Analysis
+
+Correspondingly with previous work, we report F1
+scores for Amram et al. (2018), a sentiment anal-
+ysis dataset curated by annotating Facebook user
+comments with positive/negative/neutral tags.° En-
+coder input is the raw text with the decoder gen-
+erates either <extra_id_O>, <extra_id_1> or <ex-
+tra_id_2> which correspond to the positive, nega-
+tive and neutral tags.
+
+°We use Seker et al. (2022) refined version which does not
+include leaks between split sets.
+
+
+Model Segmentation | POS Tagging | Lemmatization
+YAP 93.64 90.13 78.6
+mBERT 96.07 93.14 -
+HeBERT 97.90 95.80
+
+AlephBERT 97.88 95.81
+
+ABG 98.09 96.22 -
+mT5 - Small 94.83 94.55 89.96
+mT5 - Base 96.34 95.9 92.09
+mT5S - Large 96.76 95.58 92.21
+mT5 - XL 98.32 96.91 95.13
+mTS5 - XXL 98.67 97.46 95.53
+
+Table 2: Morpheme-Based Aligned MultiSet (mset) Re-
+sults on the UD Corpus
+
+3.1.4 Word Segmentation, POS Tagging and
+Lemmatization
+
+Sade et al. (2018) manually validated the UDv2
+version of the Hebrew treebank resulting in a set of
+morpho-syntactic tasks. Aligned to previous work
+we report word segmentation and POS tagging. We
+also evaluate our model on the lemmatization task
+and compare it to YAP (More et al., 2019), an open-
+source Hebrew parser. Correspondingly to previous
+work in Hebrew, we report aligned MultiSet (mset)
+scores. To produce the output for all these tasks we
+use two additional tokens: “@@" is the morpheme
+delimiter within a word and “»" is the morpheme-
+tag delimiter. e.g., segmenting, and POS tagging
+“habayit halavan" should return be@@ha@@bayit
+ha@@lavan and be»ADP@@ha»DET@@bayi t »NOUN
+ha»DET@@lavan»NOUN, respectively.
+
+4 Results
+
+Our findings demonstrate a marked improvement
+over previously published results on existing He-
+brew NLP benchmarks and by that establishing the
+advantage of using large multilingual sequence-to-
+sequence pretrained LMs such as mT5.
+
+mT5 produces the biggest performance boost for
+the Question-Answering task of ParaShoot, with
+mT5-base already surpassing baseline models and
+mT5-XXL outperforming AlephBERT by 27.9 Fl
+points. For NER, mT5 produces better results than
+evaluated baselines on both datasets. The largest
+performance boost comes in the morpheme-level
+NEMO version where mT5 learns to segment and
+label entities in an end-to-end fashion.
+
+For sentiment analysis, mT5 outperforms the
+baseline models by a small fraction, however, man-
+ual analysis we performed on mT5’s best perform-
+ing model show that 34% of its errors are annota-
+tion errors and for further 30% our annotators we
+not able to decide what is the correct label. We con-
+
+clude that we should work towards a cleaner, more
+challenging sentiment analysis dataset in Hebrew.
+We report error reduction of 30.3% and 32.8% for
+the segmentation and POS tagging tasks compared
+to previous state-of-the-art. For the lemmatization
+task we report an increase of 16.93 mset F1 points
+compared to YAP. All of these are an important
+step towards closing the gap in morpho-syntactic
+tasks comparing to other languages.
+
+5 Related work
+
+HeBERT (Chriqui and Yahav, 2022) is the first pre-
+trained transformer-based language model trained
+on Hebrew Wikipedia and OSCAR (Ortiz Suarez
+et al., 2020) for the task of user-generated senti-
+ment analysis. AlephBERT (Seker et al., 2022)
+was pretrained on the same copora in addition to
+a very large number of Hebrew tweets. Guetta
+et al. (2022) tackled the extreme data sparseness in
+MRLs lexica (Tsarfaty et al., 2020) by pretraining
+with roughly 2.5x of AlephBERT vocabulary size,
+leading to performance improvements. Orthogo-
+nally, Keren et al. (2022) proposed using char-level
+LMs to mitigate the same sparseness problem, al-
+beit results were inconclusive.
+
+Xue et al. (2021) showed that mT5 outper-
+forms baseline models on a number of multilingual
+datasets but did not directly evaluate on Hebrew.
+Alternatively, monolingual Hebrew LM papers only
+compared against mBERT (Devlin et al., 2019) as
+the sole multilingual baseline.
+
+6 Conclusions
+
+All Hebrew LMs to date are encoder-only mod-
+els, which could not directly generate morpheme
+sequences, and thus necessitate a specially-tuned
+decoder. In this work we propose to take advan-
+tage of mT5, a publicly available multilingual large
+language model that was trained on a considerable
+amount of multilingual and Hebrew data. Addition-
+ally the generative approach of text-to-text model-
+ing is more aligned with the morphological chal-
+lenges inherent in Hebrew and by that dispense the
+need for specially tuned decoders. We fine-tuned
+and evaluated mT5 on a set of Hebrew downstream
+tasks and report that mT5 outperforms all previous
+baselines. Subsequently, we propose that multilin-
+gual sequence-to-sequence models should be used
+for Hebrew and other MRLs as an alternative for
+their smaller encoder-only counterparts.
+
+
+7 Limitations
+
+mT5, comparing to previous Hebrew LMs, is big-
+ger, pretrained on more multiligual data, and learn-
+ing to segment and tag in an end-to-end manner.
+While it was beyond the scope of this paper to
+pretrain new LMs and study which factors con-
+tributed to the improved performance, identifying
+these factors will be useful for determining the
+most effective approach for future work. While
+larger mT5 models perform better than available
+LMs, they require more powerful hardware accel-
+erators and take longer to train and infer. Future
+research should aim to achieve similar levels of per-
+formance with smaller mT5 models. Additionally,
+the inclusion of data from 101 languages in the
+training of mT5 may have negatively impacted its
+performance on Hebrew, as some of the data may
+not have been relevant or beneficial to this partic-
+ular language. Future work will need to address
+this issue by training a monolingual Hebrew LM in
+order to further improve performance for Hebrew.
+
+An inherent limitation in sequence-to-sequence
+models is that they can generate inconsistent text
+with respect to the input text (Lee et al., 2018;
+Rohrbach et al., 2018). While potentially sensitive
+in different applications, a number of evaluation
+frameworks have been suggested to reduce the num-
+ber of such “hallucinations" (Honovich et al., 2021,
+2022). Another limitation of our evaluation frame-
+work is that, for lack of available datasets, we did
+not evaluate mT5 on purely generative tasks such
+as summarization and paraphrasing
+
+8 Acknowledgements
+
+We thank Dan Bareket and Eylon Guetta from Bar
+Ilan University for their help in sharing the UD and
+NEMO data.
+
+References
+
+Adam Amram, Anat Ben David, and Reut Tsarfaty.
+2018. Representations and architectures in neu-
+ral sentiment analysis for morphologically rich lan-
+guages: A case study from Moder Hebrew. In
+Proceedings of the 27th International Conference on
+Computational Linguistics, pages 2242-2252, Santa
+Fe, New Mexico, USA. Association for Computa-
+tional Linguistics.
+
+Wissam Antoun, Fady Baly, and Hazem Hajj. 2020.
+AraBERT: Transformer-based model for Arabic lan-
+guage understanding. In Proceedings of the 4th
+
+Workshop on Open-Source Arabic Corpora and Pro-
+cessing Tools, with a Shared Task on Offensive Lan-
+guage Detection, pages 9-15, Marseille, France. Eu-
+ropean Language Resource Association.
+
+Dogu Araci. 2019. Finbert: Financial sentiment analy-
+sis with pre-trained language models. arXiv preprint
+arXiv: 1908. 10063.
+
+Dan Bareket and Reut Tsarfaty. 2021. Neural model-
+ing for named entities and morphology (NEMO2).
+Transactions of the Association for Computational
+Linguistics, 9:909-928.
+
+Iz Beltagy, Kyle Lo, and Arman Cohan. 2019. SciB-
+ERT: A pretrained language model for scientific text.
+In Proceedings of the 2019 Conference on Empirical
+Methods in Natural Language Processing and the
+9th International Joint Conference on Natural Lan-
+guage Processing (EMNLP-IJCNLP), pages 3615—
+3620, Hong Kong, China. Association for Computa-
+tional Linguistics.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, et al. 2020. Language models are few-shot
+learners. Advances in neural information processing
+
+systems, 33:1877-1901.
+
+Idan Brusilovsky and Reut Tsarfaty. 2022. Neural to-
+ken segmentation for high token-internal complexity.
+arXiv preprint arXiv:2203. 10845.
+
+Branden Chan, Stefan Schweter, and Timo Moller.
+2020. German’s next language model. In Proceed-
+ings of the 28th International Conference on Com-
+putational Linguistics, pages 6788-6796, Barcelona,
+Spain (Online). International Committee on Compu-
+tational Linguistics.
+
+Avihay Chriqui and Inbal Yahav. 2022. Hebert &
+hebemo: a hebrew bert model and a tool for polarity
+analysis and emotion recognition. INFORMS Jour-
+nal on Data Science.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference
+of the North American Chapter of the Association
+for Computational Linguistics: Human Language
+Technologies, Volume I (Long and Short Papers),
+pages 4171-4186, Minneapolis, Minnesota. Associ-
+ation for Computational Linguistics.
+
+Eylon Guetta, Avi Shmidman, Shaltiel Shmidman,
+Cheyn Shmuel Shmidman, Joshua Guedalia, Moshe
+Koppel, Dan Bareket, Amit Seker, and Reut Tsarfaty.
+2022. Large pre-trained models with extra-large vo-
+cabularies: A contrastive analysis of hebrew bert
+models and a new one to outperform them all.
+
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Men-
+sch, Elena Buchatskaya, Trevor Cai, Eliza Ruther-
+ford, Diego de Las Casas, Lisa Anne Hendricks,
+
+
+Johannes Welbl, Aidan Clark, et al. 2022. Train-
+ing compute-optimal large language models. arXiv
+preprint arXiv:2203.15556.
+
+Or Honovich, Roee Aharoni, Jonathan Herzig, Ha-
+gai Taitelbaum, Doron Kukliansy, Vered Cohen,
+Thomas Scialom, Idan Szpektor, Avinatan Hassidim,
+and Yossi Matias. 2022. TRUE: Re-evaluating fac-
+tual consistency evaluation. In Proceedings of the
+Second DialDoc Workshop on Document-grounded
+Dialogue and Conversational Question Answering,
+pages 161-175, Dublin, Ireland. Association for
+Computational Linguistics.
+
+Or Honovich, Leshem Choshen, Roee Aharoni, Ella
+Neeman, Idan Szpektor, and Omri Abend. 2021.
+q?: Evaluating factual consistency in knowledge-
+
+grounded dialogues via question generation and
+
+question answering. In Proceedings of the 2021
+
+Conference on Empirical Methods in Natural Lan-
+
+guage Processing, pages 7856-7870, Online and
+
+Punta Cana, Dominican Republic. Association for
+
+Computational Linguistics.
+
+Jared Kaplan, Sam McCandlish, Tom Henighan,
+Tom B Brown, Benjamin Chess, Rewon Child, Scott
+Gray, Alec Radford, Jeffrey Wu, and Dario Amodei.
+2020. Scaling laws for neural language models.
+arXiv preprint arXiv:2001.08361.
+
+Omri Keren, Tal Avinari, Reut Tsarfaty, and Omer
+Levy. 2022. Breaking character: Are subwords
+good enough for mrls after all? = arXiv preprint
+arXiv:2204.04748.
+
+Omri Keren and Omer Levy. 2021. ParaShoot: A He-
+brew question answering dataset. In Proceedings of
+the 3rd Workshop on Machine Reading for Question
+Answering, pages 106-112, Punta Cana, Dominican
+Republic. Association for Computational Linguis-
+tics.
+
+Katherine Lee, Orhan Firat, Ashish Agarwal, Clara
+Fannjiang, and David Sussillo. 2018. Hallucinations
+in neural machine translation. NeurIPS 2018 Work-
+shop on Interpretability and Robustness for Audio,
+Speech, and Language.
+
+Louis Martin, Benjamin Muller, Pedro Javier Or-
+tiz Suarez, Yoann Dupont, Laurent Romary, Eric
+de la Clergerie, Djamé Seddah, and Benoit Sagot.
+2020. CamemBERT: a tasty French language model.
+In Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics, pages
+7203-7219, Online. Association for Computational
+Linguistics.
+
+Naama Ben Mordecai and Michael Elhadad. 2005.
+Hebrew named entity recognition. MONEY,
+81(83.93):82-49.
+
+Amir More, Amit Seker, Victoria Basmova, and Reut
+Tsarfaty. 2019. Joint transition-based models for
+morpho-syntactic parsing: Parsing strategies for
+MRLs and a case study from Modem Hebrew.
+
+Transactions of the Association for Computational
+Linguistics, 7:33-48.
+
+Pedro Javier Ortiz Suarez, Laurent Romary, and Benoit
+Sagot. 2020. A monolingual approach to contextual-
+ized word embeddings for mid-resource languages.
+In Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics, pages
+1703-1714, Online. Association for Computational
+Linguistics.
+
+Fabio Petroni, Tim Rocktischel, Sebastian Riedel,
+Patrick Lewis, Anton Bakhtin, Yuxiang Wu, and
+Alexander Miller. 2019. Language models as knowl-
+edge bases? In Proceedings of the 2019 Confer-
+ence on Empirical Methods in Natural Language
+Processing and the 9th International Joint Confer-
+ence on Natural Language Processing (EMNLP-
+IJCNLP), pages 2463-2473, Hong Kong, China. As-
+sociation for Computational Linguistics.
+
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+Wei Li, Peter J Liu, et al. 2020. Exploring the limits
+of transfer learning with a unified text-to-text trans-
+former. J. Mach. Learn. Res., 21(140):1—67.
+
+Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and
+Percy Liang. 2016. SQUAD: 100,000+ questions for
+machine comprehension of text. In Proceedings of
+the 2016 Conference on Empirical Methods in Natu-
+ral Language Processing, pages 2383-2392, Austin,
+Texas. Association for Computational Linguistics.
+
+Anna Rohrbach, Lisa Anne Hendricks, Kaylee Burns,
+Trevor Darrell, and Kate Saenko. 2018. Object hal-
+lucination in image captioning. In Proceedings of
+the 2018 Conference on Empirical Methods in Nat-
+ural Language Processing, pages 4035-4045, Brus-
+sels, Belgium. Association for Computational Lin-
+guistics.
+
+Shoval Sade, Amit Seker, and Reut Tsarfaty. 2018.
+The Hebrew Universal Dependency treebank: Past
+present and future. In Proceedings of the Second
+Workshop on Universal Dependencies (UDW 2018),
+pages 133-143, Brussels, Belgium. Association for
+Computational Linguistics.
+
+Amit Seker, Elron Bandel, Dan Bareket, Idan
+Brusilovsky, Refael Greenfeld, and Reut Tsarfaty.
+2022. AlephBERT: Language model pre-training
+and evaluation from sub-word to sentence level. In
+Proceedings of the 60th Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 46-56, Dublin, Ireland. Associ-
+ation for Computational Linguistics.
+
+Reut Tsarfaty, Dan Bareket, Stav Klein, and Amit
+Seker. 2020. From SPMRL to NMRL: What did
+we learn (and unlearn) in a decade of parsing
+morphologically-rich languages (MRLs)? In Pro-
+ceedings of the 58th Annual Meeting of the Asso-
+ciation for Computational Linguistics, pages 7396—
+7408, Online. Association for Computational Lin-
+guistics.
+
+
+Linting Xue, Noah Constant, Adam Roberts, Mi-
+hir Kale, Rami Al-Rfou, Aditya Siddhant, Aditya
+Barua, and Colin Raffel. 2021. mTS5: A massively
+multilingual pre-trained text-to-text transformer. In
+Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+pages 483-498, Online. Association for Computa-
+tional Linguistics.
+
+A Running T5 on common GPUs
+
+AlephBertGimmel (Guetta et al., 2022), the largest
+Hebrew LM to date is roughly the same size of
+BERT base (Devlin et al., 2019), and even though
+mT5 is 60 times larger than AlephBertGimmel,
+we do not need to horizontally scale our hardware
+accelerators by 60 to accommodate it. As models
+have grown in size, hardware accelerators have
+also become more advanced. T5 Small, Base and
+Large can all be fine-tuned in a 2016 Nvidia P100
+or 2017 Nvidia V1@0 GPU accelerators. TS XL and
+XXL can be fine-tuned in the 2020 Nvidia A100
+GPU, the same accelerator used for pretraining
+AlephBERTGimmel.
+
+Given the widespread availability of these GPU
+accelerators, we argue that the mT5 models we
+evaluate in this work can be easily trained and de-
+ployed nowadays.
+
+B- Manual Evaluation of mT5 on
+Question-Answering
+
+mT5-small performs similarly to previous state-
+of-the-art models on on the Question-Answering
+task of ParaShoot (Keren and Levy, 2021). We
+conducted manual evaluation of mT5-XXL against
+mT5-small, both as a way to analyse the impact of
+the model size, while holding other factors constant,
+and as a way to compare to the performance of
+previous state-of-the-art models.
+
+We ran our mT5 experiments using 3 seeds with
+the best performing model, mT5-XXL, achieving
+77.99 FI and 50.63 EM scores. Our worst perform-
+ing model, mT5-small, reached 47.67 F1 and 24.39
+EM scores. From the 519 exact match prediction
+mT5-XXL model made, 167 of which mT5-small
+received F1 scored of 0. Manually evaluating the
+mistakes mT5-small made we conclude that for a
+lot of the examples the model did not manage to
+fully "understand the question", here mixing when
+and where:
+
+Context: 5y 7D5.yAT7 N03 N|IS non 3nKd
+°x1D Oia Tawa "na WT NAB Tp|aa wn n|Ww
+mwaint na ww 39 manda qwamd oramr...
+
+Question: Manoa Tpwam> RAST Ippa wn ona
+
+MEIN NAW 73>
+The gold and mT5-XXL prediction is no1an 7nKX>
+naqs Sy maqam nqo0na NAT’
+
+The small model predicted *»15 518 7awina
+Oro.
+
+mT5 additionally made a few hallucination er-
+rors, returning answers that were not in the original
+context.
+
+Interestingly, mT5-small was able to accurately
+answer 49 questions that mT5-XXL was unable to,
+although for only 3 of these mT4-XXL received 0
+F1 scored. Manually evaluating these 3 errors, 2 of
+them are alternative possible answers.

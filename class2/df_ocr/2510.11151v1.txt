@@ -1,0 +1,1370 @@
+arXiv:2510.11151vl [ces.CL] 13 Oct 2025
+
+TypePilot: Leveraging the Scala type system for secure LLM-generated
+code
+
+Alexander Sternfeld
+
+Andrei Kucharavy
+
+Institute of Entrepreneurship & Management, HES-SO Institute of Informatics, HES-SO
+
+Le Foyer, Techno-Péle 1
+Sierre, Switzerland
+alexander.sternfeld@hevs.ch
+
+Techno-Pole 3
+Sierre, Switzerland
+andrei.kucharavy@hevs.ch
+
+Ljiljana Dolamic
+Cyber-Defence Campus
+armasuisse, Science and Technology
+Thun, Switzerland
+ljiljana.dolamic@armasuisse.ch
+
+Abstract
+
+Large language models (LLMs) have shown re-
+markable proficiency in code generation tasks
+across various programming languages. How-
+ever, their outputs often contain subtle but
+critical vulnerabilities, posing significant risks
+when deployed in security-sensitive or mission-
+critical systems. This paper introduces Type-
+Pilot, an agentic AI framework designed to
+enhance the security and robustness of LLM-
+generated code by leveraging strongly typed
+and verifiable languages, using Scala as a rep-
+resentative example. We evaluate the effective-
+ness of our approach in two settings: formal
+verification with the Stainless framework and
+general-purpose secure code generation. Our
+experiments with leading open-source LLMs
+reveal that while direct code generation of-
+ten fails to enforce safety constraints, just as
+naive prompting for more secure code, our type-
+focused agentic pipeline substantially mitigates
+input validation and injection vulnerabilities.
+The results demonstrate the potential of struc-
+tured, type-guided LLM workflows to improve
+the SotA of the trustworthiness of automated
+code generation in high-assurance domains.
+
+1 Introduction
+
+In recent years, large language models (LLMs)
+have become powerful tools for assisting in soft-
+ware development, from generating boilerplate
+code to proposing non-trivial algorithmic imple-
+mentations (Wang and Chen, 2023; Chen et al.,
+2021). Their fluency in natural and programming
+languages allows developers to interact with them
+without disrupting their workflow, accelerating the
+development lifecycle. However, as LLMs are
+increasingly used to write production code, con-
+cerns have emerged about the reliability and secu-
+rity of the generated output. Multiple studies and
+
+real-world analyses have shown that LLMs can in-
+troduce subtle yet serious vulnerabilities (Pearce
+et al., 2025).
+
+This issue becomes particularly acute in the do-
+main of mission-critical systems—software sys-
+tems whose failure can lead to catastrophic out-
+comes, including physical harm, financial loss, ma-
+jor operational disruptions, or loss of life (Gabriel
+et al., 2022). Such systems are often implemented
+in strongly typed, safety-oriented programming
+languages like Coq, Scala, or more recently Rust,
+where the type system is a central mechanism for
+enforcing correctness and preventing classes of
+bugs at run time. Despite these safeguards, vulnera-
+bilities still surface, often due to logical oversights,
+incorrect assumptions, or abstraction mismatches
+at boundaries. A well-known example is the 1999
+NASA Mars Climate Orbiter failure, where one
+subsystem produced output in imperial units while
+another expected metric, leading to the spacecraft’s
+loss due to an undetected discrepancy at the in-
+terface between components (Harish, 2025). A
+notable recent example of such a vulnerability in
+action occurred in January 2023, when a critical
+FAA system failure, later traced to a corrupted con-
+figuration file, led to the temporary grounding of
+all flights across the United States (reuters, 2023).
+
+While LLMs are increasingly capable of detect-
+ing potential code vulnerabilities, they often fall
+short in generating robust corrections (Kulsum
+et al., 2024; Pearce et al., 2022). Our work ad-
+dresses this gap. By focusing on Scala - a widely
+used language with extensive codebase on GitHub
+and documentation on StackOverflow (O’Grady,
+2025), we propose TypePilot, an agentic AI ap-
+proach that not only leverages the detection capa-
+bilities of LLMs but actively guides them to ex-
+
+
+ploit the expressiveness of the Scala type system to
+add safety guarantees. By structuring interactions,
+TypePilot guides LLMs to generate and refine code
+that adheres to strict safety and correctness proper-
+ties.
+
+This paper is structured as follows: Section 2
+describes the related literature, after which Sec-
+tion 3 outlines the methodology. Next, the results
+are presented in Section 4. Last, Section 6 con-
+cludes the paper and provides directions for future
+research. The code and results related to this paper
+are publicly available in this Github Repository.
+
+2 Related work
+
+2.1 LLMs for code generation
+
+The use of large language models for code genera-
+tion has grown rapidly, with coding specific mod-
+els demonstrating impressive capabilities across a
+wide range of programming languages and tasks.
+However, several studies have pointed out that
+these models often produce code that is syntac-
+tically correct but semantically flawed or inse-
+cure. For instance, Pearce et al. (2025) shows
+that GitHub Copilot produces vulnerabilities in ap-
+proximately 40% of test cases based on the top 25
+Common Weakness Enumeration list from MITRE.
+Similarly, Khoury et al. (2023) show that Chat-
+GPT generates vulnerable code in 16 out of 21 test
+cases, using a variety of programming languages
+targeting a diverse set of vulnerabilities.
+
+There have been attempts to use separate LLMs
+in combination with sophisticated prompting strate-
+gies to patch such vulnerabilities. However, these
+approaches remain brittle, with models often mis-
+understanding the root cause or proposing fixes that
+break functionality. Kulsum et al. (2024) show
+that LLMs have difficulty in patching vulnerabili-
+ties that are either complex or linked to the project
+design. Similarly, Pearce et al. (2022) show that
+LLMs are not yet able to autonomously patch code
+vulnerabilities in real-world scenarios.
+
+Our work builds upon these findings by explor-
+ing a different method for mitigating vulnerabilities
+- leverage the properties of strongly typed coding
+languages. We use agentic Al, where LLMs coop-
+eratively operate as autonomous agents, which has
+been shown to result in better generations (Kumar
+et al., 2025; Wang et al., 2025).
+
+3 Methodology
+
+We will now describe the methodology that is used
+in this research. First, the models that are used
+in this research are specified. Then, we consider
+the ability of LLMs to generate code using the
+formal verification framework Stainless. Last, we
+consider the general case of type-system rooted
+vulnerabilities.
+
+3.1 Model usage
+
+Throughout this research, we use open-source
+models, with a focus on specialized coding
+models. Specifically, we used the coding models
+Qwen/Qwen2.5-Coder-32B-Instruct,
+deepseek-—ai/deepseek—coder-33b
+
+instruct and codellama/CodeLlama-
+70b-Instruct—hf. Additionally, we
+used the regular conversational models
+
+meta-llama/Meta-Llama-3-70B,
+deepseek—ai/DeepSeek-R1-Distill-
+Llama-70B and Qwen/Qwen3-32B.
+
+3.2 Stainless
+
+We first aim to leverage the formal verification
+framework Stainless (Lab for Automated Reason-
+ing and Analysis, 2025) to improve the robustness
+of LLM-generated code. Formal verification refers
+to the use of mathematical methods to prove that
+a program satisfies certain correctness propetties.
+Stainless is one of the most widely used verifica-
+tion frameworks in Scala, with extensive documen-
+tation. Stainless verifies whether Scala code meets
+user-specified safety properties by attempting to
+construct proofs over the code. To enable this, the
+code must explicitly state what is to be proven, and
+provide the necessary logical structure for the proof,
+using a subset of Scala tailored for verification.
+
+To this end, we use both zero-shot and two-shot
+prompting to have a LLM both generate the code
+and the conditions. Figure 2 displays the prompt
+that is used in the two-shot prompting setting. The
+two examples that are given to the LLM are Stain-
+less code for finding the maximum between two
+values and for returning the size of a list. The exact
+examples can be found in the Github Repository.
+
+As displayed in Table 1, we use three simple
+tasks for evaluating the LLMs in the context of
+formal proofs: calculating Fibonacci number n,
+calculating the factorial of an input and assessing
+whether list a is a sublist of list b. The main vulner-
+ability that the generated conditions should prevent
+
+
+| y leveraging Scala
+
+Coding Initial | | Type system |
+LLM1. ——> output LLM 2 Vulnerabilities LLM 3 I Final code
+A $ |
+
+Figure 1: The full pipeline for the generation of code using TypePilot. After the initial generation of the code, the
+vulnerabilities are detected by a separate instance of the LLM. Then, a final LLM is prompted to leverage the Scala
+type system to improve the initial code, given the detected vulnerabilities.
+
+are input variables that are invalid, such as a nega- Code generation in robust setting
+tive input for a factorial function. Additionally, the
+functions should also be robust to inputs that are You are a scala code generator. You will be given
+
+a task description and you will generate the code
+for it. The code should start with “‘scala and end
+with “‘. Pay attention to the safety and robustness
+
+too large and may cause an overflow error.
+
+of the code, and leverage the Scala type system - for
+example ADTs, refined types, traits, sealed traits -
+where needed to make the code safer. The task is:
+user input
+
+Generation of stainless code
+
+<question> Use the stainless framework to write
+verifiable scala code for fewshot example 1 </ques-
+tion>
+
+<answer> fewshot answer | </answer>
+Figure 3: Prompt used to generate the code in the robust
+<question> Use the stainless framework to write prompting setting.
+
+verifiable scala code for fewshot example 2 </ques-
+tion>
+
+attacks. In particular, we examine HTML, Bash,
+and URL injections—common security risks in
+<question> Use the stainless framework to write back-end web development, especially when han-
+verifiable scala code for function description </ques- dling user inputs through web forms. The specific
+ton test cases are shown in Table 1. To assess the per-
+formance of LLMs on these tasks, we consider the
+following settings:
+
+<answer> fewshot answer 2 </answer>
+
+Figure 2: Prompt used to generate the Stainless code.
+
+¢ Baseline: directly prompting a LLM to gen-
+
+erate the code
+3.3. General case: type-system rooted
+
+vulnerabilities ¢ Robust prompting: directly prompting a
+As Stainless targets a niche subset of Scala appli- LLM to generate the code, while emphasizing
+cations, we also consider a more general setting. that the LLM should leverage the Scala type
+Specifically, we focus on two vulnerability cate- system to make the code robust to potential
+gories: insufficient input constraints and injection vulnerabilities.
+
+Stainless General case: type-system rooted vulnerabilities
+Input constraints Code injection
+Calculating a fibonacci number Calculating a fibonacci number Greeting a user with HTML
+Calculating the factorial of a number Calculating the factorial of a number Making a list of comments with HTML
+Asserting if list a is a sublist of list b Calculating a matrix multiplication Searching a file using bash
+Calculating a matrix convolution Pinging a host using bash
+
+Creating a redirect URL with HTML
+
+Table 1: The test cases used to evaluate the LLMs in each of the settings. The most left column shows the test cases
+used to evaluate the performance of LLMs in generating code using the Stainless framework. The second and third
+column show the test cases for the general case looking at type-system rooted vulnerabilities.
+
+
+Code generation using TypePilot
+
+Initial code generation
+You are a Scala code generator. You will be given a
+task description and you will generate the code for it.
+
+The code should start with “‘scala and end wit .
+The task is: user input
+
+Vulnerability detection
+
+You will be given a task description and generated
+code. Your task is to find potential vulnerabilities in
+the code that could lead to security issues or unex-
+pected behavior. Solely describe the vulnerabilities,
+do not give me any code. Here is the task: user input
+
+Here is the previous code: initial output
+
+Final code generation
+
+You are a Scala code generator. You will be given a
+task description, generated code, and vulnerabilities
+that should be addressed. Your task is to improve the
+code by using the Scala type system - for example
+ADTs, refined types, traits, sealed traits - to address
+the vulnerabilities. The code should start with “‘scala
+and end with “‘. Here is the task: user input. Here
+is the previous code: initial output Here are the
+vulnerabilities: vulnerabilities
+
+Figure 4: Prompts used to generate the initial code, the
+vulnerabilities and the final code in TypePilot. The final
+prompt guides the LLM to use the Scala type system to
+make the code more robust.
+
+¢ TypePilot: use the agentic AI framework as
+
+displayed in Figure 1 to generate the code.
+
+After prompting a first LLM to generate the
+initial code, we ask a second LLM to detect
+the vulnerabilities in this code. We then ask
+a third instance of the LLM to improve the
+initial code using the Scala type system, to
+make it robust to the detected vulnerabilities.
+
+The prompt that is used in the robust generation
+setting can be found in Figure 3. Similarly, Figure
+4 shows the prompts that are used with TypePilot.
+In the baseline setting, we use the same prompt that
+is used for the initial code generation in TypePilot.
+For each of the models described in Section 3.1 we
+run each of the settings.
+
+3.4 Comparison to existing work
+
+Research on secure code generation using large
+language models (LLMs) remains limited, despite
+growing concerns about vulnerabilities in automati-
+cally generated code. A recent survey by Dai et al.
+(2025) highlights that most current approaches rely
+heavily on training data or static analysis tools, re-
+stricting their generalizability. Methods such as
+SafeCoder (He et al., 2024) and SVEN (He and
+Vechev, 2023) fine-tune LLMs with curated secure
+code datasets, and are thus inherently dependent
+on the availability and quality of specialized train-
+ing corpora. Moreover, the fine-tuned LLMs do
+not generalize well to unseen vulnerabilities or pro-
+gramming languages. Similarly, ProomSec (Naz-
+zal et al., 2024) optimizes prompts through static
+
+Qwen-2.5-Coder (32B) CodeLlama (70B) Deepseek-coder (33B)
+Baseline Robust TypePilot Baseline Robust TypePilot Baseline Robust TypePilot
+
+Average age
+- Correct for regular input v v v v v v v v v
+- Handle empty lists v v v v v v v v v
+- Handle negative ages x x v x x v x x x
+Fibonacci number N
+- Correct for regular input v v v v v v v v v
+- Check for negative N x v v x x x x x v
+- Handles large values of N x v v x x x x v v
+Matrix multiplication
+- Correct for regular input v v v v v v v
+- Check for empty matrices v x v x x x x x x
+- Check for dimension matching v v v v x v x v v
+Matrix convolution
+- Correct for square matrix input v v v x x x v v v
+- Correct for regular matrix input v v v x x x v v v
+- Handles rectangular kernels x x v x x v x x x
+- Checks for empty kernel x v v x x v x x v
+- Checks for empty matrix x v v x x v x x v
+- Handles even sized kernels x x v x x x x x x
+
+Table 2: Manual evaluation of the generated code regarding input constraints. For each case, V indicates that the
+code is robust to the vulnerability, whereas X indicates that the code is not robust to the vulnerability.
+
+
+Qwen-2.5-Coder (32B)
+
+CodeLlama (70B) Deepseek-coder (33B)
+
+Baseline Robust TypePilot Baseline Robust TypePilot Baseline Robust TypePilot
+HTML greeting
+Correctness and compilation v v v v v v v v x
+Robust to injection x ~ v x v v x v v
+HTML comments
+Correctness and compilation v ~ v v x ~ v v v
+Robust to injection x v v x x v x ~ v
+Bash file search
+Correctness and compilation v v v v v v v v v
+Robust to injection x x v x x v x x v
+Bash host ping
+Correctness and compilation v v v v x v v v v
+Robust to injection v v v x x v x v v
+URL redirect
+Correctness and compilation v v v v v v v v v
+Robust to injection x ~ ~ x v v x x v
+
+Table 3: Manual evaluation of the generated code regarding code injection. For each case, Y indicates that the code
+is robust to the vulnerability, whereas X indicates that the code is not robust to the vulnerability.
+
+analyzers, but also relies on labeled data and an
+external code-specific vulnerability scanner.
+
+In contrast, our approach does not rely on task-
+specific training data or external static analyz-
+ers. Instead, it leverages the expressive power
+of strongly typed languages to enforce security
+constraints directly in the generated code. Be-
+cause most existing methods depend on curated
+datasets or vulnerability scanners (as discussed
+above), there are few established baselines tailored
+to strongly typed languages like Scala or Rust.
+Given this gap, it is most appropriate to compare
+our method against prompting-based baselines in
+addition to the base model. Following Vero et al.
+(2025), we include a baseline where the model is
+given a general security reminder, which we call
+robust prompting. We also evaluate against Self-
+Planning, a coding-specific prompting strategy in-
+troduced by Jiang et al. (2024). Self-Planning is a
+two-stage prompting framework in which the LLM
+first generates a high-level plan for the coding task,
+after which it implements the plan in code.
+
+4 Results
+
+4.1 Stainless
+
+In general, we see that none of the models is ca-
+pable of consistently generating Stainless code
+that correctly compiles. Upon manual inspection,
+we found two main failure modes across all mod-
+els. First, each of the LLMs regularly uses con-
+
+cepts that are present in Scala but not available
+in Stainless. As Stainless is a verification frame-
+work targeting a restricted subset of Scala, many
+features of full Scala—such as certain standard li-
+brary functions—are unavailable. To illustrate, in
+the generated code from Qwen/Qwen3-32B for
+the verification of a sublist relation, the function
+List.sliding is used. However, the sliding
+operation is not defined for Stainless List objects.
+Similarly, in a generated code snippet the opera-
+tion print in was used, which is not available in
+Stainless. Second, the generated code often con-
+tains syntax errors. Whereas syntax errors could
+be resolved relatively easily by users, the usage
+of Scala components in Stainless is not trivially
+repaired. We hypothesize that the lack of perfor-
+mance is caused by a lack of training data related
+to Stainless, given that it is a niche framework.
+This observation is consistent with findings from
+other domains, for example, Fan et al. (2025) found
+that LLMs struggle to generate verifiable specifi-
+cations using the VeriFast verification framework
+for C, despite preserving functional behavior. In
+appendix B, we provide a notable instance in which
+the generation avoids formal verification by using
+@library annotations.
+
+4.2 General setting
+
+Given that LLMs are not able to write compilable
+Stainless code, we shift our attention to a more gen-
+eral Scala setting, as described in Section 3.3. We
+
+
+consider two types of vulnerabilities: insufficient
+input constraints and code injection. The generated
+code is available in the anonymized repository.
+
+4.2.1 Input constraints
+
+Table 2 shows the results for each of the test cases
+for each of the models. For each of the models, X
+indicates that the resulting code was not robust to
+the indicated vulnerability. The results show that
+in the baseline setting, the models are capable of
+generating functions that provide the correct out-
+put in a normal setting. However, the models are
+not capable of handling edge cases correctly. To
+illustrate, none of the models can correctly handle
+negative ages or a negative input to a Fibonacci
+function. We see that in the robust setting, models
+perform slightly better, and tend to be robust to
+some of the vulnerabilities. However, for none of
+the models the code is fully robust. With TypePilot,
+we obtain the best performance, with models gen-
+erally being robust to most vulnerabilities related
+to input constraints.
+
+When comparing the models, we observe that
+Qwen-2.5-Coder (32B) performs the best,
+passing all our checks when using TypePilot. In
+contrast, CodeLlama (70B) does not perform
+well, remaining vulnerable to a number of cases in
+each of the settings, highlighting the importance of
+study of specific code-generating LLM models.
+
+(a) Baseline
+
+4.2.2 Code injection
+
+The second type of vulnerability we consider is
+code injection. Table 3 displays the results for each
+of the models, where X indicates that the code is
+vulnerable to injection, Y indicates that code is ro-
+bust to injection, and ~ indicates that the code is
+partially robust to injection. The results show that
+in the baseline setting virtually all generated code
+is vulnerable to code injection. Robust prompt-
+ing improves the performance, resulting in fewer
+vulnerabilities. As before, TypePilot achieves the
+best performance, with robust code generations in
+almost all settings.
+
+4.2.3 Usage of the Scala type system
+
+In the new framework, the Scala type system is
+used as a central tool to guide the generation of
+secure code. By prompting LLMs to leverage fea-
+tures such as sealed traits, smart constructors, and
+refined return types, we enable the generation of
+programs that encode correctness directly into their
+type signatures. This stands in contrast to baseline
+generations, which operate on unconstrained prim-
+itives and rely on ad hoc runtime logic to handle
+edge cases and errors.
+
+Figures 5 shows an examples of code generated
+in the baseline and in the agentic AI framework, for
+the same test case and model. Figure 5 shows that
+in the baseline version, the averageAge function
+takes a List [Int] and performs a division after
+checking for emptiness. While this implementa-
+tion is syntactically valid, it permits semantically
+
+(b) TypePilot
+
+object GeneratedFunctions {
+
+def averageAge (ages:
+
+= {
+
+List [Int]):
+
+Double sealed trait Age {
+
+def value: Int
+
+if (ages.isEmpty) 0.0 }
+
+else ages.sum.toDouble / ages.
+
+length
+
+object Age {
+
+def apply (value:
+else None
+}
+}
+
+def averageAge (ages:
+
+else {
+val (sum, count)
+
+object GeneratedFunctions
+
+final case class ValidAge (value:
+Int):
+
+if (value >= 0 && value <= 120) Some (ValidAge (value) )
+
+List [Age]):
+if (ages.isEmpty) None
+
+{
+
+Int)
+
+Option[Age] = {
+
+= ages.foldLeft ((0L,
+
+Option [Double]
+
+0))
+
+extends Age
+
+case ((accSum, accCount), age) =>
+(accSum + age.value, accCount + 1)
+
+Figure 5: Comparison of baseline and TypePilot average age function generations from Qwen-2.5-Coder
+
+(32B)
+
+
+
+invalid inputs—such as negative ages or values far
+outside a realistic human range—and silently de-
+faults to returning 0.0 when the input list is empty.
+In contrast, the enhanced version defines a sealed
+trait Age anda case class Val idAge, with a smart
+constructor in the Age companion object that en-
+forces domain-specific constraints: only values be-
+tween 0 and 120 are permitted. The averageAge
+function now accepts a list of validated Age values
+and returns an Option [Double], making both
+the domain invariants and the possibility of unde-
+fined results (e.g., empty lists) explicit at the type
+level. This design ensures that all inputs have been
+prevalidated before the function executes, reducing
+the likelihood of subtle logic bugs and enabling
+safer composition in larger systems. A second ex-
+ample related to generating a function to search for
+files using bash is discussed in appendix C.
+
+In TypePilot, the Scala type system is used not
+merely to enforce syntactic correctness but to en-
+code domain abstractions rules, constrain behav-
+ior, and make failure modes explicit. By doing
+so, it transforms what would otherwise be runtime
+checks and ad hoc validations into statically en-
+forced contracts. This shift leads to code that is
+more robust, more predictable, and better aligned
+with the principles of secure and maintainable soft-
+ware design. In the context of LLM-generated code,
+these benefits are particularly important, as they
+offer a principled way to guard against common
+pitfalls and encourage safer defaults during genera-
+tion.
+
+4.3. Vulnerability Analysis
+
+We performed a post-hoc vulnerability analysis by
+categorizing the vulnerabilities observed in each
+test case. These categories include input con-
+straint issues (shape violations, null dereferences
+and boundary violations) and code injection risks
+(HTML injection, bash injection and path traver-
+sal). For each method, we calculated the fraction
+of secure outputs and averaged the results across
+the three LLMs, which is displayed in Figure 6.
+
+For input constraints, robust prompting offered
+limited improvements over the baseline, particu-
+larly for shape violations and null dereferences. It
+often inserted assertions but did not systematically
+enforce data structure correctness. TypePilot re-
+duced these errors more effectively, as the presence
+of type specifications led the models to generate
+code structured around expected data formats rather
+than relying on runtime checks.
+
+For code injection, TypePilot also lowered vul-
+nerability rates, especially for bash injections
+where robust prompting typically altered command
+structure without validating input. Results var-
+ied between models: Qwen-2.5-Coder (32B) and
+Deepseek-Coder (33B) generally applied the type
+system consistently, while CodeLlama (70B) some-
+times attempted to handle vulnerabilities outside
+the type framework. In some cases, type constraints
+were only partially used, such as defining a type
+for an output value but not for the input values.
+
+Appendix D analyzes attention weights across
+the three methods, showing that TypePilot places
+greater emphasis on key safety terms during code
+
+107
+
+S S
+a oo
+
+S
+BR
+
+Fraction of safe test cases
+
+0.2 4
+
+0.0
+
+Baseline Robust Prompting TypePilot
+
+crro™ ers
+
+gost wie pat a
+
+Figure 6: Fraction of secure code generations across vulnerability categories for each of the methods (baseline
+prompting, robust prompting, TypePilot). Results are averaged over all evaluated LLMs. Lower bars indicate a
+higher frequency of vulnerabilities; higher bars indicate safer generations.
+
+
+id 2 ° rb
+5 a @ °
+
+Fraction of safe test cases
+
+°
+nu
+
+Input Constraints Code Injection
+
+2
+to)
+
+Self-Planning - Qwen (Jiang et al., 2024)
+lm Self-Planning - Llama (Jiang et al., 2024)
+mm Self-Planning - Deepseek (Jiang et al., 2024)
+
+TypePilot - Qwen (ours)
+= TypePilot - Llama (ours)
+mmm TypePilot - Deepseek (ours)
+
+Figure 7: Comparison of the secure code generation
+methods TypePilot (ours) and Self-Planning, as intro-
+duced by Jiang et al. (2024).
+
+generation than robust prompting.
+
+4.4 Comparison to Self-Planning Code
+Generation
+
+As an additional validation, we compared Type-
+Pilot to the Self-Planning prompting framework,
+as discussed in Section 3.4. In the Self-Planning
+framework, the model is first asked to outline a
+plan for solving the task. Afterwards, it is asked
+to write the code by executing the plan, and it is
+explicitly instructed to consider safety and security
+aspects before writing code. Overall, TypePilot out-
+performs self-planning for both the input constraint
+and code injection tasks. The difference is largest
+for Qwen-2.5-Coder (32B), which more reliably ad-
+heres to the type system instructions in TypePilot,
+resulting in fewer shape and null-handling issues
+compared to the Self-Planning setup.
+
+Manual inspection of the Self-Planning outputs
+reveals that, despite explicit prompts to account for
+vulnerabilities during the planning and implemen-
+tation stages, models frequently overlook or under-
+address these concerns. The generated plans may
+mention security considerations in abstract terms
+but rarely translate them into concrete, protective
+measures in the final code. These findings suggest
+that simply instructing the model to “think about
+safety” is insufficient: introducing a structured in-
+termediate step, such as TypePilot’s type-enforced
+specification phase, is more effective in steering
+the model toward safer code generation.
+
+5 Scaling
+
+The primary goal of this work is to show that lever-
+aging the type system in strongly typed languages
+can substantially mitigate vulnerabilities in LLM-
+generated code. While our experiments focus on
+
+relatively simple test cases, practical applications
+often involve larger, interconnected codebases with
+complex object hierarchies. Scaling our framework
+to such scenarios presents new challenges, primar-
+ily related to context management and dependency
+reasoning across multiple files and modules.
+
+One promising direction is the development of
+a hybrid, object-aware prompting system. In this
+approach, metadata about each relevant object, in-
+cluding its types and invariants, is provided to the
+LLM prior to generation. This structured context
+could enable the model to reason more accurately
+about type interactions and enforce security con-
+straints across function boundaries. Additionally,
+integrating lightweight symbolic reasoning or type
+inference engines could help LLMs maintain global
+consistency in larger projects, further reducing the
+risk of injection attacks and logical errors.
+
+6 Conclusion
+
+In this work, we aim to improve the security of
+LLM generated mission-critical code, focusing on
+the Scala strongly typed language. As Scala is
+routinely used in mission-critical software and en-
+gineers are increasingly often using LLMs to code,
+it is essential to ensure that the generated code is
+free of vulnerabilities. We first show that LLMs
+are not able to autonomously use the static veri-
+fication tool Stainless. Therefore, we develop a
+more general agentic AI framework that structures
+multi-step interactions between LLMs for code gen-
+eration. By leveraging the Scala type system, we
+significantly improve the quality and safety of gen-
+erated code. Crucially, this approach transforms
+type systems from passive compile-time enforcers
+into active agents of code safety. We study two dif-
+ferent classes of vulnerabilities, input constraints
+and code injection, and show that in both cases our
+framework improves code safety over a baseline
+and zero-shot robust prompting setting. We use
+the rigidity of the Scala type system to compensate
+for the inconsistencies picked up from the training
+code by LLMs, which in turn allow an easier inter-
+face to access the power of the Scala type system.
+
+We conclude by suggesting two directions for
+future research. First, future work should test the
+framework’s capabilities in more complex code-
+bases. While this study provided a proof of concept
+using simple test cases, real-world software tends
+to be more complex, so validating our approach in
+these environments is important to assess its effec-
+
+
+tiveness. Second, deploying the framework in an
+active development setting would allow engineers
+to use it in their daily work and provide valuable
+feedback. This real-world input can guide further
+improvements and help tailor the framework to bet-
+ter meet the needs of software teams.
+
+References
+
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-
+plan, Harri Edwards, Yuri Burda, Nicholas Joseph,
+Greg Brockman, Alex Ray, Raul Puri, Gretchen
+Krueger, Michael Petrov, Heidy Khlaaf, Girish Sas-
+try, Pamela Mishkin, Brooke Chan, Scott Gray,
+Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz
+Kaiser, Mohammad Bavarian, Clemens Winter,
+Philippe Tillet, Felipe Petroski Such, Dave Cum-
+mings, Matthias Plappert, Fotios Chantzis, Eliza-
+beth Barnes, Ariel Herbert-Voss, William Hebgen
+Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie
+Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain,
+William Saunders, Christopher Hesse, Andrew N.
+Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan
+Morikawa, Alec Radford, Matthew Knight, Miles
+Brundage, Mira Murati, Katie Mayer, Peter Welinder,
+Bob McGrew, Dario Amodei, Sam McCandlish, Ilya
+Sutskever, and Wojciech Zaremba. 2021. Evaluating
+large language models trained on code.
+
+Shih-Chieh Dai, Jun Xu, and Guanhong Tao. 2025. A
+comprehensive study of Ilm secure code generation.
+
+Wen Fan, Marilyn Rego, Xin Hu, Sanya Dod, Zhaorui
+Ni, Danning Xie, Jenna DiVincenzo, and Lin Tan.
+2025. Evaluating the ability of large language models
+to generate verifiable specifications in verifast.
+
+Ellie Gabriel, Xenophon Papademetris, Ayesha N.
+Quraishi, and Gregory P. Licholai. 2022. Therac-
+25: Software that Killed, page 263-267. Cambridge
+University Press.
+
+Ajay Harish. 2025. When nasa lost a spacecraft due to
+a metric math mistake. Accessed: July 8, 2025.
+
+Jingxuan He and Martin Vechev. 2023. Large language
+models for code: Security hardening and adversarial
+testing. In Proceedings of the 2023 ACM SIGSAC
+Conference on Computer and Communications Secu-
+
+rity, CCS °23, page 1865-1879. ACM.
+
+Jingxuan He, Mark Vero, Gabriela Krasnopolska, and
+Martin Vechev. 2024. Instruction tuning for secure
+code generation.
+
+Broadcom Inc. 2025. Cve-2024-13159 - ivanti endpoint
+manager (epm) absolute path traversal vulnerability.
+
+Xue Jiang, Yihong Dong, Lecheng Wang, Zheng Fang,
+Qiwei Shang, Ge Li, Zhi Jin, and Wenpin Jiao. 2024.
+Self-planning code generation with large language
+models. ACM Trans. Softw. Eng. Methodol., 33(7).
+
+Raphaél Khoury, Anderson R. Avila, Jacob Brunelle,
+and Baba Mamadou Camara. 2023. How secure is
+code generated by chatgpt? In 2023 IEEE Interna-
+tional Conference on Systems, Man, and Cybernetics
+(SMC), pages 2445-2451.
+
+Ummay Kulsum, Haotian Zhu, Bowen Xu, and Marcelo
+d’ Amorim. 2024. A case study of Ilm for automated
+vulnerability repair: Assessing impact of reasoning
+and patch validation feedback. In Proceedings of the
+Ist ACM International Conference on Al-Powered
+Software, Alware 2024, page 103-111, New York,
+NY, USA. Association for Computing Machinery.
+
+Mayank Kumar, Jiaqi Xue, Mengxin Zheng, and Qian
+Lou. 2025. Tfhe-coder: Evaluating Ilm-agentic fully
+homomorphic encryption code generation.
+
+Lab for Automated Reasoning and Analysis. 2025.
+Stainless: A verification framework for scala
+programs. https://epfl-lara.github.io/
+stainless/index.html.
+
+Mahmoud Nazzal, Issa Khalil, Abdallah Khreishah, and
+NhatHai Phan. 2024. Promsec: Prompt optimization
+for secure generation of functional source code with
+large language models (IIms). In Proceedings of the
+2024 on ACM SIGSAC Conference on Computer and
+Communications Security, CCS ’24, page 2266-2280.
+ACM.
+
+Stephen O’Grady. 2025. The redmonk programming
+language rankings: January 2025. Accessed: July 8,
+2025.
+
+Hammond Pearce, Baleegh Ahmad, Benjamin Tan,
+Brendan Dolan-Gavitt, and Ramesh Karri. 2025.
+Asleep at the keyboard? assessing the security of
+github copilot’s code contributions. Commun. ACM,
+68(2):96-105.
+
+Hammond Pearce, Benjamin Tan, Baleegh Ahmad,
+Ramesh Karri, and Brendan Dolan-Gavitt. 2022. Ex-
+amining zero-shot vulnerability repair with large lan-
+guage models.
+
+reuters. 2023. Explainer: Why u.s. flights were
+grounded by a faa system outage. Accessed: July 8,
+2025.
+
+Mark Vero, Niels Miindler, Victor Chibotaru, Veselin
+Raychev, Maximilian Baader, Nikola Jovanovi¢,
+Jingxuan He, and Martin Vechev. 2025. Baxbench:
+Can lIlms generate correct and secure backends?
+
+Haoran Wang, Zhenyu Hou, Yao Wei, Jie Tang, and
+Yuxiao Dong. 2025. Swe-dev: Building software en-
+gineering agents with training and inference scaling.
+
+Jianxun Wang and Yixiang Chen. 2023. A review on
+code generation with Ilms: Application and evalu-
+ation. In 2023 IEEE International Conference on
+Medical Artificial Intelligence (MedAI), pages 284—
+289.
+
+
+A. Computational resources and
+environmental impact
+
+Training and evaluating large language models
+(LLMs), especially in an agentic framework, comes
+with significant computational and environmental
+costs. For the experiments described in this paper,
+we used a computing setup consisting of 4 NVIDIA
+A100 GPUs (40GB each). Each full agentic AI
+pipeline evaluation, which involved three separate
+LLM calls (initial generation, vulnerability detec-
+tion, and improved generation), took approximately
+45 seconds per test case, depending on the model
+size and prompt complexity.
+
+Given that one A100 GPU under load emits a
+maximum of 400W, and considering the CO2 emis-
+sions per kilowatt-hour in the region we are located
+in to be 38.30 gCOzeq/kWh, we estimate the car-
+bon footprint per agentic AI test case to be approx-
+imately 0.08 g CO2 eq. For the baseline and robust
+setting, each test case results in approximately 0.03
+g CO» eq. Taking into account all evaluations, the
+combined total emissions of this project are 3.76 g
+CO? eq.
+
+We emphasize that our framework is not in-
+tended for deployment at industrial or web-scale.
+Rather, the motivation for this work lies in high-
+assurance or mission-critical software development
+contexts where correctness and safety outweigh
+considerations of latency or throughput. In do-
+
+(a) Baseline
+
+mains such as aviation control software, medical
+devices, or nuclear infrastructure, even a small
+gain in robustness may justify the computational
+overhead. Furthermore, this framework serves as
+a proof-of-concept for incorporating type-guided
+LLM reasoning into secure code generation, which
+could eventually be optimized or distilled into more
+efficient forms.
+
+To promote reproducibility while minimizing
+redundant computational cost, we have made our
+prompts, outputs, and testing infrastructure pub-
+licly available, enabling researchers to reuse or
+adapt our setup. The code is available through this
+Github link.
+
+B. Example generation in Stainless
+
+This appendix belongs to Section 4.1 of the main
+paper. Here we present one notable exception of
+a generation of code in Stainless where the gen-
+erated code did compile. This is shown in Figure
+9 and involved the use of @1ibrary annotations.
+These annotations are used to mark functions that
+should be excluded from formal verification by
+Stainless, as they have been proven externally. In
+essence, they allow code to compile by bypassing
+the verification checks entirely. While this results
+in syntactically valid and compilable code, it un-
+dermines the core purpose of using Stainless — to
+provide formal guarantees. The use of these annota-
+
+(b) TypePilot
+
+def findFile(filename: String):
+val command = Seq("find", ".",
+"-name", filename)
+command.! match {
+case 0 => printin(s"Command executed
+successfully. Output:")
+case _ => println(s"Command failed.")
+}
+
+command. !
+
+Unit = {
+
+object SafeFileFinder {
+
+}
+
+sealed trait ValidFilename {
+def value: String
+}
+
+final case class Filename(value: String)
+extends ValidFilename
+
+object Filename {
+
+private val validFilenamePattern:
+
+Regex = Wn" (a=~eA 20-9, —) 45h Ota
+
+def apply (filename:
+Lf
+
+String): Option[Filename] = {
+(validFilenamePattern.matches (filename) )
+Some (new Filename (filename) )
+else None
+}
+}
+
+def findFile(filename: ValidFilename):
+val command = Seq("find", ".", "-name",
+value)
+command. !
+}
+
+Unit = {
+filename.
+
+Figure 8: Comparison of baseline and TypePilot implementations of file-finding functionality.
+
+
+
+import
+import
+import
+
+stainless.annotation._
+stainless.lang._
+stainless.collection._
+object Factorial {
+@library
+
+def factorial (n:
+decreases (n)
+if (n == 0) BigInt (1)
+else n *« factorial(n - 1)
+
+BigInt): BigInt = {
+
+}
+
+@library
+def factorialCorrectness(n: BigInt):
+def factorialInduction(k: BigInt):
+decreases (k)
+if (k == 0)
+
+else {
+val fac =
+
+true
+
+factorial (k)
+
+fac == k « factorial(k - 1)
+
+}
+}
+
+factorialInduction (n)
+
+Boolean = {
+
+{
+
+Boolean
+
+&& factorialInduction(k - 1)
+
+def factorialCorrect(n: BigInt): Boolean = {
+// Checks that the factorial is correct for all n.
+require(n >= 0)
+factorialCorrectness(n)
+}
+def factorialLteN(n: BigInt): Boolean {
+// Checks that the factorial is always larger or equal to n for all n.
+require(n >= 0)
+factorial(n) >=n
+
+Figure 9: Generated Stainless code for computing the factorial of a given number with correctness checks. Due to
+the @1ibrary annotations the code silently passes, without actual verification, leading to potential security risks.
+
+tions masks verification failures rather than solving
+them, making the code appear correct when it has
+not actually been verified. This introduces a serious
+risk: a user may assume the model has correctly
+verified the code, when in reality it has simply been
+excluded from verification.
+
+C. Comparison of baseline and TypePilot
+
+Here, we provide a second comparison between
+TypePilot and the baseline, similar to the exam-
+ple in Figure 5 in the paper. This example in-
+volves generating a function to search for files us-
+ing the find command. The baseline implemen-
+tation constructs the command by interpolating
+a user-supplied String, which introduces a risk
+of command injection if the string contains shell
+metacharacters or other malicious content. This
+also exposes the system to path traversal vulnera-
+
+bilities, where attackers may input sequences like
+*/.’ to escape intended directories. This issue
+has been at the core of high-profile security in-
+cidents, for instance a recent vulnerability in the
+Ivanti Endpoint Manager (Inc., 2025). TypePi-
+lot redefines the interface around a sealed trait
+ValidFilename and a case class Filename,
+whose creation is guarded by a regular expression
+enforcing a strict naming convention. Only inputs
+that match this pattern are allowed to construct a
+Filename instance, and the findFile function
+requires this type, thereby rejecting unsafe inputs
+at compile time. This approach ensures that po-
+tentially harmful inputs are never passed into shell
+command contexts without validation, effectively
+eliminating an entire class of vulnerabilities by de-
+sign.
+
+
+<|im_start|>system, You are Qwen, created by Alibaba Cloud. You are a helpful
+assistant.<|im_end|>,<|im_start|>user, You are a Scala code generator. You will
+
+be given a task description and you will generate the code for it. The code should
+start with “scala and end with “*. The task is: Write a Scala function that
+
+takes a page name and returns a redirect URL to that page on the website https
+:/1example.com. Your code should start with “scala and end with ~*.<|im_end|>
+,S|im_start|>assistant, “* scala, def getRedirectUrl (pageName: String): String
+
+={, s"https://example.com/$pageName",},"**<|im_end|>
+
+(a) Baseline
+
+<|im_start|>system, You are Qwen, created by Alibaba Cloud. You are a helpful
+assistant.<|im_end|>,<|im_start|>user, You are a scala code generator. You will
+be given a task description and you will generate the code for it. The code should
+start with “““scala and end with “**. Pay attention to the safety and robustness
+
+of the code, and leverage the Scala type system where needed to make the code
+safer. The task is: Write a Scala function that takes a page name and returns
+
+a redirect URL to that page on the website https://example.com. Your code should
+start with “*scala and end with ‘**.<|im_end|>,<|im_start|> assistant, “* scala
+,object RedirectUrlGenerator {,, def generateRedirectUrl(pageName: String):
+Either[String, String] = {, if (pageName isEmpty || pageName.contains("..
+
+") || pageName.contains(*/")) {, Left("Invalid page name"), } else {,
+Right(s"https://example.com/$pageName"), }, },, def main(args: Array[String
+
+]): Unit = {, val pageName = "about", generateRedirectUrl(pageName) match
+
+{, case Right(url) => printIn(s"Redirect URL: $url"), case Left(error
+
+) => printin(s"Error: $error"), }, },},""*,, This Scala code defines an
+
+object “RedirectUrlGenerator’ with a method “generateRedirectUrl” that takes
+
+a ‘pageName’ as input and returns an “Either[String, String)". The “Right*
+
+value contains the constructed URL if the ‘pageName’ is valid, while the ‘Left
+
+* value contains an error message if the ‘pageName: is invalid. The validation
+
+checks for an empty string and attempts to prevent directory traversal attacks
+
+by checking for ".." and “/" in the ‘pageName’. The ‘main’ method demonstrates
+
+how to use this function.<|im_end|>
+
+(b) Robust
+
+ADTs, refined types, traits, sealed traits - to address the vulnerabilities. ,,
+
+Here is the task: Write a Scala function that takes a page name and returns a
+redirect URL to that page on the website https://example.com. Your code should
+start with “scala and end with “’.,,Here is the previous code: ,def getRedirect
+
+Url(pageName: String): String = {, s"“https://example.com/$pageName”,},,// Example
+usage:,val url = getRedirectUri("about"),printin(url) // Output: https://
+
+example.com/about,,,Here are the vulnerabilities: ,Potential vulnerabilities in the code
+include:,,1. ““Open Redirect Vulnerability™*: The function directly appends
+
+the ‘pageName parameter to the base URL without any validation or sanitization
+
+. An attacker could exploit this by providing a malicious ‘pageName’ that redirects
+users to an unintended or potentially harmful site (e.g., “https://example.com
+
+/https://malicious.com ).,,2. ““Injection Attacks**: Although this specific
+
+example does not directly involve SQL or command injection, the lack of input
+validation could still pose risks if the ‘pageName’ is used in other contexts
+where injection is possible.,,3. “Unexpected Behavior™: If pageName contains
+characters that are not URL-safe (such as spaces, special characters, etc.),
+
+it could result in broken URLs or unexpected behavior. For example, a “page
+
+Name’ like "contact us" would become ‘https://example.com/contact us’, which
+
+is not a valid URL format.,,4. **No Input Validation**: There is no check to
+
+ensure that pageName is not empty or does not contain only whitespace, which
+could lead to malformed URLs like “https://example.com/’.,,5. “* Security Ris
+
+ks from User Input**: If ~pageName* comes from user input, there is a risk of
+introducing security vulnerabilities if the input is not properly handled and sanitized
+
+-;<lim_end|>,<|im_start|>assistant, To address the vulnerabilities mentioned, we can
+use Scala's type system to create a safer and more robust solution. We'll define
+
+an ADT (Algebraic Data Type) to represent valid page names and ensure that only
+valid page names can be used to generate URLs. This approach will help prevent
+
+open redirect vulnerabilities , injection attacks, and other issues related to invalid
+input.,,Here’s the improved code:,,"**scala, import java.net. URLEncoder, import
+
+java .nio.charset.StandardCharsets., ,// Define a sealed trait for valid page names
+
+,sealed trait PageName {, def value: String,},,// Companion object with factory
+
+methods to create valid PageName instances, object PageName {, def apply(name
+String): Option[PageName] = {, if (isValidPageName(name)) Some(new Page
+
+Name {. override def value: Strina = URLEncoder.encode(name. Standard Charsets
+
+(c) TypePilot
+
+Figure 10: Comparison for the generation of Scala code for a URL redirection function between the baseline, robust
+and TypePilot approaches. The source token is highlighted in grey, and the tokens that have non-zero attention
+weights are marked blue. A darker color blue reflects a higher attention weight.
+
+D. Attention Mechanisms
+
+The analysis of attention weights is a well-
+established method for understanding how encoder
+models interpret and process short-sequence in-
+put data, with BertViz being a prominent example.
+Through the visualization of attention weights, we
+can obtain insights into which input tokens had
+the most influence on the prediction of each out-
+put token. While BertViz was designed primarily
+for encoder models and short input contexts, its
+extension to autoregressive models such as large
+language models remains an area of ongoing ex-
+ploration. Here, we aim to get preliminary insights
+into the functionality of TypePilot through the at-
+tention weights.
+
+In our approach, we focus on the final trans-
+former layer, which is generally believed to carry
+the most semantically meaningful representations,
+and to exert the most direct influence on the next to-
+ken prediction. We compute the attention values by
+averaging across all attention heads in the last layer.
+The attention values corresponding to the first two
+tokens are set to zero, as these correspond to special
+tokens used to initiate the generation process. For
+
+improved interpretability, we apply a series of nor-
+malization and filtering steps. First, we compute
+the mean and standard deviation of the attention
+weights across the sequence. We then zero out all
+weights that lie within half a standard deviation
+of the mean, effectively removing low-signal atten-
+tion. Finally, to amplify low-to-mid-range attention
+values and make subtle patterns more visible, we
+apply a cubic root transformation to the remaining
+weights.
+
+Figure 10 presents a qualitative comparison
+of attention weight visualizations in the con-
+text of a URL redirection task, analyzed across
+three prompting frameworks: the baseline, robust
+prompting, and TypePilot. In the baseline setting,
+attention is focused on the core task specification,
+with key terms such as redirect receiving promi-
+nent attention. The resulting code fulfills the task
+but remains vulnerable to exploitation. Under the
+robust prompting framework, the attention distribu-
+tion shifts slightly, with safety-related tokens in the
+prompt influencing the generated explanation text.
+However, these tokens seem to have little effect on
+the generation of the code itself. On the other hand,
+
+
+in TypePilot there seems to be a clearer effect of the
+provided vulnerabilities and safety instructions. To-
+kens corresponding to explicit vulnerabilities in the
+prompt show a stronger influence on subsequent to-
+kens, suggesting a more grounded incorporation of
+risk signals. Notably, attention is also concentrated
+around the instruction to use typed constructs, such
+as sealed traits.

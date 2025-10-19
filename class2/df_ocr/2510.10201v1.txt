@@ -1,0 +1,1414 @@
+arXiv:2510.10201v1 [cs.LG] 11 Oct 2025
+
+RLFR:
+
+Extending Reinforcement Learning for LLMs with Flow Environment
+
+RLEFR: EXTENDING REINFORCEMENT LEARNING FOR
+LLMS WITH FLOW ENVIRONMENT
+
+Jinghao Zhang!:? Naishan Zheng!> ~— Ruilin Li2** Dongzhou Cheng 2°
+Zheming Liang!? Feng Zhao!’ —Jiaqi Wang? '
+
+University of Science and Technology of China Shanghai Innovation Institute
+3ByteDance 4Wuhan University °Southeast University
+
+€) RLFR Code @ RLER Webpage ©, RLFR Models
+
+60 -
+
+Accuracy (%)
+
+10 —
+
+ABSTRACT
+
+Reinforcement Learning with Verifiable Rewards (RLVR) has recently emerged as
+a promising framework for improving reasoning abilities in Large Language Mod-
+els (LLMs). However, policy optimized with binary verification prone to overlook
+potential valuable exploration in reasoning trajectory. In view of heavy annotation
+cost of golden Process Reward Models (PRMs), recent works attempt using auxil-
+iary signals for reward shaping of process tokens, involving entropy and likelihood
+collected from logit space. In this work, we offer a novel perspective on shaping
+RLVR with flow rewards derived from latent space, and propose RLFR, where the
+flow fields of model latents are constructed from either off-policy high-quality data
+and on-policy rejection sampling data, and the velocity deviations of policy latents
+within it are quantified to serve as a reward signal. RLFR first demonstrates that
+a well-established flow field can be a sound environment for reward signal collec-
+tion, highlighting the expressive latent space is much underexplored. Moreover,
+RLFR is able to compress any off-policy expert data as reference for constitut-
+ing reward signals, and we show that the efficient context dependence compressed
+within the hidden states are utilized, rather than individual token-level denotation
+for context comprehending. Experiments on both language and multimodal rea-
+soning benchmarks demonstrate the reliability of flow rewards, and suggesting a
+promising paradigm for reward shaping with auxiliary signals.
+
+t Corresponding authors.
+
+Qwen2.5-7B-Instruct 2 80.6 Qwen2.5VL-7B-Instruct
+7 RLVR (Binary verifiable reward) RLVR
+Mm Entropy Adv. (Shaping with logit entropy 73.1 73.4 Mm Entropy Adv.
+_ 4 RLFR (Shaping with latent flow) "ZG @@ RLFR
+os. Y
+50.8 G 52.152.0
+es 47.448.
+41249, 417 Y
+«J Z
+Z Z 31.6
+/
+4 JY 7 »F
+Y, a 23.4 Y
+14 4 14 Za 14 14
+OlympiadBench MATH500 Mathvista MathvVision MathVerse
+
+Figure 1: Overall performance on language (left) and multimodal (right) reasoning benchmarks. By
+introducing flow reward from latent space, RLFR shows consistent progress over RLVR with binary
+
+verification and entropy based shaping method |Cheng et al.) (2025) from logit space, highlighting
+the expressive latent space is much underexplored for reward signal collection.
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+RLVR Auxiliary Signals RLFR
+ad rae — Ro)
+Ce ig ov} G85 {im H oy BE
+(o1la,0-4) e-#.. @
+TO\ AKG, Ack — >
+dy Malar) Tn a =] . fsa
+eee 2) —_ @
+ey r= To(q, a) sy ll TE = Rshape(To(4s 2); 79) ey a = ||V log po, (4x) — V log pu(ax)||
+Flow Sample
+(x) Overlook Trajectory g@ Shaping with Logit Signal (7) Shaping with Latent Signal
+@ Resistant to Hacking |) Self-Policy Rewarding @ Flow Environment Rewarding
+
+Figure 2: Policy optimized with RLVR prone to overlook potential valuable explorations in rea-
+soning trajectories. To beyond binary verification, auxiliary signals are used for reward shaping of
+process tokens, involving token entropy and likelihood collected from logit space, where self-policy
+rewarding risks are non-negligible. Alternatively, we show that the latent space is much under-
+explored yet highly expressive and a well established flow field can be a sound environment for
+yielding flow reward from velocity deviations and extending RLVR with latent reward utilization.
+
+1 INTRODUCTION
+
+Recent advances in improving reasoning abilities of Large Language Models (LLMs) underscore
+the substantial promise of Reinforcement Learning with Verifiable Rewards (RLVR) {Lambert et al.|
+(2024); (2024); (2025). By incentivizing the optimization of LLMs
+with outcome verification, there are far less susceptible to reward hacking. However, the binary
+verification prone to overlook potential valuable policy explorations in reasoning trajectories in cases
+that the answers are difficult to derive with part of correct trajectory (2025), thus
+provides an intolerant reward signal with decreased exploratory behavior (2025).
+
+A more natural way to address these issues is to provide step-by-step process rewards along reason-
+ing trajectories with Process Reward Models (PRMs) {Zhao et al.| (2025); {Liu et al.](2025d);
+let al.|(2025a), however, the heavy annotation costs of intermediate steps pose a significant bottleneck
+for scalability at time, and the misalignment between PRMs training corpora and online reasoning
+trajectories further introduce reward gaps (2025). Alternatively, the value model in PPO
+framework [Schulman et al.|(2017); (2025); offers a promising strategy,
+but the effective credit assignment over the binary outcome reward are still underexplored.
+
+To encouraging policy exploration, recent works leverage auxiliary signals for reward shaping
+(1999) beyond binary outcome verification, involving model likelihood
+lected from logit space. While the confidence may serve as an appropriate indicator for examining
+policy states, it may not be well-suited for constituting reward signals for optimization{Wang et al.|
+(2025b); |Cui et al.|(2025). As the self-policy rewarding may cause LLM over exploits its own con-
+
+fidence estimates rather than learning genuinely improved reasoning strategies, where the potential
+hacking risks are non-negligible, and may undermine prolong RL training |Liu et al.|(2025bJc).
+
+In this work, we propose RLFR, that offering a novel framework on shaping RLVR with flow re-
+wards for regarding reasoning trajectory. We aspire to explore whether the broader latent space of
+LLMs encompass productive signals for reward utilization with reliable stability. RLFR first con-
+structs flow fields (2022); of model latents from either off-policy
+high-quality data and on-policy rejection sampling data, and the velocity deviations of policy latents
+within it are quantified to serve as a reward signal. While the larger deviations are penalized as drift-
+ing away from the reference distribution formed by flow, and smaller deviations are encouraged. The
+flow fields are online updated alongside the policy optimization, with rejection sampling data filtered
+by desired metrics. We also formally show that the evidence lower bound of log-likelihood is con-
+stituted by negative velocity deviation, thus establishing the connection between velocity deviation
+and probability likelihood with inverse correlation under reference distribution.
+
+Particularly, RLFR first demonstrates that a well-established flow field can be a sound environment
+for reward signal collection, yielding stable performance gains throughout RL training with no sign
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+of degeneration. And we also highlight that the expressive latent space are highly underexplored as
+a substrate for reward design, complementing prior auxiliary signals from logit space. Moreover,
+RLFER provides a natural way to leverage expert reasoning trajectories from off-policy data into the
+constitution of reward signals through reference flow fields. Experiments on both language and
+multimodal reasoning benchmarks across Qwen and Llama models demonstrate the reliability of
+flow rewards with consistent progress over baseline RLVR methods.
+
+The contributions of this work can be summarized as follows: (1) We propose RLFR, a promising re-
+ward shaping framework with flow rewards derived from LLMs latents, extending RLVR with latent
+rewards utilization. (2) We demonstrate that a well-established flow field can be a sound environ-
+ment for reward signal collection, highlighting the expressive latent space is much underexplored.
+(3) Both off-policy expert data and on-policy rejection sampling data are introduced for constituting
+reward signals as flow reference . (4) Comprehensive experiments on diverse reasoning benchmarks
+across both language and multimodal models demonstrate the reliability of our framework. All the
+codes, data, and model weights are released to foster future research in this area.
+
+2 PRELIMINARIES
+
+2.1 REINFORCEMENT LEARNING WITH VERIFIABLE REWARDS
+
+Reinforcement Learning with Verifiable Rewards (RLVR){Lambert et al.|(2024) constitutes a general
+post-training paradigm where model response can be deterministically verified. Let 7» be an LLM
+parameterized by 6, that receives a prompt q and generates a token sequence a@ = (a1,...,axK) as
+response. A binary verifier then assigns a scaler reward r,(q,a) € {0,1} to each prompt-response
+pair, where 7, underlines its outcome nature. The goal of RL is to maximize the expected reward:
+
+J (0) = Lg~D,a~rg(-|q) [ro(q, @)]. (1)
+
+Here, D is a dataset of prompts with corresponding ground-truth answer. Despite robustness against
+reward hacking, the coarse granularity outcome rewards make RLVR prone to overlooking the po-
+tential valuable policy exploration in reasoning trajectories in cases of derived incorrect answers.
+
+RLVR Algorithms. Group Relative Policy Optimization (GRPO) (2024) as a widely
+used reinforcement learning algorithm that simplfies the Proximal Policy Optimization (PPO)|Schul-|
+by discarding the value model for baseline advantage estimation. While sampling
+a group of response {a;}@_, per prompt and using their average reward as baseline, and the clipped
+surrogate objective is preserved as PPO, leading to the following maximization objective:
+
+|ai|
+
+i . z
+S- min (ini, clip (pin, 1 —€,1 +) A,) , 2)
+t=1
+
+lai]
+
+G
+
+; 1
+Torro(9) = Egup, fa:}2.~n0(-la) ADs
+71,
+
+9 (Gi, 19,4, <k)
+Tq (Gib 1G, 2i, <b
+
+models, and the advantage A; , is shared among all tokens within response a, and is computed as
+
+where pj,~ = y is the importance sampling ratio between the current and old policy
+
+* _ Fim mean({rjo}@1)
+Ajo — std({rio}@,) »
+
+We denote r;,. = ro(q, ai) for simplicity and clear comparison with later introduced dense rewards.
+
+Reward Shaping. As a common technique in reinforcement learning for accelerating and stabi-
+lizing policy optimization, reward shaping transforms explicit environment-based rewards into a
+proxy reward function, which typically involves operations like clipping or shifting, erc. [Wang et al.|
+(2024c), and may also incorporate auxiliary signals, such as response length or token entropy to steer
+
+the model toward desired behavior more effectively (2025);|Cheng et al.|(2025).
+
+2.2 FLOW MATCHING
+
+Flow Matching (FM) (2022); [Liu et al.|(2022) defines a generative process that learns
+
+a continuous-time velocity field, transporting samples from a simple prior distribution pinit (e-.g.,
+Gaussian) into the target data distribution pata. With data pairs (a, &1) sampled from pinit X Paata,
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Latent Distribution of Head-25% Trajecotry Tokens Latent Distribution of Tail-25% Trajecotry Tokens. typhen
+
+Si correct:
+
+wt @ optidn™
+
+Therefore D e of 3
+“J thin aria
+
+(b) Correct Tail-25% frequency tokens
+Therefore Given think
+°F depth
+2 Pad
+
+value
+rs)
+i
+
+Athekm
+
+OF:
+Option=.@. 6" around an
+be
+
+aS . at
+
+ectivel
+
+p
+
+e
+
+correct
+
+respectively,
+
+oa 06 04 06
+ketinood Ukelihood
+
+(a) Distribution of trajectory tokens in latent space (up) and logit space (down) (c) Incorrect Tail-25% frequency tokens
+
+Figure 3: Distribution of trajectory tokens in LLM reasoning. (a) Distribution of trajectory tokens
+in latent space (up) and logit space (down). We perform 256 rollouts for prompt randomly sampled
+from MATH|Hendrycks et al.|(2021). The latent distribution show progressively expressive signals
+on tail trajectory tokens, as continuously interacting with preceding tokens for context compression.
+In contrast, neither the logit distribution nor the (b) & (c) textual clouds of reasoning trajectories
+reveal any distinguishable signals, highlighting the potential of latent space for reward utilization.
+
+the forward process is given by the linear interpolation: #, = (1—t)ao+ta1, and the neural network
+ug is trained to predict the target velocity field « = #1 — @o by minimizing the flow matching loss:
+
+Lem (#2; >) = Epnus(o,1],¢0~pinit.01~paate [ll o(#t, t) — (1 — ¥o)I|"] - (4)
+We denote & as latent signal and distinguish it from tokens. The vg characterizes the paata with the
+flow field through accurate velocity prediction, where the outsider can be notably identified.
+
+3 RLFR
+
+In this section, we first show that the latent space is highly expressive for reward utilization, and then
+introduce the flow reward formed by velocity deviation, where the connection with probability like-
+lihood are established. We then introduce RLFR, that extends RLVR with flow rewards for process
+tokens in advantage estimation, while the flow conditions are involved to introduce context depen-
+dency. The flow fields are online updated with rejection sampling data during policy optimization.
+
+3.1 ANALYZING LATENT SPACE IN REASONING TRAJECTORY
+
+Previous studies have shown the effectiveness of signals from logit space in shaping binary veri-
+while the broader latent space is much underexplored. In light of this, we further analysis the latents
+of reasoning trajectory tokens to evaluate the reliability of latent space for reward utilization. We
+use Qwen2.5-7B |Yang et al.| (2024) to generate 256 rollouts for prompt randomly sampled from
+MATH (2021) with 0.7 temperature for decoding, and ultimately get 10° response
+tokens within the same subject content along with their corresponding latents. The latents are ex-
+tracted from layers £ = (7oL,...TyL) for probing, where L denotes the total number of model
+
+layers, and 7; € [0, 1] specifies the percentile positions for extraction. We show the case of 7; = 0.5
+in Figure[3] while additional results are provided in Appendix [B]and show the similar tendency.
+
+The latents of tail tokens in reasoning trajectory show progressively pronounced signals when
+distinguished by answer correction. We observe that compared to head tokens in reasoning tra-
+jectory where basically no identifiable signals are emerged, the latents of tail tokens are much more
+expressive as continuously interacting with all preceding tokens for context compression. However,
+neither the logit space likelihood nor the textual clouds exhibit any noticeable signals.
+
+Subset of latents in reasoning trajectory with incorrect answer exhibit close to those in correct
+trajectories, while RLVR with outcome verification penalizes them. We discern that penalization
+should be applied to latents with substantial deviations from high-quality trajectory latents, while
+similar latents with minor deviations should be treated tolerantly.
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+3.2 FLOW REWARD FROM VELOCITY DEVIATION
+
+Encouraged by the expressive latent space, a sound yet efficient metric is required to collect emerg-
+ing signals for reward utilization, and we consider flow matching as underlying framework for which
+typically used in continuous modeling with established velocity field. Inspired by|Li et al.|(2025c),
+we notice that instead of using predicted velocity to reverse the forward process for data distribution
+generation, the accuracy of velocity prediction can serve as a sensible metric to evaluate whether
+current samples are within the data distribution formed by flow. And we rewrite the Eq. [4]as
+
+Rou (Gn;t, 7) = ||vg(ax.t,t) — (Az. — ||”, where t,r ~U [0,1], e+ N(0,D), 3)
+
+where a, denotes latents of token @;,, and a, + is the linear interpolation between a, and e. The flow
+network vg is first pre-trained on latents of high-quality data to establish the reference distribution
+for offline start, and then frozen for flow reward calculation that evaluates the velocity deviation of
+the current sample @;, under the reference flow field.
+
+Debiasing the Timestep Impacting. The flow network vg provides velocity drifts toward reference
+distribution through the whole reverse process, which underscores the challenge on timestep priority
+in deviation evaluation for flow reward. Considering the connection between velocity prediction and
+
+score function|Gao et al.| (2024); [Liu et al.|(2025a), we present the score given by v¢ as:
+Ak.t t .
+
+: — t). 6
+Toa t Top olan, ) (6)
+A detailed proof is provided in Appendix |C.] Instead of relying on global-consistent direction
+
+provided by velocity prediction, the score function provides more accurate drift direction from local
+distributional gradients, which is more practical for deviation evaluation, and we have
+
+Vax, 108 Pu, (@k,t) = —
+
+Ree (Gani TL) = Ews,ree [|| Vax, log pe, (Gx,t) — Vax, log pu(ax,t)||"]
+
+. t
+=Emtirve |p Rem (Gait 7)] (7)
+
+where Re, ry i8 used for calculating flow reward with timestep collection 7 by debiasing weighting.
+We suggest that the velocity deviation serves as a surrogate for score deviation, while the coefficient
+emphasizes the timestep priority through the reverse process. We provide ablations in Sec. that
+using flow reward at different timesteps for RL, where the larger timesteps with less noises are
+favorable in constituting reward signal, which is consistent with suggestion given by Eq.
+
+Theoretical Analysis with Likelihood. Comparing to probability likelihood under reference dis-
+tribution, velocity deviations show directional drifts error toward reference distribution. These two
+paradigms appear as different profile for distribution evaluation, and we further clarify their under-
+lying relationship as:
+
+where log py,,(a@x) is the log-likelihood under distribution parameterized by vg, \ > 0 is constant,
+and C'(a;,) is the sundry term. We show that the evidence lower bound of log-likelihood is consti-
+tuted by negative velocity deviation under reference distribution, indicated that the two paradigms
+are inversely correlated, and the minimal Re (an: t,7) with respect to a given a, corresponds to
+the maximal evidence lower bound (ELBO) on the log-likelihood log py, (@). We calibrate the sign
+of flow rewards in RLFR, and provide the detailed proof of Eq.[8]in Appendix[C.2|
+
+3.3. EXTENDING RLVR WITH FLOW REWARD
+
+Velocity-Based Advantage Shaping. The main idea behind RLFR is to leverage the expressive
+latent space of LLMs with flow reward and thus extend RLVR with latent rewards utilization. Instead
+of sharing common advantage within response a, we shape advantage term for each token a, with
+flow returns, yielding by the accumulation of decayed flow rewards. While the advantage shaping
+makes it more flexible for different RLVR algorithms, without considering the specific advantage
+estimation methods. We have:
+
+|a|
+
+A, — Soy fee + Ao, (9)
+s=k
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Algorithm 1: Reinforcement Learning with Flow Rewards (RLFR)
+
+Inputs: Online data O{q, a}, offline data D.¢{q, z, a}, reference data buffer B, initial flow model v4,
+validated batch size «, layer collection £ = (l1,..., 1), response quality metric(-)
+Offline Start:
+Extract policy latents from layer collection £ on Dos ¢ and construct the Dé + ¢
+Perform flow training on Dj, p with Eq. 4|where the loss is only calculated on response tokens
+Online Optimization:
+Initialize reference data buffer B + 0
+while Training do
+Generate rollouts G for batch data from QO
+Optimize the policy with RL algorithms such as Eq.2|with advantage estimated for each token by Eq.
+B <« Rejection-Sampling(G, metric); // Recommend metrics: correctness, entropy
+while |B| > « do
+Optimize flow vg on batch data from B with policy latents in £ using Eq.(4|
+B.pop(batch data)
+end while
+end while
+return policy, flow vg and end training
+
+re? = — 8. FP T||Fe?| > q], where #7? = minmax({REoq,(ax); TL} @,), (10)
+
+where I[-] is the indicator function and return | if condition is true and 0 otherwise, where we discard
+noisy fluctuations in flow rewards and preserve only substantial deviations above 7. We perform the
+minmax-norm within the single sequence to regularize the numerical values between [—1, 1]. T
+and £ are the collections of timesteps and layer percentiles used to calculate the velocity deviations,
+and the latents are detached from the computational graph for stopping backpropagation. Practically,
+we incorporate the latents of subsequent token @;,41 to serve as conditions for assisting velocity pre-
+diction in flow reward, that further establishes context dependence with enlarged interactive space,
+and more ablations are provide in Sec[4.3] The flow reward provides a stable examination on model
+latents that quantify their velocity deviation from flow pre-trained on off-policy high-quality data.
+
+Updated Rewards with Rejection-Sampling. As the policy are progressing during optimization
+
+alongside with their latents|Huan etal (2025), yielding flow rewards from frozen vg pre-trained on
+offline start data introduces inherent distribution gap. Therefore, we update flow by Eq.4|throughout
+
+the policy optimization with online rejection-samping data, where the filtered metrics are flexible to
+direct the constitution of reference distribution for flow reward calculation. We provide detailed
+framework in Algorithm [I] and we empirically found that the correctness is still the most effective
+metric, where more ablations are provided in Sec. [4.3] for comparison.
+
+4 EXPERIMENTS
+
+4.1 EXPERIMENTAL SETUP
+
+Training Data.
+
+We conduct experiments for both language and multimodal models for evaluation. In language
+
+settings, we use openr!|Hugging Face|(2025) as offline start data for flow pretraining, which contains
+
+93k carefully curated mathematical reasoning problems. The reinforcement learning of RLFR is
+
+performed on MATH /Hendrycks et al.|(2021), which includes diverse reasoning-intensive problems
+
+spanning algebra, geometry, number theory, and combinatorics. In multimodal settings, we filter the
+
+math subset from MMPR (2024b) as offline data for flow pretraining, which consists
+
+115k multimodal mathematical reasoning problems. Subsequently, the reinforcement learning is
+
+conducted on the MMK12 (2025a), which includes mathematics, physics, and general
+science with multimodal contexts.
+
+Evaluation. We assess the language reasoning performance using a suite of standard mathematical
+reasoning benchmarks, including: AIME24/25 |'| AMC23 || MATHS500|Hendrycks et al.| (2021),
+and OlympiadBench|He et al.](2024). We report Pass@1 metric with rollout temperature of 0 and
+
+"https://huggingface.co/datasets/AI-MO/aimo-validation-aime
+*https://huggingface.co/datasets/AI-MO/aimo-validation-ame
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Table 1: Overall performance on language reasoning benchmarks. Pass@32 and Pass@1 metrics
+are reported with zero-shot evaluation. { means the model trained in our setting for evaluation.
+
+Model AIME25 AIME24 AMC23 MATHS00 OlympiadBench
+Pass@32 Pass@1 Pass @32 Pass@1 Pass@32 Pass@1 Pass@32 Pass@1 Pass @32 Pass@1
+Qwen2.5-Math-1.5B 26.7 0.0 43.3 13.3 79.5 32.5 90.2 31.8 61.9 22.8
+RLVR 23.3 3:3: 46.7 16.7 81.9 41.4 91.8 71.0 62.7 33.5
+RLFR 30.0+6.7 6.743.4 50.0+3.3 13.3-3.4 83.1+1.2 44.643.2 92.4+0.6 72.0+1.0 63.1+0.6 35.7422
+Qwen2.5-Math-7B 30.0 33 56.6 16.6 80.7 37.3 94.2 50.8 61.2 17.2
+Qwen2.5-Math-7B-Inst 36.6 10.0 46.6 13.3 79.5 50.6 - 79.8 - 41.2
+Oat-Zero 30.0 6.7 56.6 30.0 81.9 55.4 - 79.6 - 42.6
+RLVR 30.0 10.0 56.6 26.7 80.7 57.8 92.0 79.2 64.8 40.1
+Entropy Adv.+ 26.6 6.6 53.3 20.0 75.9 54.2 93.0 75.6 61.2 36.4
+RLFR 33.3+3.3 10.0+0. 56.6+0.0 30.0+3.3 83.1424 59.0+1.2 92.6+0.6 80.6+1.4 66.1+1.3 41.7+1.6
+Llama3.1-8B 0.0 0.0 0.0 0.0 14.4 0.0 28.2 0.6 5.9 0.0
+Llama3.1-8B-Inst 16.7 3.3 26.7 10.0 69.8 21.7 - 48.0 - 14.7
+RLVR 6.7 0.0 6.7 0.0 25.3 72 46.0 18.0 18.6 4.0
+RLFR 13.3+6.6 6.7+6.7 16.7+10.0 6.74+6.7 27.7424 12.0+4.8 46.4+0.4 18.8+0.8 19.3+0.7 11.3+7.3
+
+Table 2: Overall performance on multimodal reasoning benchmarks. Logic Avg. denotes average
+of LogicVista and VisuLogic. Math Avg. denotes average of other four math benchmarks.
+
+MathVista MathVision MathVerse WeMath  LogicVista VisuLogic | Math Avg. Logic Avg. Avg.
+Qwen2.5VL-3B-Inst 62.0 21.1 33.7 40.7 38.9 26.8 39.4 32.9 37.2
+RLVR 65.9 24.1 42.2 55.2 41.1 26.4 46.8 33.7 42.5
+RLFR 67.7+1.8 29.6+5.5 42.6+0.4 56.9+1.7 42.3+1.2 25.4-1.0 49.2424 33.8+0.1 44.1+1.6
+Qwen2.5VL-7B-Inst 65.6 23.4 47.3 53.4 47.8 27.1 47.4 37:5 44.1
+R1-OneVision-7B 63.7 22.4 45.2 52.9 38.9 18.3 46.1 28.6 40.2
+OpenVLThinker-7B 64.5 24.3 46.1 50.3 38.7 10.6 46.3 24.6 39.1
+MM-Eureka-7B 73.5 27.9 51.9 58.7 46.9 25.5 53.0 36.2 47.4
+RLVR 73.1 27.6 48.0 64.6 48.3 24.8 53.3 36.5 47.7
+Entropy Adv. + 71.1 26.3 52.1 63.1 44.5 25.7 53.2 35.1 47.1
+RLFR 73.4+0.3 31.6+4.0 52.0+4.0 66.1+1.5 48.3400 26.7+1.9 55.8424 37.5+1.0 49.7+1.9
+
+Pass @32 with temperature of 0.7 for decoding, under a maximum response length of 8192 tokens.
+For multimodal reasoning benchmarks, we include MathVista (test mini) , MathVerse
+(test mini) [Zhang et al.| (2024), MathVision (test) (2024a), WeMath
+and logic benchmarks including Logic Vista (2024) and VisuLogic
+adopt greedy decoding with temperature of 0 and report Pass@1 metric for evaluation.
+
+Implementation Details. We adopt RL algorithm as GRPO in our experiments. In flow pretraining,
+we use a training batch size of 128 with 10~4 learning rate and warmup ratio of 0.1, where the
+LLM backbone is frozen. We empirically set the percentiles of layer collection as {0.25, 0.5, 0.75}
+throughout the model, where the layer position embedding are added. The flow network comprises
+4 layers for 3B models and 6 layers for 7B/8B models. In reinforcement finetuning, we exclude both
+KL divergence loss and entropy loss, and use a training batch size of 128 with policy learning rate
+of 10~° and flow learning rate of 10~*, where the maximal response length is set for 4096. We use
+the threshold 7) of 0.6 to discard noisy fluctuations, the validated batch size « of 32 for flow update,
+while the discount factor y and coefficient § are set as 1 and 0.01. The timestep collection 7 for
+yielding flow reward is set for {0.8}, and we use the temperature of 1 for response rollout.
+
+4.2 MAIN RESULTS
+
+The main experimental results in Table }1] and Table [2| demonstrate that RLFR consistently out-
+performs baselines across both language and multimodal reasoning benchmarks. The baselines
+
+including basic RLVR with binary verification, existing approaches |Liu et al.](2025e);
+
+(2025b); (2025); (2025b) and entropy-based advantage shaping method
+Cheng et al.|(2025), which serves as a strong baseline for logit-space comparison. Table [I] reports
+
+results on language reasoning benchmarks using Qwen and Llama base models across 1.5B and
+7B/8B size, where RLFR shows consistent improvement, surpassing basic RLVR by 1.5% average
+score on Qwen2.5-Math-7B and by 5.3% average score on Llama3.1-8B, while achieving superior
+performance compared to entropy-based shaping method in logit space. Table}2|presents results on
+multimodal reasoning benchmarks, where RLFR achieves compelling improvements on challeng-
+ing benchmarks like MathVision and MathVerse, and show steady generalization on out-of-domain
+logic benchmarks. The performance gains across both language and multimodal reasoning bench-
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+marks on different model families show that the flow rewards derived from latent space reliably
+advance the performance with binary verification, while competitive to logit space shaping.
+
+then. guid Waj twpich
+Steps Type Frequently Reward Tokens 2 ‘SC ay i
+angle sam a
+n frac theta +-={} sqrt cdot matrix times abs pi : ° are it “from
+math symbol sin line product set angle... = eal
+25 “re Sra rab)
+: To output of need equation problem value these sas sum ed digit]
+many how determine import break maximum... ti if:
+zr UA 2
+nm frac sqrt area times cdot average triangle sin pie. hs DP Wemseere
+equality outer second integers length sum... this. : 8
+286 ay
+- To problem output determine understand python A umber,
+frac denote Given integers use properties... k*hinees i y= eachmst can
+
+Table 3: Case study of reward tokens in training progress.
+positive flow reward and “-” means negative flow reward.
+
+“+” means Figure 4: Textual cloud of of-
+fline start dataset.
+
+4.3 ABLATIONS
+
+We conduct ablations on the framework of RLFR and the variant of flow reward. The ablations are
+conducted on multimodal settings with Qwen2.5VL-3B, where Pass@1 metric is reported.
+
+Effect of online rejection sampling and corresponding metrics. We present the ablations of
+RLER framework in Table/4} where both offline start of flow network and online updated with rejec-
+tion sampling show steady contribution to the final performance. Additionally, noisy fluctuations in
+flow reward appear to be detrimental and the filtering for substantial deviations is essential for stable
+RL training. In Table|5| we present the effects of metric choices in rejection sampling that incentivize
+the desired reference distribution of the flow, including outcome correctness by binary verification,
+average trajectory entropy above 50th percentile, and their composition, and the correctness is still
+validated to be the most effective metric on filtering the reference data.
+
+Table 5: Ablation results of metrics used in re-
+jection sampling that contribute to the online
+updated reference distribution for flow reward.
+
+Table 4: Ablation experimental results of model
+trained under incomplete RLFR framework.
+
+Method Math Avg. Logic Avg.
+— se oe NE Metric Math Avg. Logic Avg.
+RLFR 49.2 33.8
+w/o offline start 45.6.3.6 31.3-25 Outcome correctness 49.2 33.8
+w/o rejection sampling 46.8-2.4 32.4-14 Trajectory entropy 47.9 33.9
+w/o fluctuation filtering. 47.6-1.6 32.6-1.2 Correctness+Entropy 46.7 33.1
+Effect of timesteps debiasing in flow reward. The Be
+flow reward derived from velocity deviations delivers 4 50 408
+i : ; : © By aA ee x 48.90
+several impact factors, including timesteps used for @ ,, [°° 7. sa aah a
+velocity prediction and conditions in flow network, & 47.20
+and we provide their effect on reward quality in Fig- >°"|
+ure [5] and Table [6] The results in Figure [5] provide = § 4) —4- math avg.
+strong evidence for timesteps debiasing method sug- g = Equal collection of Math Avg.
+gested in Sec. where the larger timesteps with (on Exseatastnigiptllesetort et Mat hiaey
+
+less noisy are preferred for flow reward, as their more 00 02 0.4 06 08 10
+reliable velocity prediction, and when using collec- TRRSSES PSST Me IGSIEy Bieler
+
+tion of timesteps such as T = {0.2,0.4,0.6,0.8} for Figure 5: Results on different timesteps for
+calculating velocity deviation, the debiasing weight- flow reward and debiasing effect.
+
+ing further shows superiority by 1.7% average score improvement compared to equal average.
+
+Effect of flow conditions in velocity prediction.
+We provide results with different velocity pre-
+diction conditions for constructing flow reward
+
+Table 6: Ablations results of auxiliary condi-
+tions in flow network for velocity prediction.
+
+. ; ; : : Condition Position | Math Avg. Logic Avg.
+in Table [6] including latents from identity token, - - | g s =
+previous token, and post token, where the post to- aK rd a pon
+
+ae nak 7 Ar—1 revious : ;
+ken condition exhibits apparent advantage com fia Post 49.2 33.8
+
+pared to other two paradigms, validating that us-
+
+ing larger auxiliary space to support velocity prediction is beneficial for precedent reward quality.
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+4.4 ANALYSIS
+
+We further analysis the reward behaviors derived from velocity deviations during training progress
+to better understand what is being encouraged. In Table}3} we found that: (1) Contrast to previ-
+ous entropy-based method that encouraging tokens with logical connection function to dominate
+reasoning directions (2025b); [Cheng et al.](2025), the flow rewards prefer tokens that
+practically execute the question, and depress tokens with empty content such as connection tokens.
+We attribute this to that the high entropy tokens typically correspond to ambiguity hidden states that
+prepared for a large set of candidate tokens, which makes it hard to predict in flow field. (2) The
+positive reward tokens are initially related to offline start data as shown in Figure [4] such as sqrt,
+angle, and progressively updated with policy. (3) Despite the large portion of general words in
+pretrained dataset, the flow yields limited reward on these tokens rather than completely matching.
+Additionally, some tokens receive either positive reward or negative reward in cases, e.g., frac,
+indicating that the flow reward is capable of relying on efficient context dependence compressed
+within the hidden states, rather than individual token-level denotation for context comprehending.
+
+Takeaways
+
+¢ Flow rewards prefer tokens that practically execute the question, and depress tokens
+with empty content such as connection tokens.
+
+¢ High entropy in logit space makes larger velocity deviations in latent space, attribut-
+ing to the ambiguity hidden states correspond to a large set of candidate tokens.
+
+¢ Flow rewards rely on efficient context dependence compressed within the hidden
+states, rather than individual token-level denotation for context comprehending.
+
+5 RELATED WORK
+
+Reinforcement learning beyond binary verification. Reinforcement learning with binary verifi-
+able reward has recently demonstrates promising effectiveness in advancing reasoning abilities of
+
+Large Language Models (2025a); (2025); [DeepSeek-AT et al.| (2025). Despite
+
+robustness to reward hacking, the binary verification largely restricts the potential valuable explo-
+
+ration in reasoning trajectory. Indicated by the policy entropy|Cui et al.|(2025); (2025b),
+
+recent practices leverage a variety of metrics derived from model likelihood either to shape the re-
+ward signal (Cheng et al, (2025p; [Damani et al} (2025): [He et a. (2025); Li et al.| (20256), or to
+serve as indicators for identifying tokens with different optimization (2025a]b);
+(2025). However, this work highlights the latent space could be an expressive substrate for reliable
+reward collection, complementing prior methods that primarily focus on logit space. Additionally,
+
+recent work also adopts the pass@k training|Chen et al.|(2025) that tolerates incorrect answer with
+potential valuable trajectory, which is orthogonal to this work and also a promising direction.
+
+Flow Matching in Reinforcement Learning. As the most effective continuous modeling frame-
+work, flow matching [Lipman et al.|(2022);/Liu et al.|(2022) is especially expert at generating high-
+dimensional signals, and has achieved remarkable success across a wide range of domains. Building
+on recent progress of RLVR, series of works have been proposed to furthe advance the generation
+
+quality in respective areas, including visual generation (2025a) ;Liet al.| (2025a) ;[Xue et al.|
+(2025) and robotics (2025);|McAllister et al.|(2025). These works leverage the flow
+
+as the policy model for optimization, which is distinct from RLFR that uses flow as environment for
+reward collection, and concentrates on velocity deviation metrics rather than reverse the process.
+
+6 CONCLUSION
+
+In this work, we analysis the auxiliary signals for reward shaping of RLVR from the perspective of
+latent space, and show that the latent space is highly expressive yet underexplored, complementing
+prior methods that focus closely on logit space. In light of this, RLFR offers a novel framework
+on shaping RLVR with flow reward,mwhere the flow field of model latent are constructed from ei-
+ther off-policy high-quality data and on-policy rejection sampling data, and the deviations of policy
+latents within it are quantified to serve as a reward signal, extending RLVR for latent reward uti-
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+lization. RLFR first demonstrates that a well-established flow field can be a sound environment for
+reward signal collection, yielding steady performance improvements across both language and mul-
+timodal benchmarks, highlighting the potential of latent substrate for reward design. Additionally,
+RLFR naturally leverages expert reasoning trajectories from off-policy data into the constitution
+of reward signal, instead of relying on self-confidence. Future directions involve scaling the flow
+environment to release the latent potential, and the prospect of latent signals for test-time scaling.
+
+REFERENCES
+
+Daman Arora and Andrea Zanette. Training language models to reason efficiently. arXiv preprint
+arXiv:2502.04463, 2025.
+
+Zhipeng Chen, Xiaobo Qin, Youbin Wu, Yue Ling, Qinghao Ye, Wayne Xin Zhao, and Guang Shi.
+Pass@ k training for adaptively balancing exploration and exploitation of large reasoning models.
+arXiv preprint arXiv:2508.10751, 2025.
+
+Daixuan Cheng, Shaohan Huang, Xuekai Zhu, Bo Dai, Wayne Xin Zhao, Zhenliang Zhang, and
+Furu Wei. Reasoning with exploration: An entropy perspective. arXiv preprint arXiv:2506.14758,
+2025.
+
+Ganqu Cui, Yuchen Zhang, Jiacheng Chen, Lifan Yuan, Zhi Wang, Yuxin Zuo, Haozhan Li, Yuchen
+Fan, Huayu Chen, Weize Chen, et al. The entropy mechanism of reinforcement learning for
+reasoning language models. arXiv preprint arXiv:2505.22617, 2025.
+
+Mehul Damani, Isha Puri, Stewart Slocum, Idan Shenfeld, Leshem Choshen, Yoon Kim, and Jacob
+Andreas. Beyond binary rewards: Training Ims to reason about their uncertainty. arXiv preprint
+arXiv:2507.16806, 2025.
+
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu,
+Qihao Zhu, et al. Deepseek-rl: Incentivizing reasoning capability in Ilms via reinforcement
+
+learning, 2025. URL|https://arxiv.org/abs/2501.12948
+
+Yihe Deng, Hritik Bansal, Fan Yin, Nanyun Peng, Wei Wang, and Kai-Wei Chang. Openvlthinker:
+An early exploration to complex vision-language reasoning via iterative self-improvement. arXiv
+preprint arXiv:2503.17352, 2025.
+
+Yuqian Fu, Tinghong Chen, Jiajun Chai, Xihuai Wang, Songjun Tu, Guojun Yin, Wei Lin, Qichao
+Zhang, Yuanheng Zhu, and Dongbin Zhao. Srft: A single-stage method with supervised and
+reinforcement fine-tuning for reasoning. arXiv preprint arXiv:2506.19767, 2025.
+
+Ruiqi Gao, Emiel Hoogeboom, Jonathan Heek, Valentin De Bortoli, Kevin P Murphy, and
+Tim Salimans. Diffusion meets flow matching: Two sides of the same coin. 2024. URL
+https://diffusionflow. github. io, 2024.
+
+Hasan Abed Al Kader Hammoud, Hani Itani, and Bernard Ghanem. Beyond the last answer: Your
+reasoning trace uncovers more than you think. arXiv preprint arXiv:2504.20708, 2025.
+
+Andre He, Daniel Fried, and Sean Welleck. Rewarding the unlikely: Lifting grpo beyond distribution
+sharpening. arXiv preprint arXiv:2506.02355, 2025.
+
+Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Leng Thai, Junhao Shen, Jinyi Hu,
+Xu Han, Yujie Huang, Yuxiang Zhang, et al. Olympiadbench: A challenging benchmark for
+promoting agi with olympiad-level bilingual multimodal scientific problems. arXiv preprint
+arXiv:2402. 14008, 2024.
+
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song,
+and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv
+preprint arXiv:2103.03874, 2021.
+
+Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, Xiangyu Zhang, and Heung-Yeung Shum.
+Open-reasoner-zero: An open source approach to scaling up reinforcement learning on the base
+model. arXiv preprint arXiv:2503.24290, 2025.
+
+10
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Maggie Huan, Yuetai Li, Tuney Zheng, Xiaoyu Xu, Seungone Kim, Minxin Du, Radha Pooven-
+dran, Graham Neubig, and Xiang Yue. Does math reasoning improve general Ilm capabilities?
+understanding transferability of llm reasoning. arXiv preprint arXiv:2507.00432, 2025.
+
+Hugging Face. Open rl: A fully open reproduction of deepseek-rl, January 2025. URL|https :|
+//github.com/huggingface/open-rl
+
+Aaron Jaech, Adam Kalai, Adam Lerer, Adam Richardson, Ahmed El-Kishky, Aiden Low, Alec
+Helyar, Aleksander Madry, Alex Beutel, Alex Carney, Alex Iftimie, Alex Karpenko, Alex Tachard
+Passos, Alexander Neitz, Alexander Prokofiev, Alexander Wei, Allison Tam, Ally Bennett,
+Ananya Kumar, Andre Saraiva, Andrea Vallone, Andrew Duberstein, Andrew Kondrich, Andrey
+Mishchenko, Andy Applebaum, Angela Jiang, Ashvin Nair, Barret Zoph, Behrooz Ghorbani, Ben
+Rossen, Benjamin Sokolowsky, Boaz Barak, Bob McGrew, Borys Minaiev, Botao Hao, Bowen
+Baker, Brandon Houghton, Brandon McKinzie, Brydon Eastman, Camillo Lugaresi, Cary Bassin,
+Cary Hudson, Chak Ming Li, Charles de Bourcy, Chelsea Voss, Chen Shen, Chong Zhang, Chris
+Koch, Chris Orsinger, Christopher Hesse, Claudia Fischer, Clive Chan, Dan Roberts, Daniel Kap-
+pler, Daniel Levy, Daniel Selsam, David Dohan, David Farhi, David Mely, David Robinson,
+Dimitris Tsipras, Doug Li, Dragos Oprica, Eben Freeman, Eddie Zhang, Edmund Wong, Eliz-
+abeth Proehl, Enoch Cheung, Eric Mitchell, Eric Wallace, Erik Ritter, Evan Mays, Fan Wang,
+Felipe Petroski Such, Filippo Raso, Florencia Leoni, Foivos Tsimpourlas, Francis Song, Fred
+von Lohmann, Freddie Sulit, Geoff Salmon, Giambattista Parascandolo, Gildas Chabot, Grace
+Zhao, Greg Brockman, Guillaume Leclerc, Hadi Salman, Haiming Bao, Hao Sheng, Hart An-
+drin, Hessam Bagherinezhad, Hongyu Ren, Hunter Lightman, Hyung Won Chung, Ian Kivlichan,
+Ian O’ Connell, Ian Osband, Ignasi Clavera Gilaberte, Ilge Akkaya, Ilya Kostrikov, Ilya Sutskever,
+Irina Kofman, Jakub Pachocki, James Lennon, Jason Wei, Jean Harb, Jerry Twore, Jiacheng Feng,
+Jiahui Yu, Jiayi Weng, Jie Tang, Jieqi Yu, Joaquin Quifionero Candela, Joe Palermo, Joel Parish,
+Johannes Heidecke, John Hallman, John Rizzo, Jonathan Gordon, Jonathan Uesato, Jonathan
+Ward, Joost Huizinga, Julie Wang, Kai Chen, Kai Xiao, Karan Singhal, Karina Nguyen, Karl
+Cobbe, Katy Shi, Kayla Wood, Kendra Rimbach, Keren Gu-Lemberg, Kevin Liu, Kevin Lu,
+Kevin Stone, Kevin Yu, Lama Ahmad, Lauren Yang, Leo Liu, Leon Maksin, Leyton Ho, Liam
+Fedus, Lilian Weng, Linden Li, Lindsay McCallum, Lindsey Held, Lorenz Kuhn, Lukas Kon-
+draciuk, Lukasz Kaiser, Luke Metz, Madelaine Boyd, Maja Trebacz, Manas Joglekar, Mark Chen,
+Marko Tintor, Mason Meyer, Matt Jones, Matt Kaufer, Max Schwarzer, Meghan Shah, Mehmet
+Yatbaz, Melody Y. Guan, Mengyuan Xu, Mengyuan Yan, Mia Glaese, Mianna Chen, Michael
+Lampe, Michael Malek, Michele Wang, Michelle Fradin, Mike McClay, Mikhail Pavlov, Miles
+Wang, Mingxuan Wang, Mira Murati, Mo Bavarian, Mostafa Rohaninejad, Nat McAleese, Neil
+Chowdhury, Neil Chowdhury, Nick Ryder, Nikolas Tezak, Noam Brown, Ofir Nachum, Oleg
+Boiko, Oleg Murk, Olivia Watkins, Patrick Chao, Paul Ashbourne, Pavel Izmailov, Peter Zhokhov,
+Rachel Dias, Rahul Arora, Randall Lin, Rapha Gontijo Lopes, Raz Gaon, Reah Miyara, Reimar
+Leike, Renny Hwang, Rhythm Garg, Robin Brown, Roshan James, Rui Shu, Ryan Cheu, Ryan
+Greene, Saachi Jain, Sam Altman, Sam Toizer, Sam Toyer, Samuel Miserendino, Sandhini Agar-
+wal, Santiago Hernandez, Sasha Baker, Scott McKinney, Scottie Yan, Shengjia Zhao, Shengli Hu,
+Shibani Santurkar, Shraman Ray Chaudhuri, Shuyuan Zhang, Siyuan Fu, Spencer Papay, Steph
+Lin, Suchir Balaji, Suvansh Sanjeev, Szymon Sidor, Tal Broda, Aidan Clark, Tao Wang, Tay-
+lor Gordon, Ted Sanders, Tejal Patwardhan, Thibault Sottiaux, Thomas Degry, Thomas Dimson,
+Tianhao Zheng, Timur Garipov, Tom Stasi, Trapit Bansal, Trevor Creech, Troy Peterson, Tyna
+Eloundou, Valerie Qi, Vineet Kosaraju, Vinnie Monaco, Vitchyr Pong, Vlad Fomenko, Weiyi
+Zheng, Wenda Zhou, Wes McCabe, Wojciech Zaremba, Yann Dubois, Yinghai Lu, Yining Chen,
+Young Cha, Yu Bai, Yuchen He, Yuchen Zhang, Yunyun Wang, Zheng Shao, and Zhuohan Li.
+
+Openai o1 system card, 2024. URL https: //arxiv.org/abs/2412.16720
+
+Diederik Kingma and Ruiqi Gao. Understanding diffusion objectives as the elbo with simple data
+augmentation. Advances in Neural Information Processing Systems, 36:65484—655 16, 2023.
+
+Diederik Kingma, Tim Salimans, Ben Poole, and Jonathan Ho. Variational diffusion models. Ad-
+vances in neural information processing systems, 34:21696—21707, 2021.
+
+Nathan Lambert, Jacob Morrison, Valentina Pyatkin, Shengyi Huang, Hamish Ivison, Faeze Brah-
+man, Lester James V Miranda, Alisa Liu, Nouha Dziri, Shane Lyu, et al. Tulu 3: Pushing frontiers
+in open language model post-training. arXiv preprint arXiv:2411.15124, 2024.
+
+11
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Junzhe Li, Yutao Cui, Tao Huang, Yinping Ma, Chun Fan, Miles Yang, and Zhao Zhong. Mixgrpo:
+Unlocking flow-based grpo efficiency with mixed ode-sde. arXiv preprint arXiv:2507.21802,
+2025a.
+
+Yi-Chen Li, Tian Xu, Yang Yu, Xuqin Zhang, Xiong-Hui Chen, Zhongxiang Ling, Ningjing Chao,
+Lei Yuan, and Zhi-Hua Zhou. Generalist reward models: Found inside large language models.
+arXiv preprint arXiv:2506.23235, 2025b.
+
+Yizhuo Li, Yuying Ge, Yixiao Ge, Ying Shan, and Ping Luo. Aligning latent spaces with flow priors.
+arXiv preprint arXiv:2506.05240, 2025c.
+
+Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow matching
+for generative modeling. arXiv preprint arXiv:2210.02747, 2022.
+
+Jie Liu, Gongye Liu, Jiajun Liang, Yangguang Li, Jiaheng Liu, Xintao Wang, Pengfei Wan,
+Di Zhang, and Wanli Ouyang. Flow-grpo: Training flow matching models via online rl. arXiv
+preprint arXiv:2505.05470, 2025a.
+
+Mingjie Liu, Shizhe Diao, Jian Hu, Ximing Lu, Xin Dong, Hao Zhang, Alexander Bukharin,
+Shaokun Zhang, Jiaqi Zeng, Makesh Narsimhan Sreedhar, et al. Scaling up rl: Unlocking di-
+verse reasoning in Ilms via prolonged training. arXiv preprint arXiv:2507.12507, 2025b.
+
+Mingjie Liu, Shizhe Diao, Ximing Lu, Jian Hu, Xin Dong, Yejin Choi, Jan Kautz, and Yi Dong.
+Prorl: Prolonged reinforcement learning expands reasoning boundaries in large language models.
+arXiv preprint arXiv:2505.24864, 2025c.
+
+Runze Liu, Junqi Gao, Jian Zhao, Kaiyan Zhang, Xiu Li, Biqing Qi, Wanli Ouyang, and Bowen
+Zhou. Can 1b Ilm surpass 405b Ilm? rethinking compute-optimal test-time scaling. arXiv preprint
+arXiv:2502.06703, 2025d.
+
+Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and
+transfer data with rectified flow. arXiv preprint arXiv:2209.03003, 2022.
+
+Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee,
+and Min Lin. Understanding rl-zero-like training: A critical perspective. arXiv preprint
+arXiv:2503.20783, 2025e.
+
+Pan Lu, Hritik Bansal, Tony Xia, Jiacheng Liu, Chunyuan Li, Hannaneh Hajishirzi, Hao Cheng, Kai-
+Wei Chang, Michel Galley, and Jianfeng Gao. Mathvista: Evaluating mathematical reasoning of
+foundation models in visual contexts. arXiv preprint arXiv:2310.02255, 2023.
+
+David McAllister, Songwei Ge, Brent Yi, Chung Min Kim, Ethan Weber, Hongsuk Choi, Haiwen
+Feng, and Angjoo Kanazawa. Flow matching policy gradients. arXiv preprint arXiv:2507.21053,
+2025.
+
+Fanqing Meng, Lingxiao Du, Zongkai Liu, Zhixiang Zhou, Quanfeng Lu, Daocheng Fu, Tiancheng
+Han, Botian Shi, Wenhai Wang, Junjun He, Kaipeng Zhang, Ping Luo, Yu Qiao, Qiaosheng
+Zhang, and Wenqi Shao. Mm-eureka: Exploring the frontiers of multimodal reasoning with rule-
+based reinforcement learning. arXiv preprint arXiv:2503.07365, 2025a.
+
+Fanging Meng, Lingxiao Du, Zongkai Liu, Zhixiang Zhou, Quanfeng Lu, Daocheng Fu, Tiancheng
+Han, Botian Shi, Wenhai Wang, Junjun He, et al. Mm-eureka: Exploring the frontiers of mul-
+timodal reasoning with rule-based reinforcement learning. arXiv preprint arXiv:2503.07365,
+2025b.
+
+Andrew Y Ng, Daishi Harada, and Stuart Russell. Policy invariance under reward transformations:
+Theory and application to reward shaping. In Jcml, volume 99, pp. 278-287. Citeseer, 1999.
+
+Samuel Pfrommer, Yixiao Huang, and Somayeh Sojoudi. Reinforcement learning for flow-matching
+policies. arXiv preprint arXiv:2507.15073, 2025.
+
+Rungi Qiao, Qiuna Tan, Guanting Dong, Minhui Wu, Chong Sun, Xiaoshuai Song, Zhuoma
+GongQue, Shanglin Lei, Zhe Wei, Miaoxuan Zhang, et al. We-math: Does your large multi-
+modal model achieve human-like mathematical reasoning? arXiv preprint arXiv:2407.01284,
+2024.
+
+12
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv: 1707.06347, 2017.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathe-
+
+matical reasoning in open language models, 2024. URL https: //arxiv.org/abs/2402.
+03300
+
+Yang Song, Conor Durkan, Jain Murray, and Stefano Ermon. Maximum likelihood training of
+score-based diffusion models. Advances in neural information processing systems, 34:1415-
+1428, 2021.
+
+Jiakang Wang, Runze Liu, Fuzheng Zhang, Xiu Li, and Guorui Zhou. Stabilizing knowledge, pro-
+moting reasoning: Dual-token constraints for rlvr. arXiv preprint arXiv:2507.15778, 2025a.
+
+Ke Wang, Junting Pan, Weikang Shi, Zimu Lu, Houxing Ren, Aojun Zhou, Mingjie Zhan, and Hong-
+sheng Li. Measuring multimodal mathematical reasoning with math-vision dataset. Advances in
+Neural Information Processing Systems, 37:95095—95 169, 2024a.
+
+Shenzhi Wang, Le Yu, Chang Gao, Chujie Zheng, Shixuan Liu, Rui Lu, Kai Dang, Xionghui Chen,
+Jianxin Yang, Zhenru Zhang, et al. Beyond the 80/20 rule: High-entropy minority tokens drive
+effective reinforcement learning for IIm reasoning. arXiv preprint arXiv:2506.01939, 2025b.
+
+Weiyun Wang, Zhe Chen, Wenhai Wang, Yue Cao, Yangzhou Liu, Zhangwei Gao, Jinguo Zhu,
+Xizhou Zhu, Lewei Lu, Yu Qiao, et al. Enhancing the reasoning ability of multimodal large
+language models via mixed preference optimization. arXiv preprint arXiv:2411.10442, 2024b.
+
+Zihao Wang, Chirag Nagpal, Jonathan Berant, Jacob Eisenstein, Alex D’Amour, Sanmi Koyejo,
+and Victor Veitch. Transforming and combining rewards for aligning large language models. In
+Proceedings of the 41st International Conference on Machine Learning, ICML’ 24, 2024c.
+
+Yijia Xiao, Edward Sun, Tianyu Liu, and Wei Wang. Logicvista: Multimodal Ilm logical reasoning
+benchmark in visual contexts. arXiv preprint arXiv:2407.04973, 2024.
+
+Weiye Xu, Jiahao Wang, Weiyun Wang, Zhe Chen, Wengang Zhou, Aijun Yang, Lewei Lu,
+Hougiang Li, Xiaohua Wang, Xizhou Zhu, et al. Visulogic: A benchmark for evaluating visual
+reasoning in multi-modal large language models. arXiv preprint arXiv:2504.15279, 2025.
+
+Zeyue Xue, Jie Wu, Yu Gao, Fangyuan Kong, Lingting Zhu, Mengzhao Chen, Zhiheng Liu, Wei
+Liu, Qiushan Guo, Weilin Huang, et al. Dancegrpo: Unleashing grpo on visual generation. arXiv
+preprint arXiv:2505.07818, 2025.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li,
+Dayiheng Liu, Fei Huang, Haoran Wei, et al. Qwen2.5 technical report. arXiv preprint
+arXiv:2412.15115, 2024.
+
+Wenkai Yang, Jingwen Chen, Yankai Lin, and Ji-Rong Wen. Deepcritic: Deliberate critique with
+large language models. arXiv preprint arXiv:2505.00662, 2025a.
+
+Yi Yang, Xiaoxuan He, Hongkun Pan, Xiyan Jiang, Yan Deng, Xingtao Yang, Haoyu Lu, Dacheng
+Yin, Fengyun Rao, Minfeng Zhu, et al. Rl-onevision: Advancing generalized multimodal rea-
+soning through cross-modal formalization. arXiv preprint arXiv:2503.10615, 2025b.
+
+Chenlu Ye, Zhou Yu, Ziji Zhang, Hao Chen, Narayanan Sadagopan, Jing Huang, Tong Zhang, and
+Anurag Beniwal. Beyond correctness: Harmonizing process and outcome rewards through rl
+training. arXiv preprint arXiv:2509.03403, 2025.
+
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Tiantian Fan, Gaohong
+Liu, Lingjun Liu, Xin Liu, et al. Dapo: An open-source Ilm reinforcement learning system at
+scale. arXiv preprint arXiv:2503.14476, 2025a.
+
+Tianyu Yu, Bo Ji, Shouli Wang, Shu Yao, Zefan Wang, Ganqu Cui, Lifan Yuan, Ning Ding, Yuan
+Yao, Zhiyuan Liu, et al. Ripr: Extrapolating rlvr to general domains without verifiers. arXiv
+preprint arXiv:2506. 18254, 2025b.
+
+13
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Yufeng Yuan, Yu Yue, Ruofei Zhu, Tiantian Fan, and Lin Yan. What’s behind ppo’s collapse in
+long-cot? value optimization holds the secret. arXiv preprint arXiv:2503.01491, 2025.
+
+Yu Yue, Yufeng Yuan, Qiying Yu, Xiaochen Zuo, Ruofei Zhu, Wenyuan Xu, Jiaze Chen, Chengyi
+Wang, TianTian Fan, Zhengyin Du, et al. Vapo: Efficient and reliable reinforcement learning for
+advanced reasoning tasks. arXiv preprint arXiv:2504.05118, 2025.
+
+Renrui Zhang, Dongzhi Jiang, Yichi Zhang, Haokun Lin, Ziyu Guo, Pengshuo Qiu, Aojun Zhou,
+Pan Lu, Kai-Wei Chang, Yu Qiao, et al. Mathverse: Does your multi-modal Ilm truly see the
+diagrams in visual math problems? In European Conference on Computer Vision, pp. 169-186.
+Springer, 2024.
+
+Jian Zhao, Runze Liu, Kaiyan Zhang, Zhimu Zhou, Junqi Gao, Dong Li, Jiafei Lyu, Zhouyi Qian,
+
+Biqing Qi, Xiu Li, et al. Genprm: Scaling test-time compute of process reward models via
+generative reasoning. arXiv preprint arXiv:2504.00891, 2025.
+
+14
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+A EXPERIMENTAL DETAILS
+
+A.1l SETTINGS
+
+Experiments are conducted on 8 H20 GPUs. We use AdamW optimizer and sample 8 rollouts per
+prompt with (0.2, 0.28) clip range in policy loss for training. The prompt template is shown in Tab. [7]
+where we adopt bbox template for language training and tag template for multimodal training. In
+evaluation, we deploy a Qwen?2.5-7B-Instruct model server for answer extraction and judge, and
+adopt DeepSeek v3.1 for more complex benchmarks, such as MathVision and MathVerse.
+
+RLFR training prompt
+
+<|im_start|>system
+
+Please reason step by step, and put your final answer within \\boxed{}.
+<|im_end|>
+
+<|im_start|>user
+
+{ {question} }<|im_end|>
+
+<|im_start|>assistant
+
+RLFR training prompt
+
+<|im_start|>system
+
+You should first thinks about the reasoning process in the mind and
+then provides the user with the answer. Your answer must be in latex
+format and wrapped in $...$. The reasoning process and answer are
+enclosed within <think> </think> and <answer> </answer> tags,
+respectively, i.e., <think> Since $1+1=2$, so the answer is $2S.
+</think> <answer> $2S </answer>, which means your output should start
+with <think> and end with </answer>.
+
+<|im_end|>
+
+<|im_start|>user
+
+{ {question} }<|im_end|>
+
+<|im_start|>assistant
+
+Table 7: Training prompt for RLFR.
+
+A.2. TRAINING LOGS
+
+We monitor the training dynamics of RLVR and RLFR in Fig. [6] for comparison. During train-
+ing, the flow reward derived from latent space steadily improves the reasoning performance and
+accelerates the policy optimization, validating the reliability of the latent signals and their underex-
+plored expressiveness. The policy entropy of RLFR also stabili zed at a slightly higher level during
+the training plateau compared to RLVR, underscoring the effectiveness of velocity deviation as the
+dense reward for encouraging exploration. While the response length shows healthy behavior with
+steady increases and adjustment, while no sign of degeneration are observed.
+
+— RWR —— RLFR
+train/accuracy_rewards train/entropy train/response_length
+12
+
+os
+
+06 08
+
+0s 06
+
+oa 04 150
+
+03
+
+0.2 100
+
+° 50 100 150 200 250 300 ° 50 100 150 200 250 300 ° 50 100 150 200 250 300
+training steps training steps training steps
+
+Figure 6: Training logs of RLVR and RLFR on Qwen2.5VL-3B.
+
+B EXTENDED ANALYSIS OF LATENT SPACE
+
+Sec. [3.1] analysis the latent space of Qwen2.5-Base-7B at layer percentile of 0.5. We further show
+that the broad latent space exhibits the similar tendency throughout the LLM. In Fig.|7| we provide
+
+15
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Latent Distribution of Head-25% Tokens Latent Distribution of Tail-25% Tokens Latent Distribution of Head-25% Tokens Latent Distribution of Tail-25% Tokens
+
+% Latents in Correct Trajectory a 4. + batents in Correct Trajectory Latents in Correct Trajectory Latents in Correct Trajectory
+
+ba Latents in Incorrect Trajectory a, "+ Latents in incorrect Trajectory sf 2 + Latents in Incorrect Trajectory Latents in Incorrect Trajectory
+‘ aod
+
+SNE 2
+eSNE 2
+SNE 2
+SNE 2
+
+eSNEL PSNEL PSNEL ° ° eSNEL
+
+(a) Distribution of trajectory tokens in latent space with layer percentail-25. (b) Distribution of trajectory tokens in latent space with layer percentail-50.
+
+ion of Head-25% Tokens _ __Latent Distribution of Tail-25% Tokens _
+
+n of Head-25% Tol
+te
+
+__Latent Distribution of Tail-25% Tokens _
+
+ct Trajectory
+Incorrect Trajectory
+
+Latents in Correct Trajectory
+Latents in Incorrect Trajectory
+
+Latents in Correct Trajectory
+Latents in incorrect Trajectory
+=. @
+
+&
+SNE 2
+SNE?
+
+® 9
+
+PSNEL ° ° SNE L . PSNEL - tSNEL
+
+(c) Distribution of trajectory tokens in latent space with layer percentail-75. (d) Distribution of trajectory tokens in latent space with layer percentail-100.
+
+Figure 7: Distribution of reasoning trajectory tokens in latent space across different layer percentiles
+of the Qwen2.5-Base-7B, which consistently show expressive signals on tail trajectory tokens, high-
+lighting the broader potential of latent space for reward signal collection.
+
+the latent distributions of reasoning trajectory tokens at the {25, 50, 75, 100} layer percentiles, and
+found that there is no evidence of contradiction and specialization across layer positions, instead, the
+latent space exhibits coherent and consistent signals for trajectory quality identification. In practice,
+we exclude the 100th percentile in training, as the last hidden states are heavily modulated by the
+lm_head for logit prediction, and we therefore rely on intermediate percentiles for reward collection.
+
+C THEORETICAL ANALYSIS
+
+C.1 DERIVATION OF SCORE FUNCTION FOR VELOCITY
+
+Here, we provide the derivations for Eq. |6|that establish the connection between velocity prediction
+and score function.
+
+Proof. We consider the linear interpolation
+Le = AL + GH1, to ~N(0,1), 1 ~ Peatas
+where Xo and a, are independent. We denote derivatives a; = fan, Bi = 4 6,. Conditioned on
+the data a1, the noisy variable x; is Gaussian:
+pr(az | t1) ~ N (6x1, a71),
+
+with conditional score
+
+Vz log p(a: | a1) =. (11)
+By Fisher’s identity, the marginal score given by
+
+8:(a) = Vz log p(x) = E[ V, log p(a, | v1) | a = 2]
+
+1
+= ale 6 fa | @ =2]). (12)
+Rearranging yields
+1
+Ela, | 2, = 2] = 3 (2 + as:(2)). (13)
+
+Considering fay = Xo + Bix, thus the velocity field is
+
+= at [ao | a, = 2] + GE[ay | a, = 2). (14)
+
+16
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Since xo = (a — 6:21) /a4, we have
+
+, t ~
+ee f[ay | v, =a). (15)
+Ot Ot
+
+Substituting the Eq.[15]and Eq.[I3] the velocity field is given by
+
+a 5 ,
+v(x) = 2+ (4 = Subs ) j[e1 |v = 2]
+Ot
+Bs 2 Br ay
+= eta 81 (x). (16)
+Br ’ Br Ot i( )
+For linear schedule, where a; = 1 — t and (; = t, we have
+1 1-t
+v(x“) = rc + F 81(2). (17)
+The score function is given by
+wa t
+—j———. +}. , 18
+A ae ~
+
+Eq. [I7]and Eq. [I8]show the exact equivalence between the score function and velocity field under
+the linear interpolation schedule.
+
+C.2 PROOF OF VARIATIONAL LOWER BOUND
+
+Here, we provide the proof of Eq. [8] that establish the connection between the velocity deviations
+which measured by flow matching objective, and the likelihood given by evidence lower bound
+(ELBO) under target distribution. We indicate that the connection between ELBO and diffusion
+
+objective has been shown by previous works (2021); (2021);
+(2023), and we further extend it to velocity field.
+
+Proof. For sample y that need to be evaluated for velocity deviation in reference flow distribu-
+tion and consider the linear interpolation y, = a;a% + Bry, with a ~ pinit. Let si(yz) =
+Vz log pu, (yt) be the score of y;. Recall the flow matching objective in Eq.(5| we take
+
+' 1
+Lents) =f Byea| 5 llvolust) ~ uP] ae
+
+By continuity equation, the density and velocity of flow defined by vg (yz, t) satisfies
+
+Pv, (y)+V- (Dv, (yr) ve (yr. t)) = 0. (19)
+
+Given V log py, (Yi) = VPvs (Yt) /Pug (Ye), we have
+
+O: log pu, (yt) = —V- vs(yt, t) — volye, t) - Vy log po, (yt). (20)
+
+Considering fy = vo(yz,t), and substituting the Eq.[20] the total derivative of log py, (yz) is
+
+d d
+dt log py, (yr) = log Pu, (yt) + Vy log pu, (yt) - ae
+
+d
+=—-V-v6(yi,t) — vo(yt, t) > Vy log pu, (yt) + Vy log po, (Yt) - aut
+=-V- v¢(yi,t). (21)
+
+17
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Therefore, integrating over ¢ € [0, 1] yields the standard change-of-variables formula
+1
+log Pu, (y) = log init (@o) — | V = v6(Yi,t) dt
+0
+1
+= Egon pinit| log pinit (@o)] — / EynpaatalV * Vo(Ye, t)] dt
+0
+
+1
+= Co(x) ~~ | Ey~paseal ol Ut t), V log Paata( Ut ))] dt (22)
+0
+
+where (-,-) denotes inner product, and we derive the last step from the Stein’s identity. Considering
+
+(a, 9) = (a,b) — 5 lll? + Sllgll? — sila — all’,
+we thus substitute a = vg(y,t), b= uj, and g = V log paata(y), yielding
+
+(vg, Vlog paata) = (Vo, ut) — gllug ll? + 5IlV log paatall” — 3|IV log paata — uf |”.
+
+We simplify vg (yz, t) as vg and Paata(Yt) aS Paata for clarity, and have
+
+1
+
+1
+| Epaatal (Us V log Paata) | dt = | Eat] (05s uf)| dt + Bly), (23)
+0 0
+
+where B(y) depends only on the fixed bridge (paata, u?), and have
+1
+BOW) = fF Braca[ — $llull? + HIV logpasial? — ZIV log Pasta — uf? ]ae. 24)
+0
+
+Considering the Fenchel—Young inequality
+
+1 r
+(vg, uz) 2 = Mleoll? —5llui(?; A> 0,
+where we substitute into Eq. [23] and havex
+
+1
+
+, . 1 d
+J Bramall Vlogdaaa)] d= f Bpasul ~ 5yllvoll? — 5llufl] at + BO)
+0 0
+
+ab
+a 1 yy2
+=f Broa[= glee Avil] de + BG) 5)
+
+For the special case \ = 1, this simplifies to the equivalence given by Eq|8} Therefore, combining
+with Eq. [22] we obtain
+
+1
+log Peetu) > Cv) ~ > J By~paua[llP(ot) ~ wl Pat
+
+which establish the connection between the velocity and likelihood under target distribution.
+
+D CASE STUDY
+
+Question and Ground Truth
+
+Question: Jen enters a lottery by picking 4 distinct numbers from S = {1,2,3,--- ,9, 10}. 4
+numbers are randomly chosen from S. She wins a prize if at least two of her numbers were 2
+
+of the randomly chosen numbers, and wins the grand prize if all four of her numbers were the
+randomly chosen numbers. The probability of her winning the grand prize given that she won a
+prize is 7 where m and n are relatively prime positive integers. Find m + n.
+
+Ground Truth: 116
+
+18
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Response from RLVR Baseline
+
+To solve this problem, we need to calculate the probability of Jen winning the grand prize given
+that she won a prize. We can break this down into several steps:
+
+1. Calculate the total number of ways to choose 4 numbers from the set (S = {1, 2, 3,..., 10} ).
+2. Calculate the number of ways Jen can win a prize (i.e., at least 2 of her numbers are among
+the 4 chosen numbers).
+
+3. Calculate the number of ways Jen can win the grand prize (i.e., all 4 of her numbers are among
+the 4 chosen numbers).
+
+4. Use the conditional probability formula to find the probability of winning the grand prize
+given that she won a prize.
+
+Let’s go through these steps one by one.
+1. The total number of ways to choose 4 numbers from 10 is given by the combination formula
+
+((2) ).
+
+2. The number of ways Jen can win a prize is the sum of the number of ways she can have
+
+exactly 2, 3, or 4 of her numbers among the 4 chosen numbers. This can be calculated as:
+
+- Number of ways to have exactly 2 of her numbers among the 4 chosen numbers: ( (3) ) )
+))
+
+- Number of ways to have exactly 4 of her numbers among the 4 chosen numbers: ( (4) . (5) )
+3. The number of ways Jen can win the grand prize is simply the number of ways to choose 4
+numbers from her 4 chosen numbers, which is ( (3) : (3) =1).
+
+4. The probability of winning the grand prize given that she won a prize is the ratio of the number
+of ways to win the grand prize to the number of ways to win a prize.
+
+6
+- Number of ways to have exactly 3 of her numbers among the 4 chosen numbers: ( (3) . (°
+6
+
+Let’s calculate this using Python.
+
+import math
+
+# Total number of ways to choose 4 numbers from 10
+total_ways = math.comb(10, 4)
+
+# Number of ways to win a prize
+
+ways_to_win_prize = (math.comb(4, 2) * math.comb(6, 2)
++ math.comb(4, 3) * math.comb(6, 1)
+
++ math.comb(4, 4) * math.comb(6, 0))
+
+# Number of ways to win the grand prize
+ways_to_win_grand_prize = math.comb(4, 4) * math.comb(6, 0)
+
+# Probability of winning the grand prize given that she
+# won a prize
+probability = ways_to_win_grand_prize / ways_to_win_prize
+
+from fractions import Fraction
+fraction = Fraction (ways_to_win_grand_prize, ways_to_win_prize)
+m, n = fraction.numerator, fraction.denominator
+
+result =miton
+print (result)
+
+output 47
+
+The probability of Jen winning the grand prize given that she won a prize is (+).
+Therefore, the values of (m) and (n) are 1 and 47, respectively. The sum (m + n) is (1 + 47 = 48).
+
+So, the final answer is (| 48 }).
+
+19
+
+
+RLFR: Extending Reinforcement Learning for LLMs with Flow Environment
+
+Response from RLFR
+
+To solve this problem, we need to calculate the probability of Jen winning the grand prize given
+that she won a prize. Let’s break down the problem step-by-step:
+
+1. Total number of ways to choose 4 numbers from 10: ('?) = Wie =210
+2. Number of ways Jen can win a prize:
+
+- Jen wins a prize if at least 2 of her numbers are among the 4 chosen numbers.
+
+- We need to calculate the number of ways she can have 2, 3, or 4 of her numbers among the 4
+chosen numbers.
+
+- Number of ways to have exactly 2 of her numbers among the 4 chosen numbers: (3) . (8) =6
+-15=90
+
+- Number of ways to have exactly 3 of her numbers among the 4 chosen numbers: (3) . (°) =4
+-6=24
+
+- Number of ways to have exactly 4 of her numbers among the 4 chosen numbers: (4) . (3) =1
+-l=1
+
+- Total number of ways Jen can win a prize: 90 + 244+ 1=115
+
+3. Number of ways Jen can win the grand prize: - Jen wins the grand prize if all 4 of her
+numbers are among the 4 chosen numbers.
+
+- There is only 1 way for this to happen: (4) =1
+
+4. Probability of winning the grand prize given that she won a _ prize:
+Number of ways to win the grand prize _ 1
+Number of ways to win a prize ~ 115
+5. Final answer:
+The probability is 775, som = 1 and n = 115. Since 1 and 115 are relatively prime, the final
+
+answer is: m+n=1+115=116
+The final answer is: | 116 ]]
+
+20

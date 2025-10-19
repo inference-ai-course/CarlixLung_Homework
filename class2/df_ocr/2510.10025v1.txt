@@ -1,0 +1,895 @@
+2510.10025v1 [cs.CL] 11 Oct 2025
+
+arXiv
+
+Lightweight Baselines for Medical Abstract
+Classification:
+DisttIBERT with Cross-Entropy as a Strong Default
+
+Jiaqi Liu Lanruo Wang
+
+Su Liu Xin Hu
+
+Independent Researcher University of Texas at Dallas Georgia Institute of Technology University of Michigan- Ann Arbor
+
+United States
+lxw220021 @utdallas.edu
+
+United States
+jackyliu9747 @ gmail.com
+
+Abstract—Large language models work well for many NLP
+tasks, but they are hard to deploy in health settings with strict
+cost, latency, and privacy limits. We revisit a lightweight recipe
+for medical abstract classification and ask how far compact
+encoders can go under a controlled budget. Using the public med-
+ical_abstracts corpus, we fine-tune BERT-base and DistiIBERT
+with three objectives—standard cross-entropy, class-weighted
+cross-entropy, and focal loss—keeping tokenizer, sequence length,
+optimizer, and schedule fixed. DistiIBERT with plain cross-
+entropy gives the best balance on the test set while using far fewer
+parameters than BERT-base. We report accuracy, Macro-F1, and
+Weighted-F1, release the evaluation code, and include confusion
+analyses to make error patterns clear. Our results suggest a
+practical default: start with a compact encoder and cross-entropy,
+then add calibration and task-specific checks before moving to
+heavier models.
+
+Index Terms—Healthcare AI, Medical Text Classification,
+Lightweight LLMs, DistiIBERT, Reproducibility
+
+I. INTRODUCTION
+
+Biomedical literature is growing so fast that manual track-
+
+ing is no longer feasible. This motivates reliable automated
+systems to triage, classify, and summarize large text collec-
+tions. Automatic classification of medical abstracts supports
+literature search and clinical decision support. Large language
+models perform well [1], but their compute and memory
+costs limit use in healthcare settings with budget, latency,
+and privacy constraints (e.g., HIPAA) [2]. We therefore focus
+on strong, efficient, and reproducible baselines using compact
+encoders such as DistilBERT [3].
+Why compact baselines? Despite the excitement around
+large models, many real-world healthcare pipelines operate
+under strict cost-to-serve and governance requirements (on-
+prem, air-gapped or VPC-constrained deployments; auditable
+updates; predictable inference latencies). In such settings,
+compact encoders that are easy to fine-tune and calibrate often
+deliver a better accuracy—efficiency trade-off than heavyweight
+alternatives, particularly when the target task is well-posed
+and labeled at scale (e.g., abstract-level categorization). Our
+study therefore focuses on strong, reproducible baselines with
+minimal moving parts (two encoders x three loss functions),
+emphasizing clarity and deployability.
+
+sliu792 @ gatech.edu
+
+United States
+hsinhu @umich.edu
+
+United States
+
+Connection to domain-adaptive pretraining. A substan-
+tial body of work shows that domain-adaptive pretraining
+improves biomedical and scientific text modeling: SciBERT
+tailors representations to scientific prose [4]; BioBERT and
+PubMedBERT leverage large-scale biomedical corpora [5],
+[6]; and ClinicalBERT adapts to clinical narratives [7]. These
+models typically outperform purely general-domain encoders
+on in-domain tasks. Our objective here is complementary:
+we ask how far compact, readily available encoders (BERT-
+base and DistiIBERT) can go on a public medical-abstract
+benchmark under identical, budgeted fine-tuning, and whether
+common imbalance remedies (class weighting, focal loss)
+are actually beneficial in this regime. Establishing a clean
+baseline is also useful for future comparisons against domain-
+specialized encoders.
+
+Dataset characteristics and imbalance considerations. Ab-
+stracts condense background, methods, and outcome state-
+ments into short passages, often mixing rhetorical zones
+within sentences. The resulting label boundaries can be fuzzy
+even when class priors are only moderately skewed. In
+such circumstances, over-emphasizing ambiguous examples
+via reweighting or focal modulation may amplify noise and
+harm macro-F1, whereas plain cross-entropy (CE) can remain
+a surprisingly strong default. Our experiments revisit this
+trade-off in a controlled setting, reporting Accuracy, Macro-F1,
+and Weighted-F1, alongside confusion analyses and per-class
+profiles to make error structure explicit.
+
+Calibration and governance. For decision-support appli-
+cations, calibrated confidence matters as much as top-line
+accuracy. Prior studies show that pre-trained Transformers
+may exhibit miscalibration that is nonetheless amenable to
+simple post-hoc remedies (e.g., temperature scaling) with-
+out retraining [8]. We therefore discuss calibration metrics
+(ECE/Brier) and lightweight post-hoc adjustments in tandem
+with accuracy, aligning modeling practice with auditability and
+clinical governance [2].
+
+Research questions. We ask: (RQ1) Among cross-entropy
+(CE), class-weighted CE (WCE), and focal loss (FL), which
+objective yields the best accuracy and macro-F1? (RQ2) Does
+a compact encoder (DistiIBERT) match or surpass a heavier
+
+
+encoder (BERT-base) under identical budgets? (RQ3) How do
+objectives influence error structure across classes? (RQ4) How
+sensitive are baselines to practical knobs (sequence length,
+learning rate, early stopping)? (RQ5) What efficiency gains
+(parameters, on-disk size, throughput) accompany the best
+configuration?
+
+II. RELATED WORK
+
+Our work sits at the intersection of medical text classifi-
+cation, class imbalance, and model efficiency. The field has
+moved from feature-engineered models to fine-tuned Trans-
+formers tailored to scientific and biomedical text, including
+SciBERT, BioBERT, and ClinicalBERT [4], [5], [7]. New
+pretraining that links structured lab data with knowledge-
+guided learning is emerging [9]. Class imbalance is often
+addressed with resampling or cost-sensitive losses such as
+reweighting and focal loss [10], [11]. To reduce compute and
+latency, efficiency methods such as distillation (DistiIBERT),
+pruning, and quantization are widely used [3]. Parallel efforts
+pursue interpretability and knowledge-enhanced agents for
+causal analysis in healthcare [12]. We compare compact,
+general-domain encoders with common imbalance objectives
+on a public benchmark to provide a practical baseline.
+
+In a broader context, our work links to adjacent threads
+in medical AI. As models handle text, images, and other
+modalities, safety and auditing for multimodal systems are
+important; lightweight vision—language detectors for harmful
+content and targeted bias stress suites provide useful pat-
+terns [13], [14]. The question of model scale remains open,
+with mixed evidence on whether larger models yield better
+diagnostic value and on the trade-offs between performance,
+cost, and interpretability [15]. To manage growing system
+complexity, low-code, agentic frameworks can standardize
+pipelines and improve reproducibility [16]. For error analy-
+sis, beyond confusion matrices, topology-preserving projec-
+tions from computational biology suggest helpful visualization
+tools [17].
+
+UI. METHODS
+A. Task and Dataset (HF medical_abstracts)
+
+We formulate the task as five-way single-label classifica-
+tion over medical literature abstracts using the public medi-
+cal_abstracts corpus on Hugging Face [18], originally released
+as the Medical Abstracts Text Classification Dataset [19].
+We read the dataset through datasets.load_dataset,
+automatically detect the text field from {text, abstract,
+content, sentence} (with a string-typed fallback), and
+the label field from {label, labels, category, class}
+(with an integer-typed fallback). If label names are provided
+in the dataset features, we use them; otherwise we synthesize
+Class_{i}. If labels are not 0-indexed, we remap them to
+[(0,...,C—1].
+
+Splits.: If an official test split is present, we use
+it directly; otherwise, we stratify-split 10% from the raw
+training portion to form a test set. From the training portion,
+we further hold out a stratified 10% as validation using
+
+TABLE I
+DATASET STATISTICS FOR medical_abstracts. A STRATIFIED 10%
+VALIDATION SPLIT IS HELD OUT FROM THE OFFICIAL TRAINING SET.
+
+Train Validation Test
+# Documents 10,395 1,155 2,888
+# Classes 5
+Neoplasms Digestive Nervous Cardiovascular General
+system system diseases pathologi-
+Per-class (names / %) diseases diseases cal
+conditions
+21.91% 10.35% 13.33% 21.13% 33.28%
+
+train_test_split [20]. Table I summarizes counts and
+per-class prevalence.
+
+Preprocessing and ___ tokenization.: We apply
+minimal, deployment-friendly preprocessing (strip empty
+lines/boilerplate and normalize whitespace). Tokenization
+relies on the model-matched uncased WordPiece tokenizer
+with right truncation and fixed-length padding to a maximum
+sequence length of 256 tokens for all runs. Padding uses
+padding='max_length' so every batch has uniform
+length. No stemming/lemmatization is used to preserve
+biomedical terms.
+
+B. Metrics
+
+We report Accuracy, Macro-Fl, and Weighted-F1 using
+scikit-learn implementations [21], [22]. In addition, we com-
+pute class-wise precision/recall/F1 and visualize error structure
+with confusion matrices and per-class bar charts [23], [24].
+Unless otherwise noted, metrics are computed with the same
+evaluation code across all six configurations on the held-out
+test split.
+
+C. Models and Objectives
+
+We evaluate BERT-base-uncased and DistilBERT-base-
+uncased [3], [25] as encoder backbones, each followed by
+a randomly initialized linear classification head (hidden size
+768, output size 5). The encoders are fine-tuned end-to-end.
+
+Loss functions.: Let p,; be the predicted probability of the
+true class t. We compare:
+
+Lor = — log pr, (1)
+Lwcecr = — wv; log pz, (2)
+Ly = —a,(1— pz)” log pr, (3)
+
+with y=2.0 for focal loss [10]. For weighted cross-entropy
+(WCE), class weights w; are derived from training-split fre-
+quencies via an inverse-frequency scheme (normalized). For
+focal loss (FL), we use class-dependent a; computed from
+inverse class frequency (normalized to unit mean). All other
+settings (tokenizer, max length, optimizer budget) are kept
+identical across objectives to isolate the effect of the loss.
+
+D. Training and Implementation Details
+
+We fine-tune with AdamW [26] using a learning rate of
+2x10~°, batch size 16, and 3 epochs per run. We employ
+the default linear learning-rate schedule with 500 warmup
+steps. Evaluation is performed at the end of each epoch on
+
+
+the validation split, and the best checkpoint (by validation
+Macro-F1) is automatically restored at the end of training.
+Unless otherwise specified, we use a single fixed seed for each
+run. Implementation relies on Transformers and Datasets [27],
+[28].
+
+Outputs and artifacts.: For each of the six configura-
+tions (two encoders x three objectives), we export per-run
+JSON/CSV metrics (including global and per-class scores),
+confusion matrices, per-class metric plots, and model/tokenizer
+checkpoints. These artifacts enable exact reproduction of all
+numbers reported in Section IV.
+
+IV. EXPERIMENTS AND RESULTS
+A. Experimental Setup
+
+We evaluate six configurations formed by two encoders
+(BERT-base and DistiIBERT) crossed with three objectives:
+cross-entropy (CE), class-weighted CE (WCE), and focal
+loss (FL). Unless noted, we fine-tune with AdamW (learning
+rate 2x10—5), batch size 16, for 3 epochs; tokenization is
+uncased with truncation/padding at 256 tokens. We adopt the
+official train/test split of medical_abstracts and reserve 10%
+of the training set as a stratified validation split. All random
+seeds are fixed; we save the best checkpoint by validation
+Macro-F1 and evaluate on the test set. Metrics and plots are
+computed with scikit-learn utilities [21]-[24]. The code relies
+on Transformers/Datasets [27], [28].
+
+From a design perspective, this setup isolates the contri-
+bution of the objective under a constant optimization budget
+and identical tokenization policy. Using a stratified validation
+split reduces the variance of model selection when labels
+are unevenly distributed [29], and reporting Macro-F1 along-
+side accuracy is standard practice for skewed text classifica-
+tion [30], [31]. We include WCE and FL because they are
+widely used for class imbalance in deep classifiers [11], [30],
+while keeping training time comparable across losses to ensure
+a fair comparison.
+
+B. Preprocessing and Tokenization
+
+We keep the dataset text as-is (no lowercasing beyond
+the uncased tokenizer), retain punctuation, and strip empty
+lines. Sentences longer than 256 tokens are truncated on
+the right; short sequences are padded to match the batch.
+Tokenization artifacts, special tokens, and attention masks
+follow library defaults [27]. Because abstracts often contain
+multi-part rhetorical structure (background, methods, results),
+a moderate maximum length (256) offers a good balance
+between coverage and speed. The fixed-length policy also
+stabilizes training dynamics by avoiding variability in effective
+batch compute, which is useful when comparing objectives
+head-to-head under the same budget.
+
+C. Aggregate Performance
+
+Table II reports the full scoreboard. DistiIBERT with
+standard CE achieves the best balance (Accuracy 64.61%,
+Macro-F1 64.38%, Weighted-F1 63.25%), narrowly surpass-
+ing BERT-base with CE. Figure | visualizes the Macro-F1
+
+ranking across all six settings. Figure 2 contrasts parameter
+count against Macro-Fl and shows that DistilBERT—the
+compact encoder distilled from BERT [3], [25]—occupies a
+favorable accuracy-efficiency region.
+
+Observation O1 (Objective choice). For both encoders,
+WCE and FL underperform CE. The relative drops in Macro-
+Fl (vs CE) indicate that emphasizing difficult/minority ex-
+amples does not translate into better global balance on this
+corpus, consistent with a balanced-to-moderately-imbalanced
+regime [18]. This aligns with broader evidence that when skew
+is mild and label ambiguity is present, cost-sensitive reweight-
+ing or focusing terms can over-amplify noisy/ambiguous in-
+stances and hurt precision [11], [30].
+
+Observation O2 (Encoder choice). Disti1BERT matches or
+slightly surpasses BERT-base at substantially lower capacity,
+supporting compact baselines as strong defaults when compute
+or latency is constrained [3].
+
+Observation O3 (Stability). Across runs, the ranking (Dis-
+tiIBERT+CE > BERT+CE > {WCE, FL}) is consistent with
+the per-class evidence in Figure 4 and with prior findings that
+objective-driven gains should be verified against label noise
+and class prevalence before adoption [30].
+
+D. Per-class Behavior and Error Structure
+
+The two-column confusion panel (Figure 3) reveals strong
+diagonals for Class_I and Class_4, while Class_5 shows
+distributed off-diagonal mass. The per-class bars (Figure 4)
+expose how objectives shift precision/recall:
+
+e Stable classes. Class_1I/Class_4 remain robust across
+losses and encoders, likely due to distinctive lexical cues
+common in the abstracts of those categories.
+
+Fragile class. Class_5 suffers recall deficits and
+spillovers into Class_4; many errors correspond to ab-
+stracts mixing background with outcome statements,
+which blurs boundaries.
+
+Redistribution rather than reduction. WCE/FL mildly
+reshuffle errors across neighboring classes but rarely
+reduce global error mass, explaining their weaker Macro-
+Fl compared with CE. This pattern is consistent with
+reports that naive cost-weighting may shift, rather than
+shrink, confusions when minority classes are not cleanly
+separable [11].
+
+E. Loss Comparison: Why Does CE Win Here?
+
+Given the true-class probability p;, all three objectives
+reduce to scaled variants of — log p;:
+
+Loz =—logp, Lwce = — wu; log pr, (4)
+Lry = —a:(1— p,)7 log p:, y=2.0. (5)
+
+On medical_abstracts, (i) skew is moderate rather than
+extreme [18]; Gi) many “hard” examples are ambiguous, not
+merely rare. Overweighting such points (via w; or (1 — p:)7)
+can amplify label noise and degrade precision, explaining CE’s
+advantage [30]. While more sophisticated imbalance objectives
+exist (e.g., effective-number class-balanced losses) [32], our
+
+
+TABLE II
+OVERALL RESULTS ON medical_abstracts: ACCURACY, MACRO-F1, AND
+WEIGHTED-F1 (%).
+
+Model Objective Acc. Macro-F1 Wtd-F1
+bert-base-uncased cross_entropy 64.51 63.85 62.12
+bert-base-uncased class_weight 62.88 62.43 59.66
+distilbert-base-uncased —_cross_entropy 64.61 64.38 63.25
+distilbert-base-uncased —_ class_weight 62.29 62.22 59.24
+
+results indicate that, for this corpus and budget, a plain CE
+baseline is a strong and reliable choice.
+
+Training dynamics, sensitivity, and calibration. Validation
+Macro-Fl improves mainly in the first two epochs, with
+stable AdamW optimization and no divergence at our set-
+tings, consistent with short-budget fine-tuning of pretrained
+Transformers [25]. We use the same evaluation code across
+runs [27]; model selection on a stratified validation split
+reduces variance [29]. A compact sweep with three seeds and
+small grids over sequence length {128, 256, 512} and learning
+rate {2,3,5} x 10~-° is sufficient to confirm ranking and
+guard against configuration luck [30], [31]. For deployment,
+we report Expected Calibration Error and apply post-hoc
+temperature scaling on a held-out split to improve confidence
+calibration without retraining [33].
+
+FE. Efficiency and Footprint
+
+DistiIBERT’s distilled architecture [3] reduces parameter
+count to ~ 66M from BERT-base’s ~ 110M [25], lowering
+memory footprint and cold-start latency. Figure 2 visualizes
+the accuracy-efficiency frontier on this task: the compact
+model attains equal or better Macro-F1 with smaller on-disk
+checkpoints, which simplifies on-prem deployment and re-
+source isolation under privacy regulations such as HIPAA [2].
+
+G. Takeaways for Practitioners
+
+e Start simple: DistiiBERT+CE is a robust, compute-
+efficient baseline; treat WCE/FL as hypotheses to test,
+not defaults.
+
+e Inspect class behavior: use Figure 4 and Figure 3 to
+target fragile classes rather than inflating loss weights
+globally.
+
+e Mind calibration: apply temperature scaling and report
+ECE/Brier for decision-support scenarios [33].
+
+e Track cost-to-serve: pair accuracy with footprint/latency
+considerations (Figure 2) for deployability under privacy
+constraints [2].
+
+V. DISCUSSION, LIMITATIONS, AND IMPACT
+
+Cross-entropy performs better than class-weighted cross-
+entropy and focal loss because, under moderate class skew
+and label ambiguity, upweighting hard or minority examples
+can amplify noise and reduce precision; this matches findings
+that reweighting or resampling may shift rather than reduce
+confusions in mildly imbalanced text classification [11], [30],
+[34]. Focal loss helps in dense detection or long-tail vision
+tasks, but its (1 — p,)7 factor can overemphasize uncertain
+
+Macro-F1 across all configurations
+
+Hill
+
+Macro-F1 (%)
+vow B&B uo
+es 6 6 6 8
+
+i)
+
+om wos® a oe os a
+ow ow
+oo or? eS oor Rod . ao
+na SS a ss ow
+os “ a oe
+ow vo
+ig. 1. - $ si figurations; DistiIBERT+CE leads.
+
+Model Capacity vs Macro-F1
+
+slistilbert-cross_entropy
+64.07
+jbert-cross_entropy
+= 63.5
+at
+Ww
+2
+Yy
+cj
+= 63.0
+62.57 FELL weight
+pdlstilbert-focal xB Weld!
+jdlistlbert-class_weight
+70 80 90 100 110
+
+Parameters (Millions)
+
+Fig. 2. Parameter count (M) vs Macro-F1. DistiIBERT offers a favorable
+accuracy—efficiency trade-off.
+
+points when ambiguity—not rarity—is the main issue [10].
+While alternatives such as effective-number class-balanced
+loss and logit adjustment are reasonable in other regimes [32],
+[35], the label distribution of medical_abstracts and our fixed
+training budget make plain cross-entropy the most stable
+choice here [18].
+
+This study has limits. We use one public corpus and
+practical defaults; more tuning could change absolute numbers.
+A stratified validation split reduces selection variance but does
+not remove it [29]. Results may not transfer to clinical notes
+or radiology reports due to domain shift, a known risk in
+medical AI [36], [37]. We focus on head metrics and confusion
+patterns; we do not report subgroup fairness or prospective
+robustness, and calibration is addressed only with post-hoc
+scaling, so further checks are needed before clinical use,
+consistent with reporting guidance [38]. On impact, compact
+encoders lower cost and latency and fit on-prem deployments
+with privacy constraints such as HIPAA [2], but any use in
+care settings should remain decision support within clinical
+governance frameworks, with ongoing monitoring for shortcut
+biases and distribution shift [36], [38].
+
+
+Confusion Matrix - bert-base-uncased (cross_entropy)
+
+©
+Clss,2 cass,
+8
+
+Class_3
+
+Actual
+
+Actual
+Class_3
+
+- 200
+
+class_4
+
+161 25 um 1a2
+
+# 154 in
+
+Chass. 3
+
+. Class 3
+Predicted
+
+Predicted
+ent-baca (ce)
+
+rix - distilbert-base-uncased (cross_entropy)
+
+500
+38
+
+400
+
+8
+class 2
+
+Actual
+
+Actual
+Class_3
+Class_3
+
+cl
+lass.4
+
+167 Fu 145
+
+=
+lass5
+
+Class. 2 Class. 3 Class 4 Class 5 lass 1 Class.2 Closs_3
+
+istsamene (es) Distitmen (clase veishted)
+
+Confusion Matrix - bert-base-uncased (class_weight)
+
+rix - distilbert-base-uncased (class_weight)
+
+Confusion Matrix - bert-base-uncased (focal)
+
+500
+500 %
+Fr] 21 Fi 37 3 16 2
+
+400
+400
+
+300
+300
+
+b 69 -200
+
+357
+
+Class. 4 Class § Class. Class 3 cass J
+Predicted
+
+Confusion Matrix - distilbert-base-uncased (focal)
+
+500 500
+
+4 35
+
+400 400
+
+Class_2
+
+300 300
+
+-200
+
+38
+
+Class_5
+
+Class.5 Class. Class. 2
+
+Pistimene (reeald
+
+Fig. 3. Confusion matrices for all six configurations (top: BERT-base; bottom: DistiIBERT).
+
+Hania dani
+
+Fig. 4. Per-class precision/recall/F1 across configurations.
+
+VI. CONCLUSION AND FUTURE WORK
+
+We show that a simple, compute-efficient baseline, Distil-
+BERT with cross-entropy, matches or slightly exceeds BERT-
+base at lower cost. On the medical_abstracts corpus [18], [19],
+class-weighting and focal loss do not help under the same
+budget. A practical path is to begin with a compact encoder
+and cross-entropy, then add calibration and explicit checks
+for dataset shift and governance before moving to heavier
+models [37], [38].
+
+Future work includes extending to multimodal inputs from
+figures and tables while building strong safety and bias au-
+dits, informed by lightweight vision—language detectors and
+targeted bias stress suites [13], [14]. It is also useful to test
+compact encoders against larger systems reviewed in recent
+surveys and to examine scale versus clinical utility [15], [39],
+
+alongside efficient learning methods that lower parameters
+and cost [40]. To improve the workflow, agentic low-code
+frameworks can standardize pipelines and increase repro-
+ducibility [16], and topology-preserving projections can enrich
+error analysis beyond confusion matrices [17]. Architectural
+and optimization changes such as Bayesian-optimized attentive
+networks are another direction [41]. Finally, moving beyond
+static abstracts to longitudinal prediction [42] and exploring
+federated learning with data harmonization for privacy and
+non-IID settings remain important [43].
+
+REFERENCES
+
+[1] A. J. Thirunavukarasu ef al., “Large language models in medicine,”
+Nature Medicine, 2023. [Online]. Available: https://www.nature.com/
+articles/s41591-023-02448-8
+
+“Summary of the HIPAA privacy rule,’ Online, U.S. Department
+of Health & Human Services, 2025. [Online]. Available:
+https://www.hhs.gov/hipaa/for- professionals/privacy/laws-regulations/
+index.html
+
+V. Sanh, L. Debut, J. Chaumond, and T. Wolf, “DistiIBERT: A distilled
+version of BERT,” arXiv preprint arXiv:1910.01108, 2019. [Online].
+Available: https://arxiv.org/pdf/1910.01108
+
+I. Beltagy, K. Lo, and A. Cohan, “Scibert: A pretrained language
+model for scientific text,’ in Proceedings of EMNLP-IJCNLP, 2019,
+pp. 3615-3620. [Online]. Available: https://aclanthology.org/D19-1371/
+J. Lee, W. Yoon, S. Kim, D. Kim, S. Kim, C. H. So, and J. Kang,
+“Biobert: a pre-trained biomedical language representation model for
+biomedical text mining,” Bioinformatics, vol. 36, no. 4, pp. 1234-1240,
+2020. [Online]. Available: https://academic.oup.com/bioinformatics/
+article/36/4/1234/5566506
+
+Y. Gu, R. Tinn, H. Cheng, M. Lucas, N. Usuyama, X. Liu,
+T. Naumann, J. Gao, and H. Poon, “Domain-specific language
+model pretraining for biomedical natural language processing,”
+
+[2]
+
+[3]
+
+[4]
+
+[5]
+
+[6]
+
+
+[7]
+
+[10
+
+{11
+
+[12
+
+{13
+
+[14
+
+[15
+
+[16
+
+[17
+
+[18
+
+[19
+
+[20
+
+[21
+
+[22
+
+[23
+
+[24
+
+[25
+
+in Findings of ACL, 2021, pp. 2009-2022. [Online]. Available:
+https://aclanthology.org/2021.findings-acl.176/
+E. Alsentzer, J. R. Murphy, W. Boag, W.-H. Weng, D. Jin,
+
+T. Naumann, and M. McDermott, “Publicly available clinical BERT
+embeddings,” in Proceedings of the 2nd Clinical NLP Workshop
+(ClinicalNLP@NAACL), 2019, pp. 72-78. [Online]. Available: https:
+//aclanthology.org/W19- 1909/
+
+S. Desai and G. Durrett, “Calibration of pre-trained transformers,”
+in Proceedings of EMNLP, 2020, pp. 295-302. [Online]. Available:
+https://aclanthology.org/2020.emnlp-main.21.pdf
+
+P. Hu, C. Lu, F Wang, and Y. Ning, “Bridging stepwise lab-
+informed pretraining and knowledge-guided learning for diagnostic
+reasoning,” arXiv preprint arXiv:2410.19955, 2024. [Online]. Available:
+https://arxiv.org/abs/2410.19955
+
+T. Lin, P. Goyal, R. Girshick, K. He, and P. Dollar, “Focal loss
+for dense object detection,” in Proceedings of ICCV, 2017. [Online].
+Available: https://openaccess.thecvf.com/content_ICCV_2017/papers/
+Lin_Focal_Loss_for_ICCV_2017_paper.pdf
+
+J. M. Johnson and T. M. Khoshgoftaar, “Survey on deep learning with
+class imbalance,” Journal of Big Data, vol. 6, no. 1, p. 27, 2019.
+
+X. Han, P. Hu, J.-E. Ding, C. Lu, F. Liu, and Y. Ning, “No black boxes:
+Interpretable and interactable predictive healthcare with knowledge-
+enhanced agentic causal discovery,” arXiv preprint arXiv:2505.16288,
+2025. [Online]. Available: https://arxiv.org/abs/2505.16288
+
+J. Liu, R. Tong, A. Shen, S. Li, C. Yang, and L. Ku, “Memeblip2:
+A novel lightweight multimodal system to detect harmful memes,”
+arXiv preprint arXiv:2504.21226, 2025. [Online]. Available: https:
+/larxiv .org/abs/2504.21226
+
+R. Tong, S. Wei, J. Liu, and L. Wang, “Rainbow noise: Stress-testing
+multimodal harmful-meme detectors on lgbtq content,’ arXiv preprint
+arXiv:2507.19551, 2025. [Online]. Available: https://arxiv.org/abs/
+2507.19551
+
+R. Tong, J. Liu, S. Liu, J. Xu, L. Wang, and T. Wang, “Does bigger mean
+better? comparative analysis of cnns and biomedical vision language
+models in medical diagnosis,” arXiv preprint arXiv:2510.00411, 2025.
+[Online]. Available: https://arxiv.org/abs/25 10.0041 1
+
+J. Xu, J. Liu, R. Tong, and S. Liu, “Toward causal-visual
+programming: Enhancing agentic reasoning in low-code environments,”
+arXiv preprint arXiv:2509.25282, 2025. [Online]. Available: https:
+//arxiv .org/abs/2509.25282
+
+X. Zhu, X. Shen, X. Jiang, K. Wei, T. He, Y. Ma, J. Liu, and X. Hu,
+“Nonlinear expression and visualization of nonmetric relationships in
+genetic diseases and microbiome data,’ BMC Bioinformatics, vol. 19,
+no. Suppl 20, p. 505, 2018.
+
+T. Schopf, “Timschopf/medical_abstracts,’ Hugging Face Datasets
+(Online), 2022. [Online]. Available: https://huggingface.co/datasets/
+TimSchopf/medical_abstracts
+
+S. R. Schaefer, “Medical abstracts text classification dataset,’ GitHub
+repository (Online), 2022. [Online]. Available: https://github.com/
+sebischair/Medical- Abstracts-TC-Corpus
+
+“train_test_split (sklearn.model_selection),’ Online documentation,
+scikit-learn developers, 2025. [Online]. Available: https://scikit-
+learn.org/stable/modules/generated/sklearn.model_selection.train_test_
+split.html
+
+“precision_recall_fscore_support (sklearn.metrics),’ Online documen-
+tation, scikit-learn developers, 2025. [Online]. Available: https:
+//scikit- learn.org/stable/modules/generated/sklearn.metrics.precision_
+recall_fscore_support.html
+
+“fl_score (sklearn.metrics),’ Online documentation, — scikit-learn
+developers, 2025. [Online]. Available: https://scikit-learn.org/stable/
+modules/generated/sklearn.metrics.f1_score.html
+
+“confusion_matrix (sklearn.metrics),’ Online documentation, scikit-
+learn developers, 2025. [Online]. Available: https://scikit-learn.org/
+stable/modules/generated/sklearn.metrics.confusion_matrix.html
+
+“Confusionmatrixdisplay  (sklearn.metrics)?’ | Online §documen-
+tation, scikit-learn developers, 2025. [Online]. Avail-
+able: https : / / scikit - learn.org / stable / modules / generated /
+
+sklearn.metrics.ConfusionMatrixDisplay.html
+
+J. Devlin, M. Chang, K. Lee, and K. Toutanova, “BERT: Pre-
+training of deep bidirectional transformers for language understanding,”
+in Proceedings of NAACL-HLT, 2019. [Online]. Available: https:
+//aclanthology.org/N19-1423.pdf
+
+[26]
+
+[27]
+
+[41]
+
+[42]
+
+[43]
+
+I. Loshchilov and F. Hutter, “Decoupled weight decay regularization,”
+in Proceedings of ICLR, 2019, arXiv:1711.05101. [Online]. Available:
+https://openreview.net/forum?id=Bkg6RiCqY7
+
+T. Wolf, L. Debut, V. Sanh, J. Chaumond, C. Delangue, A. Moi,
+P. Cistac, T. Rault, R. Louf, M. Funtowicz, and J. Brew, “Transformers:
+State-of-the-art natural language processing,’ in Proceedings of
+EMNLP 2020: System Demonstrations, 2020. [Online]. Available:
+https://aclanthology.org/2020.emnlp-demos.6.pdf
+
+Q. Lhoest, A. V. del Moral et al., “Datasets: A community
+library for natural language processing,” in Proceedings of EMNLP
+2021: System Demonstrations, 2021. [Online]. Available: https:
+//aclanthology.org/2021.emnlp-demo.21/
+
+R. Kohavi, “A study of cross-validation and bootstrap for accuracy
+estimation and model selection,” in Proceedings of IJCAI, 1995.
+
+H. He and E. A. Garcia, “Learning from imbalanced data,’ [EEE
+Transactions on Knowledge and Data Engineering, vol. 21, no. 9, pp.
+1263-1284, 2009.
+
+M. Sokolova and G. Lapalme, “A systematic analysis of performance
+measures for classification tasks,” Information Processing & Manage-
+ment, vol. 45, no. 4, pp. 427-437, 2009.
+
+Y. Cui, M. Jia, T.-Y. Lin, Y. Song, and S. Belongie, “Class-balanced
+loss based on effective number of samples,” in Proceedings of CVPR,
+2019, pp. 9268-9277.
+
+C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, “On calibration of
+modem neural networks,” in Proceedings of ICML, 2017. [Online].
+Available: https://arxiv.org/abs/1706.04599
+
+M. Buda, A. Maki, and M. A. Mazurowski, “A systematic study of
+the class imbalance problem in convolutional neural networks,” Neural
+Networks, vol. 106, pp. 249-259, 2018.
+
+A. K. Menon, S. Jayasumana et al., “Long-tail learning via logit
+adjustment,” in NeurIPS, 2020.
+
+J. R. Zech et al., “Variable generalization performance of a deep learning
+model to detect pneumonia in chest radiographs: A cross-sectional
+study,” PLOS Medicine, vol. 15, no. 11, p. e1002683, 2018.
+
+J. Quinonero-Candela, M. Sugiyama, A. Schwaighofer, and N. D.
+Lawrence, “Dataset shift in machine learning,” in Dataset Shift in
+Machine Learning. MIT Press, 2009.
+
+X. Liu et al., “Reporting guidelines for clinical trial reports for interven-
+tions involving artificial intelligence: The consort-ai extension,’ Nature
+Medicine, vol. 26, pp. 1364-1374, 2020.
+
+R. Tong, T. Xu, X. Ju, and L. Wang, “Progress in medical ai: Reviewing
+large language models and multimodal systems for diagonosis,” AJ Med,
+vol. 1, no. 1, p. 5, 2025.
+
+J. Yao, C.-L. Li, and C. Xiao, “Swift sampler: Efficient learning
+of sampler by 10 parameters,’ in Advances in Neural Information
+Processing Systems, vol. 37, 2024, pp. 59030-59053. [Online].
+Available: https://proceedings.neurips.cc/paper_files/paper/2024/hash/
+£896c593ae0cce758205646e1325406b- Abstract-Conference.html
+
+Y. Wang, Y. Zhang, Y. Wang, Y. Zhang, Y. Wang, and
+Y. Zhang, “BOANN: Bayesian-optimized attentive neural network for
+classification,” in 2024 International Conference on Image Processing,
+Computer Vision and Machine Learning (ICICML). YEEE, 2024.
+[Online]. Available: https://ieeexplore.ieee.org/document/10957983
+
+R. Tong, L. Wang, T. Wang, and W. Yan, “Predicting parkinson’s
+disease progression using statistical and neural mixed effects models:
+A comparative study on longitudinal biomarkers,’ arXiv preprint
+arXiv:2507.20058, 2025. [Online]. Available: https://arxiv.org/abs/
+2507.20058
+
+C. Xiao, “Confusion-resistant federated learning via diffusion-based
+data harmonization on non-iid data,” in Advances in Neural Information
+Processing Systems, vol. 37, 2024, pp. 137495-137520. [Online].
+Available: https://proceedings.neurips.cc/paper_files/paper/2024/hash/
+6c9dcffeOb9cc3b05d83bedddb250690- Abstract-Conference.html

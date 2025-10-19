@@ -1,0 +1,2907 @@
+arX1v:2510.10082v1 [cs.CL] 11 Oct 2025
+
+Diversity Augmentation of Dynamic User Preference
+Data for Boosting Personalized Text Summarizers
+
+Parthiv Chatterjee!, Shivam Sonawane!, Amey Hengle’, Aditya Tanna!, Sourish Dasgupta’,
+Tanmoy Chakraborty”
+
+1KDM Lab, Dhirubhai Ambani University, India
+
+2L.CS2 Lab, Indian Institute of Technology Delhi, India
+
+Corresponding authors: sourish_dasgupta@dau.ac.in, tanchak@iitd.ac.in
+
+Abstract
+
+Document summarization facilitates efficient identification and assimilation of user-relevant
+content, a process inherently influenced by individual subjectivity. Discerning subjective
+salient information within a document, particularly when it has multiple facets, poses
+significant challenges. This complexity underscores the necessity for personalized summariza-
+tion. However, training models for personalized summarization has so far been challenging,
+particularly because diverse training data containing both user preference history (i.e.,
+click-skip trajectory) and expected (gold-reference) summaries are scarce. The MS/CAS
+PENS dataset is a rare resource in this direction. However, the training data only contains
+preference history without any target summaries, thereby blocking end-to-end supervised
+learning. Also, the diversity in terms of topic transitions along the trajectory is relatively
+low, thereby leaving scope for better generalization. To address this, we propose PerAugy, a
+novel cross-trajectory shuffling and summary-content perturbation-based data augmentation
+technique that significantly boosts the accuracy of four state-of-the-art (SOTA) baseline
+user-encoders commonly used in personalized summarization frameworks (best result: 0.132¢
+w.r.t AUC). We select two such SOTA summarizer frameworks as baselines and observe that
+when augmented with their corresponding improved user-encoders, they consistently show
+an increase in personalization (avg. boost: 61.2% + w.r.t. PSE-SU4 metric). As a post-hoc
+analysis of the role of induced diversity in the augmented dataset by PerAugy, we introduce
+three dataset diversity metrics - TP, RTC, and DegreeD to quantify the induced diversity.
+We find that TP and DegreeD have a strong correlation with the user-encoder performance
+when trained on the PerAugy-generated dataset across all accuracy metrics, indicating that
+the increase in dataset diversity plays a major role in performance gain.
+
+1 Introduction
+
+The rapid increase in information requires efficient summarizers for fast comprehension and prioritization
+(2022). However, identifying "salient" information is subjective, particularly in multi-aspect
+documents, which makes personalized summarization critical. Training such models requires datasets with
+diverse user histories and subjective summaries. However, such datasets are scarce due to privacy concerns
+
+2024). The MS/CAS PENS dataset 2021), derived from the MIND
+dataset (Wu et al.||2020), is a key benchmark for training and evaluating SOTA personalized summarization
+models. It comprises user preference histories (i.e., sequences of click and skip interactions with news articles)
+along with user-specific gold-reference summaries. Although user-encoders trained on PENS/MIND have
+been employed in various frameworks er en have
+focused on accuracy and, more recently, on the degree-of-personalization (Dasgupta et al.| |2024), overlooking
+the evaluation of the effectiveness of preference datasets as training data. To address this challenge, we
+
+
+
+propose PerAugy — a perturbation-based augmentation of historical user preference data for personalized
+summarization. A seed preference dataset is first modeled as a User Interaction Graph (UIG). The nodes
+of a UIG represent users’ clicked and skipped documents (d-nodes) as well as their generated/expected
+summaries (s-nodes). A path, called trajectory, of the UIG starts with a specific user node (u-nodes) and
+terminates in d/s-nodes. The edges denote click, skip, generate-summary, and click-summary actions. The
+UIG, hence, is a pool of user trajectories representing dynamic user behavior histories. We apply PerAugy on
+this UIG.
+
+The key design principle behind PerAugy is guided by recent findings in recommendation systems, which show
+that higher diversity in training data directly enhances user interaction sequence representation
+2021). In other words, "trajectory diversity of training data is directly proportional to
+personalization capabilities of summarizer models". In line with this principle, PerAugy has been designed as
+a cross-trajectory augmentation technique in which we propose a novel controlled both-ways exchange of user
+trajectory segments (termed Double Shuffling (DS)) between sampled copies of the original trajectories
+to create a new pool of diverse synthetic user trajectories. There are two primary controls in DS — (i) the
+gap-length that determines how much the new trajectory should resemble the original seed, and (ii) the
+trajectory-length that determines the number of diverse profiles to be synthesized. The DS operation
+mimics the stochastic diffusion of a user’s interest into diverse themes, reflecting naturalistic behavior. A
+perturbation operation is then applied to the exchanged s-nodes to eliminate unnatural thematic jitters at
+the boundaries of two segments on the new synthetic trajectory, enhancing realistic nature of the synthetic
+trajectories. The content of every exchanged s-node is replaced by its corresponding d-node content that
+most closely matches the nearest prior nodes of the new synthetic trajectory. The substitution’s influence
+diminishes over a k-step context window that represents what is to be considered within proximity. Since this
+perturbation follows a k-order Markov Chain, we term this as Stochastic Markovian Perturbation (SMP).
+Through the DS and SMP operations, PerAugy generates synthetic profiles that capture a richer spectrum
+of thematic transitions and behavioral patterns. This controlled diversification ensures that user-encoders
+are exposed to varied histories and context shifts during training, thereby strengthening their ability to
+generalize and capture user-preferences effectively. Upon acceptance, we will release GitHub link for
+the codebase and datasets.
+
+We evaluate PerAugy across two core dimensions: (i) improvements in accuracy for SOTA user-encoder models
+trained on PerAugy-augmented data, and (ii) downstream gains in personalized summarization frameworks.
+We find that PerAugy-augmented data consistently improves models like NAML, EBNR, and NRMS, showing
+average gains of 24%, 25%, and 18% across AUC, MRR, and nDCG@5&10, respectively. In downstream
+task of personalized summarization, GTP and PENS frameworks show an average improvement of 61.2%? in
+PSE-SU4, with setups like PENS+NRMS+T2 reaching up to 75% in PSE-RG-SU4. Additionally, PerAugy
+generalizes effectively to low-resource domains (e.g., OpenAI Reddit), yielding consistent encoder gains of
+19%, 25%, and 17% across accuracy metrics.
+
+To have a deeper analysis of the performance of PerAugy and its relationship with the achieved diversity, we
+use two simple diversity evaluation metrics, Unique Topics per Trajectory (TP) and Rate of Topic Change
+(RTC). While TP and RTC capture topical richness and frequency of topical shifts in a trajectory, they
+fail to capture the effect of inserted s-nodes into trajectories, and their alignment with the corresponding
+d-nodes. This motivates to design of a more effective embedding-based metric DegreeD. DegreeD is designed
+to capture the proportional shift of successive s-nodes to that of the d-nodes, as well as faithfulness of s-nodes
+towards the corresponding d-node. We evaluate the diversity of PerAugy generated datasets in comparison to
+baseline datasets. We find a strong correlation between enhanced DegreeD and user-encoder performance,
+with Pearson r: 0.68, Spearman’s p: 0.73, and Kendall’s 7: 0.57. These results collectively demonstrate
+PerAugy’s effectiveness in enhancing data diversity, which in turn, enhances user modeling via user-encoders,
+and boosts downstream personalization.
+
+
+2 Background
+
+2.1 Dynamic User Preference (vs. Static User Persona)
+
+It is crucial to distinguish between user persona and user-preference history in the context of preference
+datasets. Persona information, such as address, nationality, or broad interests like genres, tends to remain
+relatively static over time. In contrast, preference histories are highly dynamic, since they constitute interaction
+(or reading) behavior as a temporal sequence that is complex, and spans across multiple subtopics and
+discourses. A user is unlikely to display consistent behavioral repetition; for instance, it is improbable that
+Alice’s weekly reading consistently centers only on European soccer highlights while predictably skipping U.S.
+politics or film updates. This distinction reinforces the need for training datasets that consist of dynamic
+user preferences rather than static persona features.
+
+2.2 Personalized Summarizers
+
+Most research on personalized summarization assumes a static user persona (i.e., user profile information that
+is relatively time-invariant). These works leverage the simplicity of guided (or controlled) summarization. In
+this direction, proposed GSUM, where the goal was to inject a generic guidance in terms of
+explicit user-provided key-phrases that are restricted to the query-document only and do not account for
+the dynamic shift in user preference. CTRLZSum and TMWIN were also proposed on similar lines, where
+
+either static control signals were given explicitly or extracted from dialogue sessions (He et al.||2022
+2024). (2024b) proposed the Tri-Agent personalized summarizer that was iteratively trained
+
+under an RL setup using an oracle-as-an-instructor that knows historical user-edits of previous summaries.
+However, the user-edit-preference does not entail subjectivity and is also static. Static user preference is
+unrealistic in most situations, while a shift in topics of interest is the norm.
+
+In the more realistic context of dynamic user preference, personalized summarization refers to the extent to
+which a summarization model aligns its outputs with a reader’s subjective expectations. The subjectivity is a
+function of the user’s characteristic shift in preference as reflected through the reading history — a temporal
+trajectory of the reading and skipping actions of the user on a sequence of documents. It is important to
+note that this trajectory may occasionally be interleaved by the actions of generating and reading summaries
+instead of the full-length documents. The PENS framework (with external user-encoders such as NRMS,
+NAML, EBNR [Okura et al.| [2017)) is an early example that attempts to address this
+(2021). The plugged user-encoders embed the user behavior trajectories from the PENS dataset.
+However, the encoders do not capture the dynamic temporal behavioral trend and are also tightly-coupled
+with the three injection techniques (T-1/2/3) of the encoder-decoder-based pointer-generator summarizer.
+proposed the GTP framework that follows a similar summary-editing approach as Tri- Agent,
+except there is no explicit static guidance but rather the editing (latent) control is generated from the user
+trajectory. However, the internal user encoder, TrRMIo does not encode the dynamically shifting user
+trajectory without differentiating short vs. long-term influences. Also, so far we have not found any work
+that explicitly differentiates the various semantics of the user actions — click, skip, read-summary.
+
+2.3. Personalized Summarization Datasets
+
+A key challenge in the task of personalized summarization is the lack of suitable training data across
+varied domains that covers the three key conditions: (i) chronological ordering of evolving user actions, i.e.,
+historical trajectories, (ii) subjective summary expectations (i.e. gold references/ratings) for same document by
+multiple users, and (iii) diversity and dynamicity w.r.t topics and topic transition. Standard summarization
+datasets like CNN/DM, Multinews (Hermann et al.| 2019) do not qualify. Only a few
+wr datasets, notably PENS (Ao et al.| 2021) and PersonalSum (Zhang et al. (2024), meet these
+criteria
+
+1PersonalSum was skipped because of insufficient samples and it being in Norwegian, makes it infeasible to test performance
+boost of summarizers that are not pre-trained in Norwegian.
+
+
+UIG Symbols
+
+UIG = (N,£) _ Directed acyclic graph of user-document-summary interactions.
+
+ul) User node j at time to.
+dir) Document node at time ty.
+ayia! Summary node for user j at time tg.
+Tj User j’s interaction trajectory.
+
+Trajectory pool dataset.
+
+PerAugy Symbols
+
+To Synthetically created trajectory pool by incorporating s-nodes.
+Tu; target Trajectory selected for augmentation.
+Tu;, seg Segment extracted from a source trajectory.
+gl Gap length between inserted segments.
+Foe Final trajectory after double shuffling.
+Teirp Final trajectory after SMP.
+
+Context window size for computing influence.
+Xr Exponential decay constant for context weighting.
+PSMP Probability of perturbing a summary node.
+
+Table 1: Notations and denotations used in the paper.
+
+2.4 Personalized Summarization Evaluation
+
+Vansh et al.| (2023) introduced the notion of degree-of-personalization as a measure of the subjective user
+
+experience (UX), which is inversely related to both information overload and lack of expected information.
+They proved, arguably for the first time, that accuracy metrics are unsuitable for measuring UX, i.e., there
+are real-world cases where we find low UX even with high accuracy. As a solution, they proposed EGISES as
+a metric to quantify the degree-of-personalization. EGISES was further modified and completed by [Dasgupta|
+to incorporate a penalty due to accuracy drop and the PerSEval metric was proposed (detailed
+exposition in Appendix[Ap. In this paper, we adopt PerSEval to demonstrate that SOTA user-encoders trained
+on a PerAugy-generated augmented dataset enhance the performance of SOTA personalized summarizers.
+
+3 Modeling User Preference Datasets
+
+In the following section, we first introduce User-Interaction-Graph (UIG) — a temporal knowledge graph-
+inspired data model for capturing dynamic user behavior trajectories. PerAugy operates on UIG to generate
+diverse synthetic trajectories, as discussed in depth in Section [4]
+
+3.1. User-Interaction Graph (UIG)
+
+A UIG is a Directed Acyclic Graph UIG: G = (N,E) where N(nodes) = {uf} U {dl)1 U {sa} and
+E (edges) = {al} U fal}. The node set N contains 3 disjoint types:
+
+* u-nodes ult); the j-th user at the initial time-step to (source/start node of G);
+
+¢ d-nodes dv): documents the user interacts with at time-step tp; d-node may re-appear at multiple
+time-steps.
+(ta).
+
+¢ s-nodes s;*’: user-specific summaries requested or produced at time t, for a d-node viewed at
+
+time-step ty—1.
+Edges F represent user interactions on the nodes:
+
+° alt?) a user interaction on a d-node d“) at time-step t, such that ag € {click, skip, summarize},
+where click denotes positive engagement (interest), skip denotes non-engagement (disinterest) and
+
+
+User (u-node) News doc Summary
+(d-node) (s-node)
+
+© G@ ® L)
+
+Train / Validation
+
+Action: skip Action: click Action: genSum summGen
+
+Figure 1: UIG construction pipeline for PENS-styled datasets: Step 1: Documents from train/valid
+data are sequenced as d-nodes; Step 2: Reference personalized headlines for an intersecting d-node from test
+data are interleaved as s-nodes based on time-step; Step 3: If no intersecting d-node is found, the s-node
+along with corresponding d-node from test data are simply appended at their respective time-step.
+
+Opendl Dataset Random
+
+Shuffle
+
+[Einewsto - ny
+“Ul Taking Confidence
+Bile For Every le RQ 4 + Triplet
+nA Confidence -Cij into Consideration ; ¥
+[:fummary - S[Uj, Nid
+— >
+q@ Filtering(¥) Bi M<e6 n n n
+to get @)
+confidence,[Uj ,Nij] @ @ ©
+| | contidencesttj. Ny] Highest (8) 2) 2)
+peas Rated
+confidence,[Uj ,Nij]
+
+Figure 2: UIG construction pipeline for OpenAI-styled datasets: Step 1: Extract NewsID, UserID,
+confidence, and summary; Step 2: Select top-rating < U;, Nj; > click pairs from filtered confidences; Step 3:
+Shuffle clicks, skips, and summaries to form trajectories.
+
+summarize (also called genSumm) explicitly captures the interest to read a summarized version of the
+d-node (during inference, genSumm represents user command to generate a personalized summary of
+dtr) ) :
+
+e al): the follow-up edge of summarize denoting summarized version of d‘s-1, acting on s‘« (also
+termed as summGen), indicating either a gold-reference summary written by user (in case UIG is
+treated as a training data), or a desired summary to be generated by the model (during inference).
+
+Trajectory: Given a UIG, the preference history (termed trajectory) of u; is a sequence of interactions,
+denoted 7“, starting at to and ending at a d-node or s-node at t;_1, where / is the trajectory length. Hence,
+a UIG isa i of trajectories T.
+
+A UIG can hence be seen as a dynamic temporal knowledge graph (TKG) of user behavior. We now formally
+define Personalized Summarization as follows:
+
+Definition 1. Personalized Summarization Given a user trajectory T“i of length l, a personalized
+parameterized (0) summarizer model Mg takes a query document node (as ) and generates a corresponding
+user (u;) specific summary ae pie where Mg is trained on Tirain to approach the upper-bound of a chosen
+
+personalization metric (in our case, we use PerSEval (PSE)).
+
+
+3.2 UIG Construction from Preference Data
+
+In the parlance of UIG, preference datasets suitable for personalized summarization training and evaluation
+are of two categories — (i) those which can be directly modeled into a trajectory pool T (e.g., the PENS dataset
+[2021)), dataset statistics are in Table [8| and (ii) those which lack user trajectories but contain
+discrete d-nodes, model-generated s-nodes (in contrast to user-generated s-nodes as per UIG definition),
+and subjective user feedback in the form of rating and the associated confidence score for that rating (e.g.
+OpenAI-Reddit dataset 2017)), statistics in Table [9] In our experiments, we select the
+OpenAI-Reddit dataset for establishing cross-domain generalizability of PerAugy and its broader applicability
+in more widely available datasets. We describe the UIG construction method for both types as follows:
+
+PENS-styled Datasets The construction of UIG is straightforward in the first case and is done in two
+steps. In the first step, click and skip interactions in the train dataset are mapped to document nodes
+(d-nodes) as incoming edges, forming the corresponding u-tier pool TJ. As an example, for the PENS dataset,
+the clkNews interaction corresponds to a click edge and uclkNews to a skip edge, forming 7,2. However, the
+PENS dataset lacks user-specific s-nodes (i.e., true interest evolution over time), rendering 7,5,,, an incomplete
+representation of the user dynamic preference. Despite this, most recent frameworks train on TPENS using
+
+history or document titles as "pseudo-targets" or via unsupervised learning (Ao et al.||2021}|Song et al.| |2023
+Yang et al.|/2023} |Lian et al.||2025). We address this in the second step, where we incorporate the s-nodes
+
+from the test dataset (Ttest) at their associated time-steps into T with the addition of genSumm (directed to
+the d-node whose corresponding s-node is incorporated) and swmmGen (to the incorporated s-node) edges,
+forming a derived (and more diverse) user-profile pool 75%" (see Figure [i}.
+
+OpenAI-styled Datasets For the second category of datasets, we first do a pre-construction classification
+of clicked and skipped d-nodes for every human rater u;. This is done based on a simple heuristic of selecting
+those d-nodes as clicked which has at least one corresponding model-generated summary (NT: there can be
+multiple models) that received a confidence score above a chosen threshold. In the case of OpenAI-Reddit,
+we chose the threshold for clicked d-nodes to be 6 out of 9 (see Figure (alin), forming 7,241. We then select
+the best model-generated summary (i.e., the highest rated one by u;) as the surrogate expected s-node for wu;
+(Figure [2}II). We then randomly sequence all such (d — s)-node pairs along with the skipped d-nodes to form
+ri (thereby 72204. Figure |2bIII). This method makes UIG-modeling compatible with most summarization
+
+base ’
+
+datasets that are not PENS-styled. Additionally, it also addresses cold-start problem as 75°! itself is
+
+base
+synthetically designed as a random sequence. A detailed pseudo-code of UIG construction is given Algorithm
+
+O
+
+4 PerAugy: Augmentation of Base UIG
+
+In this section, we introduce PerAugy, a novel data augmentation method designed to improve personalization
+in summarizers by enhancing the accuracy of user-encoders. The design is motivated by the objective to
+create diverse realistic user trajectories for training, under the hypothesis that "trajectory diversity of training
+data is directly proportional to personalization capabilities".
+
+4.1 PerAugy Pipeline: Overview
+
+The PerAugy (Perturbation-based Augmentation) pipeline has four steps. In the first step, we randomly
+sample (without replacement) m seed trajectories (7,"),p1.) from a given UIG (i.e., trajectory pool 7.20). In
+the next step, we perform the "Double Shuffling (DS)" operation that selects each of the sampled trajectories
+as the target and substitutes trajectory-segments at different time-steps of the target with that of segments
+from the other m — 1 trajectories. This leads to a modified "shuffled" sample 75%. We describe the DS
+operation in details in section [4.2| We then select the s-nodes of each trajectory 7 € 7% via a Bernoulli
+Trial and perturb the summary content on the basis of the corresponding d-node’s similarity with preceding
+
+d-nodes. The details of the perturbation method, called "Stochastic Markovian Perturbation (SMP)", is given
+
+?For detailed exposition of datasets, see Appendix[B]
+
+
+User (u-node) News doc (d-node) Summary (s-node) Perturbed Summary Action: skip Action: click Action:genSum summGen
+
+® () Z A © a) ® o
+® ) @ © a2 ) © a © S
+(a) ©2626 2% o2@ ®@ 2
+i
+; DS ~
+6 ~ 6 e@ . ! ) : > Dd @
+@re@2rele a 5 Ai eg%2_g9%g
+nnd = eee nnn. Cs “
+Z q Trajectory Length (1) J ”
+
+Offset Segment Length | Gap
+
+: @2el29%@2%z
+SME i as k-steps context window 2 9 fe ® .
+@ @ a @ © © ) (2) ie) @ @* o—
+ck c3 2 cy = 7
+(c) \ SBERT = A
+=
+
+~| (010 Co
+BHF Benes) | (Senne
+|) (ene) | (sone
+
+Figure 3: PerAugy: our proposed framework — (a) Pipeline overview depicting the two-step augmentation,
+(b) Double Shuffling (DS) to ensure cross-trajectory augmentation and induce diffusion, (c) Stochastic
+Markovian Perturbation (SMP) to smoothen the s-nodes and modulate random diffusion incorporated in DS
+stage.
+
+in section [4.3] The resulting perturbed trajectories form 7g{;p which represents a new set of synthetic user
+preference history data. Note that Tg is added back into the trajectory pool (Ty42 — Tatinpie) before the
+next iteration of sampling is done. ParAlgy terminates after |7;°2"|/m sampling iterations. We depict the
+pipeline in Figure [3[a).
+
+4.2 Double Shuffling
+
+In this section, we detail the Double Shuffling (DS) operation. The key design heuristics behind DS are that
+behavioral subsequences within real-life trajectories can be stitched together to form more diverse, realistic
+synthetic trajectories. That is, a sequence of interactions of Alice can be stitched with that of Bob and Joe to
+result in a realistic synthetic profile that behaves like Alice during the first session, then Bob in the second, and
+then finally Joe. To simulate this, following the sampling method described in the previous section, given a tar-
+get trajectory Fetesen € Teele corresponding to a user u, (i.e., an existing real user), we first randomly select
+an "Offset" O. This offset determines the early-stage behavior sequence (behavior sequence is termed "tra-
+jectory segment" Tseg) that should remain the same as u;. O helps to make sure that a new trajectory does
+not start with an unrealistic initial segment. The random selection helps to generate early-stage trajectory seg-
+ments of varying lengths in the augmented dataset. For example, if the original trajectory of Alice sere looks
+like: CLK:MT-CLK:YR-SKP:PR-CLK:GW-SKP:TA—SKP:CR-CLK:MB—SKP:DK-—CLK:WC. Al-
+ice’s first three interactions involve reading "Meditation tips" (CLK:MT) and "Yoga retreat guides" (CLK:YR),
+and skipping "Political tension rises in Russia" (SKP:PR), an offset O = 3 ensures these three steps remain
+unchanged in her synthetic trajectory, preserving a natural beginning. The random selection of O also helps
+to generate early-stage trajectory segments of varying lengths in the augmented dataset.
+
+
+i=lim-1
+
+In the next step, we eee m — 1 trajectory segments (Tseg ) from each of the remaining m — 1 "source"
+trajectories Tscarce’ > € ae manle corresponding to m — 1 users and substitute corresponding target segments
+having same length as that of these source segments. After Alice’s preserved O = 3 steps, a segment of length
+lseg, = 2 from Bob’s trajectory where he was browsing "Concert schedules" (CLK:CS) and "Band interviews"
+(CLK:BI) gets substituted in Alice’s synthetic trajectory 7H°°.
+
+The m — 1 time-steps on Fe ven where the substitutions occur are controlled by "Gap" (G), which deter-
+mines the number of time-steps that should be kept intact (i.e., same intermediate behavior sequences
+as the original u;). If G = 2, then after Bob’s exchanged segment ends, two of Alice’s untouched inter-
+actions, say, "Cooking recipes" (SKP:CR) and "Mindfulness blogs" (CLK:MB) ~ are preserved in rp’
+before the next substitution. Following this, another source segment may be introduced. For exam-
+ple, a segment of length lseg, = 2 from Joe could be substituted, representing his interactions with
+"Sports highlights" (CLK:SH) and "Malaria Outbreaks" (SKP:MO). The final 74’ will therefore look
+like: CLK:MT-—CLK:YR-SKP:PR-CLK:CS—CLK:BI-SKP:CR-CLK:MB>CLK:SH-—SKP:MO.
+
+Gap length is a hyper-parameter that we ablate on in our experiments (see section [I-1). Longer gaps would
+signify that the new synthetic trajectory Ty is more similar to the corresponding original 7, Foc apis while
+longer source segments and higher m value would lead to longer Tags The random selection of O also helps
+
+to generate early-stage trajectory segments of varying lengths in the augmented dataset.
+
+Although DS introduces diversity by aggregating trajectory segments from different users and threads them
+up at different time-steps thereby altering their original positions, it fails to ensure that the s-nodes that
+come intact along with the source segments have realistic coherence with the preceding nodes. This is because
+the source s-node has been influenced by the preceding source nodes that form its "history", and
+hence, may not be compatible with the new history in the target trajectory. To address this, we introduce a
+subsequent operation on each double-shuffled trajectory in 75% called "Stochastic Markovian Perturbation"
+that we describe in the next section.
+
+4.3. Stochastic Markovian Perturbation (SMP)
+
+SMP smoothens the newly substituted incompatible s-node s‘) at time-step t; by operating over a backward
+sliding context window T“**"s°tc, of k time-steps, derived from the corresponding d-node at ti —1. This
+process refines s‘) by perturbing it—replacing it with a sentence that better aligns with the temporal context
+of the target user. Specifically, SMP selects the top-p sentences from d“-1) that are most influenced by
+the context nodes c,—1., within the window. In our experiments, we use top-1 selection, since the s-node
+represents a summary-level headline, making a single representative sentence sufficient. The notion of
+"influence" ‘i quantified through the Root Mean Square Distance (RMSD) between each candidate sentence
+st, in d‘i-1) and each context node Cq in T“*rsetc,. Sentence and context representations are computed using
+SBERT embeddings (as detailed in Section [E) . To reflect temporal relevance, this influence is weighted by
+an exponential decay factor e~*’ ‘pos(ca) where poS-, = 0 denotes the most recent context and thus receives
+maximum weight. As a result, earlier gontext nodes contribute less to the influence score. This formulation
+characterizes SMP as a k-order Markov process, where the prediction at t; depends on a weighted combination
+of the preceding k time steps. A compact representation of SMP follows:
+
+SMP(s) E pittarect) — alts) — arg min([E] ea ay XK) [e~* Pa) | m1); a
+_ 1
+
+where: Xi(p,q) = T(€st,»€c,); Mgti_1) * No. of sentences in d‘ti-1): ¢ : RMSD
+
+Once the minimum-scoring sentence g(t) is identified via this influence-weighted RMSD computation,
+the original s-node s‘*) is replaced with 8). RMSDis chosen over other metrics because it provides a
+straightforward, geometry-based measure of dissimilarity between embeddings, capturing overall distributional
+mismatch rather than just directional alignment (as in cosine similarity). This makes it sensitive to subtle
+semantic shifts, which is desirable when ensuring that substituted s-nodes remain contextually coherent.
+The DS operation mimics the stochastic diffusion of a user’s interest into diverse themes, reflecting natural
+behavior; hence, smoothing every s-node may inhibit the intended thematic diffusion. Consequently,
+
+
+s-node st’) is selected for perturbation via a Bernoulli trial with perturbation probability psyrp Asan
+illustrative example, suppose at time-step t; Alice’s double-shuffled trajectory inserts an s-node from Bob,
+e.g., "Booked tickets for a rock concert", but her recent context window (& = 3) contains "Searching for yoga
+retreats", "Reading reviews of meditation centers", and "Browsing healthy recipes". SMP looks back to the
+previous d-node, extracts candidate sentences, and scores them against this context with exponential decay
+weighting. A more coherent candidate, such as "Workshops focus on mindfulness practices" achieves the
+lowest weighted RMSD and replaces the original s-node, ensuring the trajectory flows naturally with Alice’s
+wellness theme instead of abruptly shifting to concerts.
+
+The DS and SMP operations generate synthetic user profiles & and trajectories tas € Tgp. We ablate on
+the context window size k, decay constant A, and pgyyp in Section [I] The pseudo-code for DS is provided in
+Algorithm [3]and that of SMP is provided in Algorithm [4]
+
+5 Evaluation
+
+To evaluate the overall efficacy of PerAugy, we frame our investigation around two central research questions:
+RQ-1: Does applying PerAugy on seed training data lead to higher accuracy in SOTA user-encoders? RQ-2:
+If so, then do the enhanced user-encoders, in turn, improve SOTA personalized summarization frameworks?
+
+5.1 Experiment Setup
+
+In this section, we describe our detailed experimental setup: The training and testing datasets, Training
+procedure, Baseline augmentations, user-encoders, and summarizers, and the Evaluation metrics utilized to
+assess the effectiveness and utility of PerAugy.
+
+5.1.1 Augmented Synthetic Datasets
+
+Training Data. We create two training datasets using PerAugy: Tis and Ths 4gmp- The dataset Ths isa
+mized bag of trajectories sampled from ten different augmented datasets generated with varying <Gap-length
+gi, Trajectory-length [> configurations without SMP operations. Among them, five datasets {T;js'*°} use a
+fixed | = 150 and vary m € {10, 15,20, 25,40}, while the remaining five {755°'°} use a fixed g; = 25 and
+vary | € {50, 100,125, 175,200}. Each of the ten datasets contains 400K trajectories. From each, we sample
+
+10% to construct the final Ths.
+
+Similarly, Tks 4smp is constructed via the same mixed-bag sampling strategy, but using SMP operations
+applied to each of the ten augmented datasets with a decay constant \ = 0.3, perturbation probability
+psmp = 0.8, and context length k = 10. Proportional sampling from diverse configurations helps mitigate
+overfitting and increases the generality of preference histories. We generate four variants in total: (i) Tike. Pp
+(it) Hg", Gi) TEs fomp, and (iv) Tea, fre derived respectively from TX" and TSY O81.
+
+Test Data: User-Encoder Evaluation. We construct the test dataset 7,2, to evaluate user encoders
+under realistic interaction conditions accurately. The PENS validation set lacks skipped d-nodes (thereby
+rendering it less effective to evaluate user-encoders). The PENS test set lacks explicit negative d-nodes in
+the target bin, we merge Phase-1 clicks (7324, ) with Phase-2 (d,s) pairs (rs) in sequential order. We split
+Ts’ in half: the first half is appended to Tség, to form the user history ae while the second half serves as
+the candidate set for next-click prediction. To ensure balance, we augment positive samples with negative
+samples-documents not clicked by user u; in either Phase-1 or 2 -randomly drawn from the index range
+[50 : ns’], where ng’ is the total number of s-nodes in 7;’. This process yields a realistic distribution of
+clicked and non-clicked items, enabling a fair next click prediction evaluation. The final test set contains
+103 trajectories with ~ 20K candidate pool (both positive and negative samples) of d-nodes with 10K target
+d-nodes, thereby not altering the settings of the PENS test dataset. (Table[gp.
+
+Test Data: Personalized Summarizer Evaluation. We evaluate personalized summarizers using the
+original PENS test set Ttest. For each user uj, we retain Stage-1 click history Tség, and use the 200 (d,s)
+
+3All symbols used are described in Table[1|
+
+
+pairs from Stage-2 as summarization queries. The model generates personalized summaries 8“/ conditioned
+on the query document dguery and Tséq,, alone; the intermediate (d,s) pairs are not appended, resulting in
+inferred summaries $1%599 based solely on Tség,,.
+
+5.1.2 User-Encoder Training
+
+We train the user-encoder models from scratch on each of the mixed sets Tis and Ths, gyrp (with batch
+size: 128 trajectories; epochs 2; Adam Optimizer (a : le — 4; 8; = 0.9; 82 : 0.999; = le — 8)), in contrast to
+standard fine-tuning, to analyze: (a) the extent to which synthetic datasets can replace real datasets, especially
+when such datasets are extremely scarce, and (b) to clearly understand the effect of the hyperparameters
+of PerAugy under ablation. During training, we split a user’s trajectory tsa /DS+SMP into an input segment,
+
+also termed train history-segment (mo and a target segment Te sa at random time-step within the
+interval [/“ /2,1"7 — 3]. The nodes of 7;2,.0, form a target candidate bin for the next node prediction task.
+We ablate on 7? length in section 6.1 We further fine-tune TrRMIo (with epoch 1) on the top of 722"
+
+ASE
+
+to ascertain the impact of fine-tuning by each baseline augmentations (as discussed in Section |5.1.3).
+
+5.1.3. Baseline Augmentation Methods
+
+We evaluate PerAugy against three state-of-the-art (SOTA) algorithmic augmentation methods. We select
+PENS-SH as a strong baseline, as it is specifically designed for personalized summarization. We also choose
+53-Aug as intrea-trajectory baseline, and SDAlInter as inter-trajectory baseline, along with three LLM-based
+augmentation setups. PENS-SH merges multiple user interaction trajectories from 7;f,,,, into synthetic ones
+by aligning common d-nodes to create diverse pseudo-users. $3-Aug applies intra-trajectory segment-shuffle-
+stitch operations to perturb temporal structure while preserving local coherence in 7,23,,,. SDAInter swaps
+interchangeable sub-sequences between user trajectories based on anchor overlaps and IoU (Interaction over
+Union) confidence, producing cross-user hybrids in 7,824. We convert each of these into UIG-compatible
+datasets, T°" PSH, Tsy-S3° and Tsy2SDA_ by injecting s-nodes from test dataset summaries to evaluate
+diversity. In the LLM-as-augmentor setup, we use LLaMA-2-13B, Mistral-v2-Instruct, and DeepSeek-7b-
+chat with two prompt strategies. Chain-of-Thought (CoT) prompts guide LLMs to reason step-by-step
+through user preferences to generate personalized summaries. Prompt-Chaining (PC) splits the task: first
+generating user behavior, then using that to generate personalized summaries. All augmented datasets are
+used to train user encoders, and we evaluate them to assess their diversity and impact on user-encoders|"]
+The baseline augmentations are discussed in details in Appendix [C.]| and prompt details are depicted in
+
+Figure [9] (Chain-of-thoughts) and Figure }10] (Prompt Chaining).
+
+5.1.4 User-Encoder Baselines
+
+To study RQ-1, we evaluate four SOTA user-encoder models originally trained on PENS or its source
+dataset MIND 2020): NAML (Wu et al.||2019a), NRMS 2019b), EBNR
+(2017), and TrRMIo (Song et al.| |2023) since these encoders form four structural variations of
+history sequence modeling. NAME employs a multi-view additive attention approach to integrate news
+features (e.g., titles, categories) and models user interests via attention over browsing history. NRMS applies
+multi-head self-attention in both news and user encoders to capture semantic relations in titles and personalize
+based on attended browsed content. EBNR is click-order GRU that incorporates dwell-time-based implicit
+negatives, combining transformers and attention to model user preferences from both positive and negative
+signals. TrRMIo leverages pre-trained full-sequence transformers with attention pooling, defining user
+interest through CTR-based filtering that emphasizes low-CTR news as indicators of core user preference.
+All baseline encoders are described in Appendix [C.2]
+
+5.1.5 Personalized Summarization Baselines
+
+Most recent frameworks for personalized summarization are trained on the trajectory dataset 7,{,, using
+
+either of two methodological paradigms. The first involves reinforcement learning setups, where models are
+
+4UIG statistics are detailed in Table[10|
+
+10
+
+
+optimized using a "pseudo-target" such as user history (Ao et al.}|2021) or document title (Song et al.||2023)
+
+to approximate personalized summaries. The second involves unsupervised setups, where the training objective
+is not based on explicit summaries but instead aims to reduce the surprise in the generated summary
+or to align user representations with the style-preference centroid of similar users in their
+neighborhood 2025). We could not experiment with models of the second paradigm since they
+are closed? To systematically investigate RQ-2, we adopt two state-of-the-art personalized summarization
+frameworks. The first is PENS (2021), a pointer-network-based model trained on the PENS dataset
+using policy gradient-based reinforcement learning. PENS utilizes user embeddings derived from third-party
+user-encoders such as NAML, NRMS, and EBNR, injecting them into the generation process to personalize
+summaries. The second is GTP (2023), which follows a two-stage late-fusion approach trained on
+PENS-SH. In this framework, a general headline is first generated using a transformer-based encoder—decoder
+model, and then personalized in a second stage using TrRMIo-generated user embeddings to control stylistic
+and semantic refinements. Baseline frameworks are detailed in Appendix [C3]
+
+5.2 Evaluation Metrics
+5.2.1 Encoder Evaluation
+
+To evaluate user-encoders on the task of Next-item Prediction, we use standard metrics: AUC, MRR, and
+nDCG@5&10. AUC (Area Under the ROC Curve) measures the model’s ability to rank a positive item
+higher than negative ones, indicating overall ranking quality. MRR (Mean Reciprocal Rank) evaluates the
+position of the first relevant item in the ranked list, giving higher scores when relevant items appear earlier.
+nDCG (normalized Discounted Cumulative Gain) at cutoff positions 5 and 10 assesses both the relevance and
+position of items, rewarding models that rank relevant items higher in the top-K predictions.
+
+5.2.2 Personalization Evaluation
+
+We adopt PSE-SU4 as the PerSEval (only existing personalized summarization evaluation metric known
+so far) variant to measure the boost in degree-of-personalization for both frameworks, owing to its high
+human-judgment correlation (Pearson’s r: 0.6; Spearman’s p: 0.6; Kendall’s 7: 0.51) and computational
+efficiency (2024). PerSEVal measures how well a summarization model personalizes its
+outputs to individual user preferences (responsiveness) while also penalizing it for poor or inconsistent
+accuracy across users. It balances the trade-off between generating diverse, user-specific summaries and
+maintaining relevance to the expected content. The detailed formulation is described in Appendix [A]
+
+5.2.3. Human-Judgment based Evaluation
+
+Direct human evaluation of personalized summarization faces fundamental feasibility issues. A third-party
+annotator cannot reasonably adopt the evolving preferences of a target user after parsing through extensive
+and often noisy interaction histories, ranging from raw click headlines and skipped articles to long Reddit
+threads. Personalization hinges on nuanced, longitudinal signals such as shifting stances, sub-topic interests,
+and stylistic inclinations, which are often subtle and subjective. Any attempt to reduce this complexity into
+a simplified abstraction risks erasing the contributions of more expressive personalization models that can
+capture temporal shifts in preference history, collapsing the goal of personalized summarization to persona-
+centric (static) summarization (as described in Section [2.1). Thus, to assess the cognitive validity of PerSEval,
+designed a survey-based meta-evaluation simulating how human evaluators perceive
+personalization. Participants rated the similarity of summary pairs (model-generated and gold-reference)
+without knowing their source. From these ratings, they constructed DEGRESS-HJ (a human-judged version
+of DEGRESS) using normalized similarity as divergence and compared it against DEGRESS using correlation
+metrics (Pearson’s r, Spearman’s p, Kendall’s 7), and further evaluated whether applying standard accuracy
+metrics as discounting factors over DEGRESS-HJ (mimicking EDP) aligns with PerSEval scores. Strong
+correlations in both stages confirm that human evaluators intuitively align with PerSEval’s ratio-based
+responsiveness and factor-based accuracy penalty—indicating that PerSEval has strong human-judgment
+validity and does not require further human evaluation in this setup.
+
+5We are yet to receive the codebase from the authors.
+
+11
+
+
+NAML EBNR NRMS TrRMIo (ft)
+
+Method
+AUC MRR nDCG@5 nDCG@10 AUC MRR nDCG@5 nDCG@10 AUC MRR nDCG@5 nDCG@10 AUC MRR nDCG@5 nDCG@10
+
+PENS (Original) 0.48 0.74 0.81 0.81 0.45 0.72 0.77 0.77 0.47 0.73 0.80 0.80 0.47 0.7 0.78 0.78
+PENS-SH 0.48 0.67 0.79 0.79 0.46 0.68 0.79 0.79 0.48 0.72 0.81 0.81 0.62 0.89 0.94 0.94
+S3 0.47 0.71 0.79 0.79 0.46 0.69 0.78 0.78 0.47 0.70 0.81 0.81 0.51 0.75 0.8 0.8
+SDAInter 0.53 0.78 0.83 0.83 0.51 0.75 0.79 0.79 0.52 0.77 0.83 0.83 0.56 0.87 0.95 0.95
+LLaMA2(13B) 0.43 0.62 0.68 0.68 0.46 0.68 0.74 0.74 0.41 0.53 0.58 0.58 0.42 0.67 0.73 0.73
+Mistral(7B) 0.45 0.64 0.71 0.71 0.48 0.70 0.74 0.74 0.45 0.59 0.68 0.68 0.56 0.73 0.76 0.76
+DeepSeek-R1 0.43 0.61 0.65 0.65 0.45 0.64 0.72 0.72 0.44 0.54 0.65 0.65 0.47 0.69 0.77 0.77
+PerAugy DS(ours) 0.57 0.78 0.84 0.84 0.54 0.77 0.84 0.84 0.55 0.78 0.83 0.83 0.74 0.9 0.95 0.95
+PerAugy DS+SMP(ours) 0.59 0.79 0.87 0.87 0.59 0.81 0.88 0.88 0.59 0.83 0.86 0.86 0.76 0.91 0.97 0.97
+
+Table 2: User encoder performance (trained-from-scratch): Models trained on PENS and its augmented
+variants, including PerAugy (DS+SMP). Observation-1: PerAugy outperforms all baselines across models
+(NAML, EBNR, NRMS) and metrics (AUC, MRR, nDCG@5/10), when trained-from-scratch. Observation-
+2: When finetuned on TrRMIo, PerAugy consistently outperforms all baseline augmentation strategies, as
+compared to their fine-tuned versions. Observation-3: While some methods (e.g., SDAInter) help, others
+(e.g., S38, LLaMA2) degrade performance, showing the impact of augmentation and UIG quality.
+
+6 PerAugy Performance Results and Insights
+
+In this section, we discuss the results of each of the research questions outlined in Section [5]
+
+6.1 RQ-1: PerAugy’s Effect on User-Encoder Accuracy
+
+Comparison with SOTA augmentation strategy. We observe a significant improvement in accuracy
+across all the trained-from-scratch baseline encoderg’| when trained on our proposed dataset Ties ee
+compared to their original performance using the standard preference training set 7,£,,,,. The best results
+obtained using PerAugy show notable relative gains of 0.139 t in AUC, 0.108 t in nDCG@5/10 (on the EBNR
+encoder), and 0.096 + in MRR (on the NRMS encoder), clearly demonstrating that the PerAugy augmented
+dataset can effectively substitute for scarce preference training data. We also find that PerAugy significantly
+outperforms all baseline augmentation methods ($3, PENS-SH, and SDAInter) when the user encoders
+(NAML, EBNR, and NRMS) are trained-from-scratch. Specifically, we observe average gains of 0.127 ¢,
+0.143 t, and 0.090 ¢ over 53; 0.117 4, 0.120 +, and 0.070 t over PENS-SH; and 0.103 t, 0.090 +, and 0.067 +
+over SDAInter, in terms of AUC, MRR, and nDCG@5/10, respectively. Tike esas upgrades performance w.r.t.
+Tag P across all metrics throughout the user encoders (average boost of 0.03 + in AUC and nDCG@5/10, and
+0.02 + in MRR), establishing that Double-Shuffling alone is not sufficient to yield significant performance lift
+(Table [2). Weablate on the mixed training data Ta P to analyze the effect of DS hyperparameters—gap
+length g (Section [5.1.1) and train history-segment length 7p,,,., € {l/2, 51/8, 31/4, 71/8, 1 —3} (I: trajectory
+length). For SMP hyperparameters (k € {10,15,20}, A € {0.3,0.8,1}, pgmp © {0.5, 0.8, 1}), we ablate on
+hn ase Results are in Append lfand Figure
+
+Comparison with LLM-generated Train sets. Furthermore, to assess the effectiveness in comparison
+to LLM-generated training data, we train the same user encoders from scratch using T243M4-?, 7 Mistral and
+TocepSeekR1 Ty comparison to these LLM-generated baselines, our PerAugy training set Tég, ismp Yields
+average performance gains of 0.157 Tt, 0.2 t, and 0.203 + over LLaMA2; 0.13 t, 0.167 t, and 0.16 t over
+Mistral; and 0.15 ft, 0.213 t, and 0.197 + over DeepSeek-R1 — again reported in terms of AUC, MRR, and
+nDCG@5/10 respectively. It is important to understand that LLMs have limited capacity to generate a large
+number of diverse trajectories, and thus we scale down to 800 — 1500 unique trajectories generated. These
+consistent improvements across all metrics and models further validate the effectiveness of the PerAugy as an
+augmentation strategy (For details, see Table [2).
+
+Effect of Finetuning. We reserve TrRMIo to analyze the fine-tuning performance of PerAugy and find it
+to outperform the best performing PENS-SH-based fine-tuning (0.14 t w.r.t AUC, 0.034 t w.r.t MRR, &
+0.026  w.r.t nDCG@5/10) (Results in Table [2}.
+
+All results are statistically significant with p < 0.01 (test size: 18.1K positive and negative decision nodes).
+
+12
+
+
+Personalized Summarizer User-Encoder PENS (Original) DS (Scratch) DS+SMP (Scratch) DS+SMP (Encoder FT / End-to-End)
+
+NAML (T1) 0.013 0.008 0.014 0.015 / 0.017
+EBNR (T1) 0.008 0.009 0.010 0.010 / NA
+PENS EBNR (T2) 0.005 0.008 0.008 0.010 / 0.009
+NRMS (T1) 0.011 0.008 0.010 0.011 / NA
+NRMS (T2) 0.004 0.007 0.007 0.005 / NA
+GTP TrRMIo (title) 0.006 0.017 0.017 0.020 / 0.022
+
+Table 3: Personalized Summarizer Performance (PSE-SU4). All models are injected with the same
+user-encoder used during their original training. Observation-1: GTP utilizes improved user embeddings
+best in both encoder finetuning and end-to-end tuning. Observation-2: In PENS, NAML-T1 shows a clear
+boost, while other variants fail to capitalize on the finetuned encoder. Observation-3: SMP consistently
+improves over DS, indicating its necessity for maximizing gains.
+
+Tps/D8+SMP
+that PerAugy reliably applied to OpenAI (Reddit) like datasets that do not contain preference histories
+(best (NRMS): 0.163 ¢ w.r.t AUC, 0.112 t w.r.t MRR, 0.097 w.r.t nDCG@5/10). Importantly, our primary
+claim is both of cross-domain generalizability along with transferability. By generalizability, we mean that
+
+PerAugy can be trained on datasets (as trained on Teepssur) that are very different in domain and
+
+Cross-domain Study. When trained on and evaluated on the PENS test set Tics, we observe
+
+structure (for instance, is a non-news, multi-domain dataset), and still sustain its boosting performance
+on their corresponding test sets, while testing the Tos/peismpttained encoders on Tiest sufficiently validates
+
+cross-domain transferability. The results are detailed in Figure [8]
+
+6.2 RQ-2: PerAugy’s Effect on Personalization
+
+We examine how effectively the baseline personalized summarization frameworks, GTP and PENS, leverage
+their corresponding improved user encoders, focusing on the frameworks’ sensitivity to enhanced user
+history embeddings. To isolate the contribution of user encoder improvements, we first replace the fine-
+tuned encoders with their train-from-scratch counterparts. This setup helps us assess the raw effect of our
+augmentation strategy, PerAugy. With DS, the highest improvement in the PSE-SU4 score is for the GTP
+framework (+TrRMIo), achieving a gain of 0.012 over its baseline (original PSE-SU4: 0.006). On the
+PENS framework, the PENS(+EBNR+T2) variant shows a notable performance increase of 0.003 under
+DS. PENS variants that utilize NAML and NRMS encoders with T1 injection appear to benefit more from
+the SMP augmentation, yielding additional gains of 0.006T and 0.0027 respectively—on top of what DS
+alone provides. This further establishes that Double Shuffling alone is not sufficient to boost downstream
+performances. When we switch to using the fine-tuned versions of the user encoders, the improvements in
+PSE-SU4 become more pronounced across models. The best results with these encoders include a boost of
+0.014 + for GTP+TrRMIo, 0.005 ¢ for PENS+EBNR-T2, and 0.002 + for PENS+NAML-T1. Finally, to
+evaluate the full effect of end-to-end fine-tuning of the summarization frameworks with PerAugy, we utilize
+NAML(T1), EBNR(T2), and TrRMIo (since these encoders had shown relatively greater improvements in
+their fine-tuned versions). This end-to-end training leads to further performance boosts for NAML(T1) and
+GTP, both gaining 0.002 +, whereas EBNR(T2) shows a slight performance decline of 0.002 | (Table fp.
+This indicates that the architecture and the injection method play a major role. This is evident from the
+best-performing GTP, which is trained with the additional loss on aligning generated summary embedding
+with the history embedding by the TrRMIo user-encoder. This results in superior personalized summaries,
+while the PENS framework falls behind due to a lack of alignment with the user’s preference history.
+
+7 Dataset Diversity Boosts Performance: Quantitative Analysis
+
+We observe that DS and SMP operations lead to significantly higher performance of the SOTA user encoders
+(and thereby, the personalized summarization frameworks) when trained on PerAugy-generated datasets (see
+Tables [}] & [3). This empirically confirms our hypothesis that "trajectory diversity of training data is directly
+proportional to personalization capabilities". In this section, we further analyze the extent to which PerAugy
+achieves diversity via the DS and subsequent SMP operations w.r.t. three different post-hoc diagnostic
+
+13
+
+
+diversity metrics. We then show that these metrics have high positive correlation with the accuracy metrics,
+thereby hinting (as a part of a preliminary study) that such metrics may be reliably used to estimate how
+good the training data (both real and synthetic) might be for the personalized summarization task. The
+analysis outlined is a strongly suggestive verification method to show that diversity is the primary cause of
+the performance boost.
+
+7.1 Trajectory Diversity Metrics
+
+In order to analyze the extent of diversity in PerAugy-generated datasets, we first define three diversity
+metrics — Topics per Trajectory (TP), Rate of Topic Change per Trajectory (RTC), and Degree-of-Diversity
+(DegreeD) as follows:
+
+Topics per Trajectory (TP). TP is a simple trajectory-level metric that is commonly used to quantify
+topical variety and diversity in user—interaction graphs (UIGs):
+
+TPH) = |{topic(a”) Feil ;TP(D) = Lyi (2)
+
+For a user trajectory 7“? with length 1, where d) is the i-th document (d-node) consumed at time t;, and
+let topic(-) map d“*) to its discrete topic (given as ground-truth). Higher TP indicates that a user engages
+with a wider variety of unique topics over time. However, TP alone cannot distinguish between drift and
+diffusion. A trajectory where topics change gradually over time (drift) and one where topics switch abruptly
+in a scattered manner (diffusion) can yield the same TP score, since TP only counts distinct topics. This
+limitation motivates the need for a complementary metric that accounts for the frequency of topical shifts.
+
+Rate of Topic Change per Trajectory (RTC). This captures how frequently the topic changes between
+consecutive steps:
+
+I-1 |U|
+
+1[topic(a“*? ) # topic(d**)) | ;RTC(D) = a RTC(r"), (3)
+j=l
+
+1
+RTC(t™) = ——
+
+i=1
+where 1[-] is the indicator function and |U| is the number of user trajectories in dataset D. A higher RTC
+indicates more frequent topic switching within a trajectory. By construction, RTC(r“7) = 1 if every successive
+pair of interactions involves different topics.
+
+While TP and RTC provide fast, interpretable signals of diverse topics and frequent shifts of users’ interest
+over timesteps, they do not capture several aspects crucial to a personalized summarization dataset: (i)
+Faithfulness of s-node to source d-node: they ignore how closely each subjective expected summary (s-node)
+aligns with the central discourse of the corresponding d-node. (ii) Magnitude of thematic shifts: a change
+of topic label is treated equally regardless of the actual semantic distance between the topics — i.e., small
+and large shifts are indistinguishable. (iii) Consistency of user focus: they do not penalize cases where
+s-nodes drift away from the core content of the corresponding d-nodes across time, i.e., when the faithfulness
+decreases. (iv) Sparsity of s-nodes: practical UIGs often lack s-nodes at many time-steps; these metrics offer
+no principled way to account for the lack of gold-reference s-nodes in training data. Also, RTC is insensitive
+to the uniqueness and breadth of topical transitions: a trajectory that merely switches with high frequency
+between a small subset of topics (periodic alternation) can yield a high RTC score, even though the topical
+coverage remains narrow. These limitations motivate a metric that jointly captures over (a) the relative
+alignment between document—document and summary-summary shifts, (b) the absolute thematic divergence,
+and (c) changes in faithfulness over time.
+
+Degree-of-Diversity (DegreeD). To address the above drawbacks, we propose a novel metric called DegreeD
+(Degree-of-Diversity) and then briefly discuss the method to compute it given any UIG. As a building block,
+we first define Degree-of-Preference-Shift (DePS) in a given UIG trajectory 7“ corresponding user u;, where
+DePS quantifies the shift in a user’s interest across T“.
+
+14
+
+
+Symbol Description
+
+TP(7r™) Unique topics in trajectory 7).
+
+RTC(r“7) — Rate of topic change in 7“.
+
+5[X]a Thematic Divergence between consecutive documents.
+
+5[X]s, Thematic Divergence between consecutive summaries for user j.
+A(ti,ti¢1) A unit time-span.
+
+oO Divergence metric in embedding space.
+
+E, [6] Expected preference shift across 7“.
+
+E,[6"] Penalized expected preference shift for 7.
+
+a Regulator that controls the influence of Penalized DePS.
+
+|U| Number of trajectories in the dataset.
+
+(a) DegreeD penalization: (a) Disproportion- (b) Symbols used in the definition of TP, RTC, and DegreeD.
+ality between successive s-node and d-node diver-
+
+gences, (b) Proportionate but unfaithful align-
+
+ment of s-node & d-node, (c) Lack of thematic
+
+divergence between consecutive d-s pairs.
+
+Definition 2 (Degree of Preference Shift (DePS)). DePS is the ratio of the thematic divergence between
+consecutive d-nodes d“) and d+.) (denoted as 6[X]q) over a time span (or interval) A(,.1,,,) = tiga — ti
+
+and that between the corresponding s-nodes (user’s subjective expected summaries) off and gen (denoted
+
+as 0[X]5).
+
+The thematic divergence 6[X]. (¢ € {d, s}) is calculated as o(et' et) where o is a distance measure on a
+chosen metric space. As per the definition, DePS for the j-th user at any unit interval A(;, ¢,,,) is:
+Deps titty) _ min(6[X]a, 6[X]s,;) re (4)
+A max(6[X]a,6[X]s,) + €
+The Expected DePS, E,[DePS], for j-th user over the trajectory 7“i having length / is:
+— A
+E,[DePs] = -— S"Deps, "? (5)
+i=1
+
+IE;[DePS] penalizes the disproportionate alignment between the expected summaries (6[X],,) and the
+document divergence (6[X]qa) for r“i (Figure 4a] (a)). We adopt the min-max normalization in Eq. [4] to
+ensure that DePS is scale-invariant across embedding spaces while remaining naturally bounded in (0, 1],
+providing a consistent measure of alignment between document and summary divergences. Consider that at
+t,, Alice clicks on "Yoga retreat in Bali" (d“)) and her expected summary is "Yoga travel guide" (s‘)), which
+is well aligned. At tz, the document shifts to "Top 10 meditation apps" (d\2)), but her summary remains
+almost unchanged as "Yoga travel blogs" (s‘2)). Here, the document divergence 6{X]q is non-trivial (topic
+shifted within wellness), while the summary divergence 5[X], is very less. This disproportion leads to a low
+DePS4(1.2), signaling that Alice’s summaries are not faithfully tracking her document-level preference shifts.
+However, it fails to penalize the case when any expected summary (s-node) in rT“? is not consistently faithful
+(in the sense of centrality to the core topic) to the corresponding document (d-node) (Figure [4a] (b)). It also
+fails to penalize the case when the absolute thematic divergence is small (Figure |4a|(c)). Both these cases
+can happen even with a high E,[DePS]. To address the first issue, we modify E,;|DePS] to incorporate the
+necessary penalties (i.e, penalized E;[DePS] or E;[DePS”]) as follows:
+
+i) g(ta)
+J o(di+0) 56 i+1))
+
+[=
+
+(6)
+
+Al
+i=l
+
+IE; [DePS”] = i
+
+In the above equation, the second factor penalizes negative shift in faithfulness where the s-node starts
+deviating away from the corresponding d-node as compared to the deviation at previous time-steps. Note that
+
+15
+
+
+Augmentation Baselines TP RTC _ DegreeD
+
+PENS (original) 7.3 0.56 0.009
+PENS-SHj{ 7A 0.54 0.067
+S3} 7.3 0.56 0.019
+SDAInter{ 7.8 0.63 0.083
+LLaMA-2-13Bj{ 8.8 0.61 0.113
+Mistral-7By{ 8.6 0.63 0.144
+DeepSeek-R1} 94 0.68 0.219
+PerAugy DS} 13.6 0.77 0.232
+PerAugy DS+SMP7{ 13.6 0.77 0.289
+' OpenAI (Reddit) (OAI) 8.5 0.42 0.008 ~
+PerAugy-OAIx 11.7 0.72 0.121
+
+Table 4: Diversity analysis: Comparison of DegreeD, TP, and RTC across datasets. + indicates aug-
+mentation followed by UIG abstraction on PENS, and x indicates augmentation on seed OpenAI(Reddit).
+Observation-1: PerAugy shows higher diversity in terms all 3 metrics than its seeds and augmentation
+baselines. Observation-2: While TP and RTC relate to diversity, they fall short in capturing preference
+shifts effectively (e.g. PENS-SH has lower RTC than PENS, although it leads to higher user-encoder accuracy;
+see Table [2).Observation-3: PerAugy DS and PerAugy DS+SMP yields same across TP and RTC because
+they are agnostic of the inserted s-nodes, while SMP changes s-node contents only on the top of DS, thereby
+making DegreeD a better evaluator of the pertubation w.r.t. diversity.
+
+the second factor rewards positive shift where s-node comes closer to its corresponding d-node.
+As can instance, consider at t,, Alice clicks "Yoga retreat in Bali" (d\)) and her expected summary is " Yoga
+travel guide" (s“)). At tz, she clicks "Top 10 meditation apps" (d\)), but her expected summary becomes
+"App technology and efficiency" (s‘2)). The two documents are semantically close (both wellness-related), but
+the new s-node drifts away, showing inconsistency. E,[DePS] would still look high because of normalization, but
+the penalized E; [DePS”] detects this faithfulness drop and penalizes it. To address the second issue, we inject
+an additional factor 6|X],, that penalizes lack of thematic divergence in terms of user’s actual interest /focus
+(hence, 6[X],, instead of 6[X]a,). d[X]s, is regulated by the hyper-parameter a = (0,1). The final DegreeD
+formulation for a dataset D containing |U| unique user trajectories is:
+
+[UI
+DegreeD(D) = i] pou I; [DePS” | (7)
+
+To continue illustration from the last example itself, consider at ts, Alice clicks "Meditation workshop details"
+(d‘s)), and her expected summary is "Workshop information" (s‘)). Both d“2) and ds) are very similar,
+and the corresponding summaries are almost identical. Here, EK; [DePS”] might appear high since s-nodes are
+faithful towards their respective d-nodes, along with being proportionate. But 6[X],, penalizes such low
+divergence in user interest, ensuring that datasets with repetitive, uninformative shifts are not overvalued.
+A dataset D is suitable for personalization training if it has a high DegreeD score. Mathematical proof of
+robustness of DegreeD under a variant choice of o is given in Appendix [F]
+
+7.2 Effect of Augmentation on Dataset Diversity
+
+We analyze PerAugy’s effect on dataset diversity. We observe that Ties, DS ae achieves a boost of 4.2/0.09/0.28
+w.r.t TP/RTC/DegreeD compared to the PENS original dataset and a boost of 3.2/0.30/0.113 + w.r.t
+TP/RTC/DegreeD compared to the OAI original dataset ( (Table[4p. We ablate the Suet of the hyperparameters
+of PerAugy on DegreeD, including gap length g; and taijenteny length 1 for Tess as well as context length k,
+decay constant A, and perturbation probability psy p for Tissue “gmp (see Appendix 2] Figure(7}.
+
+7.3. Dataset Diversity Metrics as a Potential Predictor of Performance Gain
+
+In order to draw a conclusive statement on dataset diversity being a primary cause of performance gains
+across models, we first have to establish the reliability and stability of the three diversity metrics, along with
+
+16
+
+
+Diversity Metric Pair Pearson Spearman Kendall
+
+TP vs RTC 0.75 0.78 0.62
+TP vs DegreeD 0.79 0.81 0.67
+RTC vs DegreeD 0.84 0.90 0.75
+
+Table 5: Inter-correlation (Pearson r, Spearman p, Kendall’s 7) between Diversity Metrics:
+Observation-1: DegreeD is effective diversity evaluation metric that gives additional insights, which are not
+captured by TP and RTC; Observation-2: DegreeD has high compatibility with text-based diversity evaluation
+metrics; Observation-3: RTC exhibits higher correlation than TP across all datasets, which suggests that
+RTC might fail to capture true diversification of sequence, and misevaluate a frequently shifting trajectory
+limited to fewer topics.
+
+Aggregate Mean Correlation of Diversity Metrics with User Encoder Performance
+Diversity Metric Eval Metric Kendall’s r
+(incl. PerAugy/ excl. PerAugy)
+
+Pearson r Spearman p
+(incl. PerAugy/ excl. PerAugy) (incl. PerAugy/ excl. PerAugy)
+
+AUC 0.606 / 0.543 (A = 0.063) 0.710 / 0.562 (A = 0.148) 0.518 / 0.461 (A = 0.057)
+
+_ MRR 0.765 / 0.686 (A = 0.079) 0.704 / 0.637 i. = 0.067) 0.542 / 0.531 (A = 0.011)
+nDCG@5 0.719 / 0.612 (A = 0.107) 0.701 / 0.635 (A = 0.066) 0.529 / 0.424 (A = 0.105)
+
+nDCG@10 0.719 / 0.612 (A = 0.107) 0.701 / 0.635 (A = 0.066) 0.529 / 0.424 (A = 0.105)
+
+AUC 0.448 / 0.392 (A = 0.056) 0.243 / 0.201 (A = 0.042) 0.112 / 0.094 (A = 0.018)
+
+RTC MRR 0.642 / 0.581 (A = 0.061) 0.251 / 0.213 (A = 0.038) 0.132 / 0.110 (A = 0.022)
+nDCG@5 0.523 / 0.472 (A = 0.051) 0.234 / 0.196 (A = 0.038) 0.106 / 0.090 (A = 0.016)
+
+nDCG@10 0.523 / 0.472 (A = 0.051) 0.234 / 0.196 (A = 0.038) 0.106 / 0.090 (A = 0.016)
+
+AUC 0.682 / 0.645 (A = 0.037) 0.737 / 0.712 (A = 0.025) 0.578 / 0.556 (A = 0.022)
+
+DegreeD MRR 0.672 / 0.624 (A = 0.048) 0.725 / 0.684 (A = 0.041) 0.552 / 0.537 (A = 0.015)
+nDCG@5 0.687 / 0.663 (A = 0.024) 0.731 / 0.693 (A = 0.038) 0.580 / 0.566 (A = 0.014)
+
+nDCG@10 0.687 / 0.663 (A = 0.024) 0.731 / 0.693 (A = 0.038) 0.580 / 0.566 (A = 0.014)
+
+Table 6: Meta-evaluation of Diversity Metrics: Correlation of dataset diversity with encoder accuracy
+(averaged) Observation-1 (Reliability): DegreeD consistently shows the strongest correlation, confirm-
+ing it as the most reliable diversity indicator. Observation-2: RTC exhibits low correlation throughout,
+indicating that frequency of topic switching alone is insufficient for capturing personalization-relevant di-
+versity. Observation-3 (Stability): Correlation of TP and DegreeD remains strong even after excluding
+high-performing PerAugy, thereby confirming that overall metric reliability is not inflated by PerAugy.
+
+whether they have inter-metric alignment. In this section, we first check whether the three metrics align with
+each other, and then show the meta-evaluation of diversity metrics to establish reliability.
+
+7.3.1 Inter-metric Alignment
+
+We also see a positive correlation between the diversity metrics within themselves, with an average correlation
+of 0.7 between TP and RTC, 0.75 between TP and DegreeD, and 0.8 between DegreeD and RTC, as in Table
+This suggests that at a broader design level, DegreeD although being a more nuanced metric, is compatible
+with simpler diversity metrics (correlation computation details have been provided in Appendix [H).
+
+7.3.2. Meta-evaluation: Diversity Metric Reliability
+
+As per the empirical evidences of Tables [2] and dataset diversity should lead to an increase in accuracy.
+Therefore, any diversity metric should be consistent with these empirical results. Hence, we conduct the
+meta-evaluation of the diversity metrics w.r.t reliability. To this end, we compute the correlation of the
+dataset diversity (both original and synthetic generated by the augmentation methods) as shown in Table
+[4] with the average user-encoder accuracy across the encoder models when trained on these datasetq"| We
+observe a strong positive correlation, thereby high reliability w.r.t consistency, for TP and DegreeD across all
+accuracy metrics (Pearson: 0.72/0.69, Spearman: 0.7/0.73, and Kendall: 0.53/0.58 w.r.t. nDCG), while RTC
+
+7Since LLM-generated trajectories have been preprocessed to track unique sequences to address redundancies (thus making
+the number of trajectories quite low and yielding significantly lower user-encoder performance). For details of correlation
+measures, see Appendix[H]
+
+17
+
+
+Correlation of TP and DegreeD with each user encoder
+
+Metric Corr. NAML EBNR NRMS TrRMIo Aggr. Mean Corr. Variance
+(TP / DegreeD) (TP /DegreeD) (TP /DegreeD) (TP / DegreeD) (TP / DegreeD) (TP / DegreeD)
+Pearson 0.318 / 0.848 0.303 / 0.380 0.616 / 0.700 0.570 / 0.607 0.606/0.682 .044 / 0.031
+AUC Spearman 0.602 / 0.905 0.429 / 0.571 0.464 / 0.567 0.357 / 0.500 0.710/0.737 0.069 / 0.035
+Kendall 0.371 / 0.786 0.229 / 0.357 0.371 / 0.500 0.257 / 0.429 0.518/0.578 .049 / 0.030
+Pearson 0.167 / 0.643 0.100 / 0.239 0.341 / 0.499 0.245 / 0.576 0.765/0.672 313 / 0.057
+MRR Spearman 0.265 / 0.667 0.153 / 0.262 0.357 / 0.433 0.267 / 0.643 0.704/0.725 .202 / 0.077
+Kendall 0.148 / 0.500 0.095 / 0.143 0.190 / 0.286 0.143 / 0.476 0.542/0.552 0.16 / 0.062
+Pearson 0.205 / 0.772 0.143 / 0.288 0.382 / 0.468 0.279 / 0.638 0.719/0.687 0.226 / 0.054
+nDCG@5/10 Spearman — 0.530 / 0.786 0.365 / 0.524 0.530 / 0.467 0.414 / 0.690 0.701/0.731 0.063 / 0.029
+Kendall 0.297 / 0.643 0.185 / 0.286 0.334 / 0.389 0.260 / 0.524 0.529/0.580 .071 / 0.033
+
+Table 7: Stability of Diversity Metrics: The sensitivity of TP and DegreeD to strong positive user-encoder
+outliers is analyzed via model-specific correlation variance w.r.t aggregate mean correlation (reported in Table
+(6). Observation-1: Overall, TP an DegreeD consistently has low variance across models; Observation-2:
+DegreeD has stronger stability w.r.t MRR (the strictest accuracy metric) than TP.
+
+has low correlation (see Table [6). This indicates that RTC, which only focuses on the absolute frequency
+of topic shifts rather than their uniqueness, can incorrectly quantify a low diversity dataset as high. It is
+to be noted that beyond PerAugy, multiple baseline augmentations (e.g., SDAInter, PENS-SH) also raise
+encoder accuracy over the original PENS set, indicating that increased and well-aligned diversity can improve
+learning.
+
+7.3.3 Meta-evaluation: Diversity Metric Stability
+
+Having established that the diversity-accuracy relationship holds across all augmentation methods (not
+only PerAugy), we next test whether the strong correlation observed between dataset diversity and encoder
+performance is inflated by two potential sources — (i) PerAugy itself that acts as a strong outlier and dominates
+the correlation trend, and (ii) a specific strong positive user-encoder outlier whose unusually high accuracy
+performance disproportionately boosts the correlation values.
+
+Stability w.r.t. PerAugy as strong outlier: There is a possibility that the high performance of PerAugy
+acts as a positive strong outlier. This can inflate the reliability correlation of TP and DegreeD thereby giving a
+misleading metric reliability. We perform the same experiment as in Table [6] but excluding PerAugy-generated
+datasets. We observe that the correlation of both TP and DegreeD do not vary and lie in the same high
+correlation band, underscoring that the diversity—accuracy trend is not because of PerAugy alone (see Table
+
+A: absolute difference in correlation values; Mean values jupp : 0.082, Upegreep : 0.023; Standard Deviations
+OTP: 0.03, ODegreeD : 0.01).
+
+Stability w.r.t. strong outlier user-encoder: The previous analysis cannot detect whether a user-encoder
+acts as a strong positive outlier and inflates the aggregate correlation results reported. To address this,
+we find the correlation between dataset diversity (w.r.t TP and DegreeD) and individual user-encoder (i.e.,
+NAML, EBNR, NRMS, TrRMIo) accuracy performances (w.r.t AUC, MRR, and nDCG metrics). We then
+compute the correlation variance (averaged across the user-encoders w.r.t the aggregated mean reported in
+Table|6). We observe that DegreeD consistently demonstrates lower variance than TP (average gain of 0.07 f).
+Also, the results indicate that TP as a diversity metric is not a stable indicator of the role of the underlying
+dataset diversity under the stricter condition of MRR of encoders. In general, both metrics are stable w.r.t
+outlier models.
+
+Although DegreeD is more stable and robust across models, it is relatively less interpretable and computationally
+heavier. TP, on the other hand, is simpler and interpretable but fails to capture the magnitude and direction
+of semantic shifts, making it insensitive to subtle preference drifts.
+
+18
+
+
+7.4 Data Diversity Causes Personalization Boost
+
+Having empirically established the reliability and stability of TP and DegreeD, we can conclude that PerAugy
+reliably outperforms other baseline augmentation methods by a significant margin in terms of injecting
+diversity in the seed datasets (outperforms best (DeepSeek-R1) by 4.2/0.03 + w.r.t TP /DegreeD; Table [4p.
+However, the user-encoder and the downstream model architecture matter, we find that NAML, NRMS, and
+TrRMIo being able to capture the diversity more, showing consistent correlation with diversity metrics.
+
+8 Related Work
+
+Prior works on data augmentation have largely focused on generative approaches for dialogue summarization
+
+Park et al.||2024), and document-level augmentation for generalized
+summarization tasks (Fabbri et al.| Chen et. al.| (Sahu et al] (2025). However, to the best of
+our knowledge, preference-oriented data augmentation in the context of personalized summarization
+remains significantly underexplored. The most relevant effort in this domain is PENS-SH (2023),
+which constructs synthetic user trajectories by identifying and merging common d-nodes across multiple user
+interaction graphs (UIGs). While effective at preserving shared preferences, PENS-SH fails to retain temporal
+order information due to the loss of time-step data, and entirely lacks intermediate summary nodes (s-nodes),
+leading to an incomplete representation of user intent and preference evolution. Broadly, preference data
+augmentation methods for sequential recommendation can be categorized into two classes: intra-trajectory
+and cross-trajectory augmentation. Most of these techniques use sequential recommendation datasets like
+Amazon, MovieLens, where the goal is next interaction prediction, not preference-based generation.
+
+8.1 Intra-Trajectory Augmentation
+
+Most intra-trajectory methods perturb each user’s history by locally manipulating nodes or segments,
+but within the same trajectory. For example, MBASR employs an intra-trajectory
+augmentation technique by performing pairwise swapping of segments to generate diversity. But on highly
+monotonous trajectories, this yields minimal change and may even inject unrealistic temporal transitions.
+STEAM operates by deciding whether to drop or insert nodes within a trajectory to create
+augmented data. However, the method is not scalable to longer trajectories, and the insertion or deletion of
+nodes can disrupt the historical sequence or break the natural flow of interactions. L2Aug
+
+learns a policy to delete nodes, but deletions disrupt continuity and remove potentially informative context.
+The Heuristic SAMPLER model replaces single nodes via popularity- or co-occurrence-
+based heuristics, but such isolated swaps fail to shift the sequence’s overall engagement degree. ASReP
+extends trajectories by generating pseudo-prior nodes using reverse pretraining. Although it aims
+to enrich the trajectory, any kind of insertion technique (or segment extension) can incorporate unrealistic
+synthetic nodes that compromise the authenticity of time-step information of further interactions, making it
+unsuitable for our application. Finally, BTBR incorporates masking strategies and swapping
+operation to train the model for "Next Novel Basket Recommendation". But it does not generate a diverse
+input sequence to make the existing encoders learn the representations.
+
+PerAugy departs from these schemes by applying controlled perturbations that operate at both micro- and
+macro-scales while preserving strict temporal coherence since intra-trajectory augmentations does not solve
+the problem of monotonous user history. Rather than swapping or deleting isolated nodes, we perform
+shuffling that incorporates controlled shifts and apply perturbation to diffusion. This approach polishes
+the sequence—enriching diversity—without sacrificing realistic time-step information or overburdening the
+augmentation pipeline, making it scalable to long trajectories.
+
+8.2 Cross-Trajectory Augmentation
+
+Cross-trajectory techniques draw patterns across users to forge new sequences and augments multiple
+
+trajectories. DR4SR (Yin et al.) |2024) uses a transformer to learn global sequence regeneration. The
+pertaining task is constructed for to extract patterns from given set of sequences and feed the patterns
+to the model to regenerate other set of possible sequences, but applying interchangeable patterns across
+
+19
+
+
+subjective “s-node” summaries risks injecting generic behaviors that dilute personalization. TiCoSeRec
+ensures uniform time-interval distribution in the sequence based on the time-aware traditional
+operations like Crop, Mask, Insert, Reorder and Substitute. But our trajectories inherently assume consistent
+unit-step timing, thereby making such time-aware edits redundant. FDA generates
+synthetic user profiles from the realistic profiles to balance between realistic data and pseudo data. But it
+generates monotonic “complemented” sequences that mirror existing repetition rather than diversifying it.
+divSPA swaps segments between similar users based on similarity metrics. Similarity-based
+exchanges often leave the overall interaction degree unchanged and introduce context mismatches.
+
+Instead of wholesale regeneration or arbitrary segment swaps, PerAugy leverages cross-trajectory substitution
+to adapt its perturbation parameters dynamically. By analyzing inter-user variance in s-node distributions,
+our method addresses optimal perturbation scales and target positions, ensuring that borrowed structure
+enhances diversity without compromising each trajectory’s unique summarization points w.r.t. realistic
+user-behaviors. This yields augmented sequences that are both personalized and information-rich, overcoming
+the homogenization (or unrealistic heterogenization) pitfalls of existing cross-trajectory approaches.
+
+9 Discussions & Limitations
+
+PerAugy enhances the diversity and expressiveness of the original user history data while preserving personal-
+ization fidelity. This approach is particularly beneficial for improving model robustness and generalization in
+sparse or skewed datasets. In deployment settings, where user-written summaries are typically unavailable,
+model-generated summaries can serve as effective proxies, especially during cold-start scenarios such as a new
+browsing session, which we address via experiments on the OpenAI(Reddit) dataset. Looking forward, we
+see promising opportunities in extending this augmentation framework using large language models (LLMs).
+In particular, we are investigating prompt-tuning-based augmentation techniques that could generate more
+semantically rich and user-aligned variations of preference histories. Such methods hold the potential to
+be especially impactful in low-resource or non-PENS-like domains, where user signals are limited or noisy.
+Additionally, we aim to ground perturbation modeling in more principled stochastic processes. One such
+candidate is the It6 process, which incorporates both deterministic trends (drift) and random fluctuations
+(diffusion). Modeling user preference evolution through such continuous-time stochastic frameworks may
+offer a more realistic approximation of human behavior, allowing for fine-grained control over the intensity
+and direction of perturbations. This could open avenues for theoretically grounded, temporally aware
+augmentation strategies that better reflect user dynamics in real-world settings.
+
+10 Conclusion
+
+In this paper, we introduced PerAugy, a novel data augmentation technique designed to enhance the
+personalization capabilities of summarization models. By addressing limitations in current personalized
+datasets like PENS, PerAugy generates synthetic, diverse user interaction trajectories, reducing overfitting and
+improving generalization across domains. Techniques like Double Shuffling (DS) and Stochastic Markovian
+Perturbation (SMP) ensure that the augmented data remains realistic and coherent, enabling models to
+better align with individual user preferences. Our evaluation demonstrated significant improvements in the
+personalization metric PSE (an average of 61.2% boost), particularly in models like PENS+NRMS+T2,
+which achieved a 75% performance increase (PSE-RG-SU4). PerAugy also improved user-encoders such as
+NAML, EBNR, and NRMS, enhancing their ability to capture user preferences with average boosts of 24%,
+25%, and 18% over baseline augmentations (w.r.t AUC, MRR, and nDCG@5&10). We further demonstrated
+its potential as a reliable generator of synthetic datasets in low-resource domains like OpenAI (Reddit), with
+encoder boosts of 19%, 25%, and 17% in the same metrics, broadening its applicability. While PerAugy is a
+critical advancement in addressing data scarcity and generalization in personalized summarization, future
+work will refine its techniques and explore adaptability to more models and architectures.
+
+20
+
+
+References
+
+Xiang Ao, Xiting Wang, Ling Luo, Ying Qiao, Qing He, and Xing Xie. PENS: A dataset and generic framework
+for personalized news headline generation. In Chengqing Zong, Fei Xia, Wenjie Li, and Roberto Navigli
+(eds.), Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the
+11th International Joint Conference on Natural Language Processing (Volume 1: Long Papers), pp. 82-92,
+Online, August 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.acl-long.7. URL
+
+https: //aclanthology.org/2021.acl-long.7/
+
+Pengshan Cai, Kaiqiang Song, Sangwoo Cho, Hongwei Wang, Xiaoyang Wang, Hong Yu, Fei Liu, and Dong
+Yu. Generating user-engaging news headlines. In Anna Rogers, Jordan Boyd-Graber, and Naoaki Okazaki
+(eds.), Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume
+1: Long Papers), pp. 3265-3280, Toronto, Canada, July 2023. Association for Computational Linguistics.
+
+doi: 10.18653/v1/2023.acl-long.183. URL https: //aclanthology.org/2023.acl-long.183/
+
+Lei Chen, Le Wu, Kun Zhang, Richang Hong, Defu Lian, Zhiqiang Zhang, Jun Zhou, and Meng Wang.
+Improving recommendation fairness via data augmentation. In Proceedings of the ACM Web Conference
+2023, WWW ’23, pp. 1012-1020, New York, NY, USA, 2023a. Association for Computing Machinery. ISBN
+
+9781450394161. doi: 10.1145/3543507.3583341. URL |https: //doi.org/10.1145/3543507 . 3583341
+
+Xiuying Chen, Guodong Long, Chongyang Tao, Mingzhe Li, Xin Gao, Chengqi Zhang, and Xiangliang
+Zhang. Improving the robustness of summarization systems with dual augmentation. In Anna Rogers,
+Jordan Boyd-Graber, and Naoaki Okazaki (eds.), Proceedings of the 61st Annual Meeting of the
+Association for Computational Linguistics (Volume 1: Long Papers), pp. 6846-6857, Toronto, Canada,
+July 2023b. Association for Computational Linguistics. doi: 10.18653/v1/2023.acl-long.378. URL
+
+ttps://aclanthology.org/2023.acl-long.378
+Xu Chen, Zhenlei Wang, Hongteng Xu, Jingsen Zhang, Yongfeng Zhang, Wayne Xin Zhao, and Ji-Rong
+Wen. Data augmented sequential recommendation based on counterfactual thinking. [EEE Transactions
+on Knowledge and Data Engineering, 35(9):9181-9194, 2023c. doi: 10.1109/TKDE.2022.3222070.
+
+Yizhou Dang, Enneng Yang, Guibing Guo, Linying Jiang, Xingwei Wang, Xiaoxiao Xu, Qinghui Sun, and
+Hong Liu. Ticoserec: Augmenting data to uniform sequences by time intervals for effective recommendation.
+IEEE Transactions on Knowledge and Data Engineering, 36(6):2686—2700, 2024. doi: 10.1109/TKDE.2023.
+3324312.
+
+Sourish Dasgupta, Ankush Chander, Tanmoy Chakraborty, Parth Borad, and Isha Motiyani. PerSEval:
+Assessing personalization in text summarizers. Transactions on Machine Learning Research, 2024. ISSN
+
+2835-8856. URL |https: //openreview. net/forum?id=yqT7eBz1VJ
+
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, Xiaokang Zhang, Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhihong
+Shao, Zhuoshu Li, Ziyi Gao, Aixin Liu, Bing Xue, Bingxuan Wang, Bochao Wu, Bei Feng, Chengda
+Lu, Chenggang Zhao, and Chengqi et al. Deepseek-r1: Incentivizing reasoning capability in llms via
+
+reinforcement learning, 2025. URL https: //arxiv.org/abs/2501.12948
+
+Zi-Yi Dou, Pengfei Liu, Hiroaki Hayashi, Zhengbao Jiang, and Graham Neubig. GSum: A general frame-
+work for guided neural abstractive summarization. In Kristina Toutanova, Anna Rumshisky, Luke
+Zettlemoyer, Dilek Hakkani-Tur, Iz Beltagy, Steven Bethard, Ryan Cotterell, Tanmoy Chakraborty,
+and Yichao Zhou (eds.), Proceedings of the 2021 Conference of the North American Chapter of the
+Association for Computational Linguistics: Human Language Technologies, pp. 4830-4842, Online,
+June 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.naacl-main.384. URL
+
+ttps://aclanthology.org/2021.naacl-main. 384
+
+Alexander Fabbri, Irene Li, Tianwei She, Suyi Li, and Dragomir Radev. Multi-news: A large-scale multi-
+document summarization dataset and abstractive hierarchical model. In Anna Korhonen, David Traum,
+and Lluis Marquez (eds.), Proceedings of the 57th Annual Meeting of the Association for Computational
+Linguistics, pp. 1074-1084, Florence, Italy, July 2019. Association for Computational Linguistics. doi:
+
+10.18653/v1/P19-1102. URL |https://aclanthology.org/P19-1102
+
+21
+
+
+
+Alexander Fabbri, Simeng Han, Haoyuan Li, Haoran Li, Marjan Ghazvininejad, Shafiq Joty, Dragomir Radev,
+and Yashar Mehdad. Improving zero and few-shot abstractive summarization with intermediate fine-tuning
+and data augmentation. In Kristina Toutanova, Anna Rumshisky, Luke Zettlemoyer, Dilek Hakkani-Tur,
+Iz Beltagy, Steven Bethard, Ryan Cotterell, Tanmoy Chakraborty, and Yichao Zhou (eds.), Proceedings
+of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics:
+Human Language Technologies, pp. 704-717, Online, June 2021. Association for Computational Linguistics.
+
+doi: 10.18653/v1/2021.naacl-main.57. URL https: //aclanthology.org/2021.naacl-main.57/
+
+Shivam Grover, Amin Jalali, and Ali Etemad. Segment, shuffle, and stitch: A simple layer for improving
+time-series representations. In A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak,
+and C. Zhang (eds.), Advances in Neural Information Processing Systems, volume 37, pp. 4878-4905.
+Curran Associates, Inc., 2024. URL
+
+Junxian He, Wojciech Kryscinski, Bryan McCann, Nazneen Rajani, and Caiming Xiong. CTRLsum: Towards
+generic controllable text summarization. In Yoav Goldberg, Zornitsa Kozareva, and Yue Zhang (eds.),
+Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing, pp. 5879—
+5915, Abu Dhabi, United Arab Emirates, December 2022. Association for Computational Linguistics. doi:
+
+10.18653/v1/2022.emnlp-main.396. URL https: //aclanthology.org/2022.emnlp-main. 396/
+
+Karl Moritz Hermann, Tomas Ko¢éisky, Edward Grefenstette, Lasse Espeholt, Will Kay, Mustafa Suleyman,
+and Phil Blunsom. Teaching machines to read and comprehend. In Proceedings of the 28th International
+Conference on Neural Information Processing Systems - Volume 1, NIPS’15, pp. 1693-1701, Cambridge,
+MA, USA, 2015. MIT Press.
+
+Zhiting Hu, Bowen Tan, Ruslan Salakhutdinov, Tom Mitchell, and Eric P. Xing. Learning data manipulation
+for augmentation and weighting. Curran Associates Inc., Red Hook, NY, USA, 2019.
+
+Albert Q Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, et al. Mistral 7b.
+arXiv e-prints, pp. arXiv—2310, 2023.
+
+Yang Jiao, Fan Yang, Yetian Chen, Yan Gao, Jia Liu, and Yi Sun. Rethinking sequential relationships:
+Improving sequential recommenders with inter-sequence data augmentation. In Companion Proceedings
+of the ACM Web Conference 2024, WWW ’24, New York, NY, USA, 2024. Association for Computing
+Machinery. ISBN 9798400701726.
+
+Hannah Rose Kirk, Bertie Vidgen, Paul Rottger, and Scott A Hale. The benefits, risks and bounds of
+personalizing the alignment of large language models to individuals. Nature Machine Intelligence, pp. 1-10,
+2024.
+
+Frederic Kirstein, Terry Ruas, Robert Kratel, and Bela Gipp. Tell me what I need to know: Exploring
+LLM-based (personalized) abstractive multi-source meeting summarization. In Franck Dernoncourt,
+Daniel Preotiuc-Pietro, and Anastasia Shimorina (eds.), Proceedings of the 2024 Conference on Empirical
+Methods in Natural Language Processing: Industry Track, pp. 920-939, Miami, Florida, US, November
+2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.emnlp-industry.69. URL |https:|
+//aclanthology.org/2024.emnlp-industry.69/
+
+Suchetha N. Kunnath, David Pride, and Petr Knoth. Prompting strategies for citation classification. In
+Proceedings of the 32nd ACM International Conference on Information and Knowledge Management,
+CIKM ’23, pp. 1127-1137, New York, NY, USA, 2023. Association for Computing Machinery. ISBN
+
+9798400701245. doi: 10.1145/3583780.3615018. URL |https: //doi.org/10.1145/3583780. 3615018
+
+Ming Li, Mozhdeh Ariannezhad, Andrew Yates, and Maarten de Rijke. Masked and swapped sequence
+modeling for next novel basket recommendation in grocery shopping. In Proceedings of the 17th ACM
+Conference on Recommender Systems, RecSys ’23, pp. 35-46, New York, NY, USA, 2023. Association for
+
+Computing Machinery. ISBN 9798400702419. doi: 10.1145/3604915.3608803. URL https: //doi.org/10
+1145/3604915. 3608803
+
+22
+
+
+Junhong Lian, Xiang Ao, Xinyu Liu, Yang Liu, and Qing He. Panoramic interests: Stylistic-content aware
+personalized headline generation. In Companion Proceedings of the ACM on Web Conference 2025, 2025.
+
+Chin-Yew Lin. ROUGE: A package for automatic evaluation of summaries. In Text Summarization
+Branches Out, pp. 74-81, Barcelona, Spain, July 2004. Association for Computational Linguistics. URL
+https: //aclanthology.org/W04-1013
+
+Yujie Lin, Chenyang Wang, Zhumin Chen, Zhaochun Ren, Xin Xin, Qiang Yan, Maarten de Rijke, Xiuzhen
+
+Cheng, and Pengjie Ren. A self-correcting sequential recommender, 2023. URL https: //arxiv.org/abs/
+
+Chong Liu, Xiaoyang Liu, Ruobing Xie, Lixin Zhang, Feng Xia, and Leyu Lin. Learning from all sides:
+Diversified positive augmentation via self-distillation in recommendation. CoRR, abs/2308.07629, 2023.
+URL https://doi.org/10.48550/arXiv. 2308 .07629
+
+Ruibo Liu, Jerry Wei, Fangyu Liu, Chenglei Si, Yanzhe Zhang, Jinmeng Rao, Steven Zheng, Daiyi Peng, Diyi
+Yang, Denny Zhou, and Andrew M. Dai. Best practices and lessons learned on synthetic data. In First
+
+Conference on Language Modeling, 2024. URL https: //openreview. net/forum?id=OJaWBhh61C
+
+Yongtai Liu, Joshua Maynez, Goncalo Simoes, and Shashi Narayan. Data augmentation for low-resource
+dialogue summarization. In Marine Carpuat, Marie-Catherine de Marneffe, and Ivan Vladimir Meza Ruiz
+(eds.), Findings of the Association for Computational Linguistics: NAACL 2022, pp. 703-710, Seattle,
+United States, July 2022. Association for Computational Linguistics. doi: 10.18653/v1/2022.findings-naacl.
+53. URL https: //aclanthology..org/2022. Findings-naacl..53/)
+
+Zhiwei Liu, Ziwei Fan, Yu Wang, and Philip S. Yu. Augmenting sequential recommendation with pseudo-
+prior items via reversely pre-training transformer. In Proceedings of the 44th International ACM SIGIR
+Conference on Research and Development in Information Retrieval, SIGIR ’21. ACM, July 2021. doi:
+
+10.1145 /3404835.3463036. URL http: //dx.doi.org/10.1145/3404835. 3463036
+
+Shumpei Okura, Yukihiro Tagami, Shingo Ono, and Akira Tajima. Embedding-based news recommendation
+for millions of users. In Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge
+Discovery and Data Mining, KDD ’17, pp. 1933-1942, New York, NY, USA, 2017. Association for Computing
+Machinery. ISBN 9781450348874. doi: 10.1145/3097983.3098108. URL|https: //doi. org/10. 1145/3097983 |
+
+3098108
+
+Siru Ouyang, Jiaao Chen, Jiawei Han, and Diyi Yang. Compositional data augmentation for abstractive
+conversation summarization. In Anna Rogers, Jordan Boyd-Graber, and Naoaki Okazaki (eds.), Proceedings
+of the 6lst Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),
+pp. 1471-1488, Toronto, Canada, July 2023. Association for Computational Linguistics. doi: 10.18653/v1/
+2023.acl-long.82. URL [https: //aclanthology .org/2023. acl-Long.82/)
+
+Sangwon Park, Hongseok Choi, Dongha Choi, and Hyunju Lee. GENDEX: Generative data augmentation
+strategy leveraging external data for abstractive dialogue summarization. In Lun-Wei Ku, Andre Martins,
+and Vivek Srikumar (eds.), Findings of the Association for Computational Linguistics: ACL 2024, pp.
+3171-3185, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/
+
+2024.findings-acl.188. URL https: //aclanthology.org/2024.findings-acl.188/
+
+Nils Reimers and Iryna Gurevych. Sentence-bert: Sentence embeddings using siamese bert-networks. In
+Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing. Association
+
+for Computational Linguistics, 11 2019. URL https: //arxiv.org/abs/1908 . 10084
+
+Pranab Sahoo, Ayush Kumar Singh, Sriparna Saha, Vinija Jain, Samrat Mondal, and Aman Chadha. A
+systematic survey of prompt engineering in large language models: Techniques and applications, 2024.
+
+URL https: //arxiv.org/abs/2402.07927
+
+Gaurav Sahu, Olga Vechtomova, and Issam H. Laradji. A guide to effectively leveraging Ilms for low-
+resource text summarization: Data augmentation and semi-supervised approaches, 2025. URL
+//arxiv.org/abs/2407 .07341
+
+23
+
+
+Yun-Zhu Song, Yi-Syuan Chen, Lu Wang, and Hong-Han Shuai. General then personal: Decoupling and pre-
+training for personalized headline generation. Transactions of the Association for Computational Linguistics,
+
+11:1588-1607, 2023. doi: 10.1162/tacl_a_00621. URL https: //aclanthology.org/2023.tacl-1.90/
+
+Md Arafat Sultan, Jatin Ganhotra, and Ramon Fernandez Astudillo. Structured chain-of-thought prompting
+for few-shot generation of content-grounded QA conversations. In Yaser Al-Onaizan, Mohit Bansal, and
+Yun-Nung Chen (eds.), Findings of the Association for Computational Linguistics: EMNLP 2024, pp.
+16172-16187, Miami, Florida, USA, November 2024. Association for Computational Linguistics. doi:
+
+10.18653/v1/2024.findings-emnlp.948. URL https: //aclanthology.org/2024.findings-emnlp.948/
+
+Shichao Sun, Ruifeng Yuan, Ziqiang Cao, Wenjie Li, and Pengfei Liu. Prompt chaining or stepwise
+prompt? refinement in text summarization. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar (eds.),
+Findings of the Association for Computational Linguistics: ACL 2024, pp. 7551-7558, Bangkok, Thailand,
+August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.findings-acl.449. URL
+https: //aclanthology.org/2024.findings-acl.449/
+
+Maartje Ter Hoeve, Julia Kiseleva, and Maarten Rijke. What makes a good and useful summary? Incorporating
+users in automatic summarization research. In Marine Carpuat, Marie-Catherine de Marneffe, and
+Ivan Vladimir Meza Ruiz (eds.), Proceedings of the 2022 Conference of the North American Chapter of
+the Association for Computational Linguistics: Human Language Technologies, pp. 46-75, Seattle, United
+States, July 2022. Association for Computational Linguistics. doi: 10.18653/v1/2022.naacl-main.4. URL
+https: //aclanthology.org/2022.naacl-main.4
+
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open foundation and
+fine-tuned chat models. arXiv e-prints, pp. arXiv—2307, 2023.
+
+Rahul Vansh, Darsh Rank, Sourish Dasgupta, and Tanmoy Chakraborty. Accuracy is not enough: Evaluating
+personalization in summarizers. In Findings of the Association for Computational Linguistics: EMNLP
+2023, pp. 2582-2595, Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/
+
+v1/2023.findings-emnlp.169. URL https: //aclanthology.org/2023.findings-emnlp. 169
+
+Michael Volske, Martin Potthast, Shahbaz Syed, and Benno Stein. TL;DR: Mining Reddit to learn automatic
+summarization. In Lu Wang, Jackie Chi Kit Cheung, Giuseppe Carenini, and Fei Liu (eds.), Proceedings
+of the Workshop on New Frontiers in Summarization, pp. 59-63, Copenhagen, Denmark, September 2017.
+Association for Computational Linguistics. doi: 10.18653/v1/W17-4508. URL
+
+Jianing Wang, Qiushi Sun, Xiang Li, and Ming Gao. Boosting language models reasoning with chain-of-
+
+knowledge prompting, 2024. URL https: //arxiv.org/abs/2306. 06427
+
+Jianling Wang, Ya Le, Bo Chang, Yuyan Wang, Ed H. Chi, and Minmin Chen. Learning to augment for
+casual user recommendation. In Proceedings of the ACM Web Conference 2022, WWW ’22, pp. 2183-
+2194, New York, NY, USA, 2022. Association for Computing Machinery. ISBN 9781450390965. doi:
+
+10.1145 /3485447.3512147. URL https: //doi.org/10.1145/3485447. 3512147
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed Chi, Quoc Le,
+and Denny Zhou. Chain-of-thought prompting elicits reasoning in large language models, 2023. URL
+
+https: //arxiv.org/abs/2201.11903
+
+Chuhan Wu, Fangzhao Wu, Mingxiao An, Jianqiang Huang, Yongfeng Huang, and Xing Xie. Neural news rec-
+ommendation with attentive multi-view learning. In Proceedings of the Twenty-Eighth International Joint
+Conference on Artificial Intelligence. International Joint Conferences on Artificial Intelligence Organization,
+2019a.
+
+Chuhan Wu, Fangzhao Wu, Suyu Ge, Tao Qi, Yongfeng Huang, and Xing Xie. Neural news recommen-
+dation with multi-head self-attention. In Proceedings of the 2019 Conference on Empirical Methods in
+Natural Language Processing and the 9th International Joint Conference on Natural Language Processing
+
+24
+
+
+(EMNLP-IJCNLP), pp. 6389-6394, Hong Kong, China, November 2019b. Association for Computational
+
+Linguistics. doi: 10.18653/v1/D19-1671. URL https: //aclanthology.org/D19-1671
+
+Fangzhao Wu, Ying Qiao, Jiun-Hung Chen, Chuhan Wu, Tao Qi, Jianxun Lian, Danyang Liu, Xing Xie,
+Jianfeng Gao, Winnie Wu, and Ming Zhou. MIND: A large-scale dataset for news recommendation. In
+Dan Jurafsky, Joyce Chai, Natalie Schluter, and Joel Tetreault (eds.), Proceedings of the 58th Annual
+Meeting of the Association for Computational Linguistics, pp. 3597-3606, Online, July 2020. Association
+
+for Computational Linguistics. doi: 10.18653/v1/2020.acl-main.331. URL https: //aclanthology.org/
+2020. acl-main. 331
+
+Jing Xiao, Weike Pan, and Zhong Ming. A generic behavior-aware data augmentation framework for
+sequential recommendation. In Proceedings of the 47th International ACM SIGIR Conference on Research
+and Development in Information Retrieval, SIGIR ’24, pp. 1578-1588, New York, NY, USA, 2024a.
+Association for Computing Machinery. ISBN 9798400704314. doi: 10.1145/3626772.3657682. URL
+
+https: //doi.org/10.1145/3626772. 3657682
+
+Wen Xiao, Yujia Xie, Giuseppe Carenini, and Pengcheng He. Personalized abstractive summarization by
+tri-agent generation pipeline. In Yvette Graham and Matthew Purver (eds.), Findings of the Association
+for Computational Linguistics: EACL 2024, pp. 570-581, St. Julian’s, Malta, March 2024b. Association
+
+for Computational Linguistics. URL https: //aclanthology.org/2024.findings-eacl .39/
+
+Zhao Yang, Junhong Lian, and Xiang Ao. Fact-preserved personalized news headline generation. 2023 IEEE
+International Conference on Data Mining (ICDM), 2023.
+
+Jiacheng Ye, Shansan Gong, Liheng Chen, Lin Zheng, Jiahui Gao, Han Shi, Chuan Wu, Xin Jiang, Zhen-
+guo Li, Wei Bi, and Lingpeng Kong. Diffusion of thought: Chain-of-thought reasoning in diffusion
+language models. In A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomezak, and
+
+C. Zhang (eds.), Advances in Neural Information Processing Systems, volume 37, pp. 105345-105374.
+
+Curran Associates, Inc., 2024. URL
+
+be30024e7fa2c29cac/7a6dafcbb8571f-Paper-Conference. pdf
+
+Mingjia Yin, Hao Wang, Wei Guo, Yong Liu, Suojuan Zhang, Sirui Zhao, Defu Lian, and Enhong Chen.
+Dataset regeneration for sequential recommendation. In Proceedings of the 30th ACM SIGKDD Conference
+on Knowledge Discovery and Data Mining, KDD ’24, pp. 3954-3965. ACM, August 2024. doi: 10.1145/
+
+3637528.3671841. URL http: //dx.doi.org/10.1145/3637528. 3671841
+
+Lemei Zhang, Peng Liu, Marcus Tiedemann Oekland Henriksboe, Even W. Lauvrak, Jon Atle Gulla, and
+Heri Ramampiaro. Personalsum: A user-subjective guided personalized summarization dataset for large
+language models. In The Thirty-eight Conference on Neural Information Processing Systems Datasets and
+
+Benchmarks Track, 2024. URL https: //openreview. net/forum?id=ETZk7lqyaF
+
+A Measuring Degree-of-Personalization
+
+A.1 Motivation
+
+Vansh et al.| (2023) proposed EGISES— a metric to measure the degree of insensitivity-to-subjectivity for
+
+relative benchmarking of how much models lack personalization (i.e., a lower score is better within the range
+(0, 1]) instead of assigning an absolute goodness score. Based on this notion, they defined (summary-level)
+
+“deviation” of a model Mg,,,(later termed as Degree-of-Responsiveness (DEGRESS) by|Dasgupta et al.) (2024))
+
+as follows:
+
+Definition 3. Summary-level DEGRESS. Given a document d; and a user-profile ui; (user j’s expected
+summary), the summary-level responsiveness of a personalized model Mo,u, (i.e., DEGRESS(sx,,|(di, uij))), ts
+defined as the proportional divergence between model-generated summary 8u,, of d; for j-th user from other
+user-specific summary versions w.r.t. a corresponding divergence of ui; from the other user-profiles.
+
+25
+
+
+min( Xijks Yup) +e
+
+DEGRESS(s,,.. dj, Ui;) 8
+( Uig ( ty Wag (Xijn, Yigk) + € ( )
+exp(w(Uui;|Usk exp(W(Su4;|Suix))
+Xijzk =~ aes rt ul : D , o (wiz, Vik) Yijr ~ |Ua,| — , F(Suj;+Suix)s
+D exp(w(ui;|wir)) D2 exp(w(su,;|8ui))
+t=1 l=1
+O (tj, Wik) F( Siig Sinz.)
+w(ujj|Uuse) = 7“ —~, w(Su;;|Su;,) = ——~——.
+
+Here, |D| is the total number of documents in the evaluation dataset, |U| is the total number of users
+who created gold-reference summaries that reflect their expected summaries (and thereby, their subjective
+preferences), (= |Sq,|) is the number of users who created gold-references for document d;. w is
+the divergence of the model-generated summary s,,, (and the corresponding expected summary u;;) from
+document d; itself in comparison to all the other versions. It helps to determine how much percentage
+(therefore, the softmax function) of the divergence (i.e., o(Su;;,Su,,) Should be considered for the calculation
+of DEGRESS. If s,,,, is farther than s,,, w.r.t d; then DEGRESS(s,,,,|(di, uij)) < DEGRESS(s,,,,,|(di, Wiz)), implying
+that Mg, is more responsive to the k-th reader. A lower value of DEGRESS(s,,,,|(d;, uij)) indicates that while
+reader-profiles are different, the generated summary s,,,, is very similar to other reader-specific summaries
+(or vice versa), and hence, is not responsive at the summary-level. The system-level DEGRESS and EGISES
+have been formulated as follows:
+
+IDI Ua, |
+DEGRESS(s,,,.
+DEGRESS( Mg.) = pS Ee 1 (Sue,
+
+(di, tig)
+
+A.2 PerSEval: Formulation
+
+As can be noted, the DEGRESS formualtion does not enforce any penalty on accuracy drop. To
+rectify this [Dasgupta et al.| proposed PerSEval. The design of PerSEval had two key goals: (i) to
+penalize models for poor accuracy, while simultaneously (ii) ensuring that the evaluation of responsiveness
+(i.e., DEGRESS) is not overshadowed by high accuracy. This penalty is referred to as the Effective DEGRESS
+Penalty Factor (EDP). If a model achieves 100% accuracy, no EDP will be applied, and the PerSEval score will
+equal the DEGRESS score. The following formulation of PerSEval guarantees these properties:
+
+1
+EDP(s,,,.|(di, uij)) = 1 5
+(s ig (dz, waz) 1+ 10023 exp(— 1082! p(su,, (di, uiz)))
+P( Suis |(Gis Wag) = ADP( Sux |(di, Uae) + ACP(Su.;|(di, Wig). (10)
+
+Here, ADP is a document-level penalty due to a drop in accuracy for the best-performance of the model
+(ie., the model-generated summary of document d; (sy,,) is closest to the corresponding reader’s expected
+summary u;;). ADP is formulated as follows:
+
+1
+
+> o* (Suze Vie )|di—0
+1or4 exp( a Goan aa ayee)
+
+ADP( Sux | (dis Uix)) =
+
+|Ua,|
+
+where o*(Su,,,Uie)|di = min O(Su;;>Uij)|di- (11)
+j=
+
+26
+
+
+ADP ensures that even if the DEGRESS score is acceptable, a penalty due to accuracy drop can still be imposed
+as a part of EDP. ADP, however, fails to address the scenario where the best-case scenario is acceptable
+(ie., accuracy is fairly high) but is rather an outlier case — i.e., for most of the other model-generated
+summary versions, there is a considerable accuracy drop. To address this issue, the second penalty component
+within EDP called Accuracy-inconsistency Penalty (ACP) was introduced which evaluates whether a model
+consistently performs w.r.t accuracy for a specific generated summary compared to its average performance.
+ACP is formulated as:
+
+ACP (Suc, |(di, tig) = oom PP Cig, at
+1+ lov=4 exp( 10 GG tie EHO Bag re 1A =)
+1 |Ua, |
+where G(Su,,,Uie)|di = wT, S> o(Suis, tig) Idi (12)
+
+1
+
+a
+
+The system-level PerSEval € [0,1] and is bounded by the system-level DEGRESS score.
+
+PerSEval-RG-SU4. (or PSE-SU4) is the PerSEval variant that uses ROUGE-SU4 as a distance
+metric (i.e., 7) in the PerSEval formula. PSE-SU4 has been reported to have high human-judgment correlation
+(Pearson’s r: 0.6; Spearman’s p: 0.6; Kendall’s 7: 0.51) [Dasgupta et al.| (2024). The ROUGE-SU4 score is
+based on skip-bigrams, which are pairs of words that appear in the same order within a sentence but can
+have up to four other words between them. The formula is as follows:
+
+For a given generated summary G and reference summary R, the ROUGE-SU4 score is calculated as:
+
+Skip-Bigram Recall (Rgy4):
+
+Count of matching skip-bigrams between G and R
+
+R. =
+sua Total skip-bigrams in R
+
+Skip-Bigram Precision (Psy):
+
+Count of matching skip-bigrams between G and R
+Total skip-bigrams in G
+
+Psu4 =
+
+F1 Score (F1lgy4): The F1 score is the harmonic mean of precision and recall:
+
+2x Psua X Rgua
+
+Fi =
+Sua Psua + Rsua
+
+Where:
+
+e A skip-bigram consists of two words in the correct order but with zero to four words skipped in
+between.
+
+e Matching skip-bigrams are counted between the generated summary and the reference summary.
+
+The final ROUGE-SU4 score is typically reported as the Fl measure, balancing precision and recall.
+
+B_ Dataset and Statistics
+PENS The PENS dataset (2021) includes 113,762 news articles across 15 topics. Each article
+
+contains an ID, title (avg. 10.5 words), body (avg. 549 words), and category, with titles linked to the
+WikiData entities. The dataset also includes user interaction data, such as impressions and click behaviors,
+
+27
+
+
+ary Model A Model B Model C Manually-written
+St ski St :
+mee P “ee Headline] Headline2 —_ Headline3 Headling-hnuman
+
+One Two
+
+score, Score score;
+
+hy wile Headline2 = Headline3 Headline-human
+
+Figure 5: Two stage PENS test data (original) creation (2021): Stage 1 - Participants selected
+50+ preferred headlines from 1,000 shown titles; Stage 2 - They rewrote headlines for 200 unseen articles
+using only news bodies, without seeing original titles.
+
+combined with news bodies and headlines from the MIND dataset (2020). For training, 500k
+user-news impressions were sampled from June 13 to July 3, 2019. Each log records user interaction as [uID,
+tmp, clkNews, uclkNews, clkedHis], where ‘clkNews’ and ‘uclkNews’ represent clicked and unclicked news,
+and ‘clkedHis’ refers to the user’s prior clicked articles, sorted by click time. To create an offline testbed,
+103 English-speaking students reviewed 1,000 headlines in stage-1, and then selected 50 articles, and created
+preferred headlines (i.e., expected gold-reference summaries) for 200 unseen articles in stage-2 (see Figure 5).
+Each article was reviewed by four participants. Editors checked for factual accuracy, discarding incorrect
+headlines. The high-quality remaining headlines serve as personalized gold-standard references in the PENS
+pntaen oi cone ral] Far] G03 a (Waar = uaa), (Cara all oa at) (OOS us ear at E055). The eta task [Ao]
+
+a Gat Bag oe are given in cations
+
+OpenAI (Reddit). The OpenAI (Reddit) dataset {Volske et al.| (2017) comprises 123,169 Reddit posts
+collected from 29 distinct subreddits. This dataset provides both OpenAI-generated and human-written
+summaries and is organized into two splits: Comparisons, used for training and validation, and Axis, designated
+for validation and testing. A curated subset of 1,038 posts was processed by 13 different summarization
+policies, resulting in the generation of 7,713 summaries. These summaries underwent evaluation by 64
+annotators who rated paired summaries based on selection preferences, confidence in their ratings, and
+dimensions such as accuracy, coherence, coverage, and overall quality (see Table[9] for details). Notably, unlike
+datasets like PENS, these summaries are not linked to individual annotators or their reading histories, which
+means they lack elements of personalization and contextual user information. The detailed statistics are
+given in Table [9]
+
+C_ Baselines
+
+Here, we discuss in details the baseline augmentation strategies, user-encoders and summarization frameworks.
+
+C.1 Baseline Augmentations
+
+We compare PerAugy with three SOTA algorithmic augmentation methods and three LLM-as-augmentors,
+and create corresponding UIGs for each of the augmentation methods. The statistical analysis of UIGs are
+given in Table We describe each method as follows:
+
+PENS-SH. We choose PENS-SH [Song et al.| (2023), a SOTA PENS-based synthetic data generator for
+personalized summarization, as a comparative baseline w.r.t user-encoder accuracy boost. PENS-SH merges
+multiple (say, m) seed UIG trajectories {r“/-!'"" } from the PENS train dataset (Tein) into a single synthetic
+trajectory ae ‘gf, Such that all the common d-nodes on 7 gf; are unique to it, thereby forming the pool 7,f3".
+We analyze the diversity of the PENS-SH trajectories in 7,25" when a with s-nodes from the PENS
+
+test dataset, denoted T*¥"-PSH as UIG of PENS-SH, following Section
+
+28
+
+
+Characteristic Dimension Value
+
+Article Stats
+
+# Topics 15
+# Articles 113,762
+General Stats Avg. Title Length 10.5 words
+Avg. Body Length 549 words
+Train Dataset Statistics
+# User—News Impressions (anon.) 500,000
+F # Users (anon.) 445,000
+Interaction Data Time Period June 13—July 3, 2019
+User Interaction Fields [ulD, tmp, clkNews, uclkNews, clkedHis]
+Test Dataset Statistics
+# Participants 103
+Participant Category English-speaking college students
+Participant Stats # Articles 3,940
+Browsed Headlines (Click + Skip) 1,000 per participant
+Min. Interested (Click) Headlines 50 per participant
+Gold Reference Summarized Article Bodies 200 per participant
+(Participant-written Headlines) Avg. Summaries per Article 4
+
+Table 8: PENS dataset (original) statistics: Here the ‘clkNews’ and ‘uclkNews’ indicate clicked and
+un-clicked (i.e., skipped) news; ‘clkedHis’ refers to the user’s prior clicked articles, all sorted by click time;
+news bodies and headlines sourced from the MIND dataset (2020); Test dataset is created in two
+stages (see Figure [5).
+
+S3-Aug. We choose $3 (Segment-Shuffle-Stitch) (2024), a modular neural intra-trajectory
+
+augmentation mechanism designed for sequential data, as a comparative baseline. $3 restructures user
+interaction sequences 7“ by dividing them into n non-overlapping segments, followed by a differentiable
+shuffling and stitching operation on 7;£,;,, to yield augmented trajectories tae? that preserve local coherence
+while introducing temporal perturbations. The resulting $3-augmented trajectories 7,23,, are used to train
+user-encoders, and we evaluate its diversity after incorporating s-nodes from PENS testbed (denoting the
+UIG of it as T*” n-S3) and further effect on user encoders as compared to PerAugy.
+
+SDAInter. We include SDAInter as a cross-trajectory augmentation baseline that
+generates pseudo user sequences by identifying interchangeable subsequences in 7,2; between different
+user trajectories based on shared anchor items. If the subsequences between two users meet a minimum
+IoU-based interchangeability confidence C' > T., they are swapped to create new synthetic trajectories ree
+The resulting SDAInter-augmented pool 7,324 is evaluated for its effect on user-encoder performance and
+compared against PerAugy, along with evaluation of T°"-SP4 (synthetic UIG version of SDAInter augmented
+
+trajectories by incorporating intermediate s-nodes) for DegreeD.
+
+LLM-as-Augmentor. We also compare our method against three popular LLMs — Llama-2-13B
+(2023), Mistral-v2-Instruct |Jiang et al. , and DeepSeek-7b-chat (2025) in two
+prompt-based settings - 1) Chain-of-Thoughts|Wei et al.| (2023) which involves guiding an LLM through a
+series of logical reasoning steps to solve a task . Using LLaMA-2-13B as the base model, we
+design a CoT prompt with detailed step-by-step instructions to logically generate a personalized summary
+based on a user’s interaction history (see Figure[9), and 2) Prompt-Chaining |Sahoo et al.| which is a
+technique that involves using a series of prompts to deconstruct a task into sequential steps. Our prompt-
+chaining setup consists of two sequential tasks. In the first task (step-1), the LLM generates user interactions
+in the form of (document, action) pairs, simulating user behavior (e.g., clicks, skips). In step-2, using few-shot
+prompting, the LLM generates a personalized summary, conditioned on both the input document and the
+user interactions generated in step-1. Each few-shot prompt contains four in-context examples (see Figure
+
+29
+
+
+Characteristic Dimension Value
+
+Dataset Overview
+
+# Reddit Posts 123,169
+# Subreddits (Domains) 29
+General. Btats Policy-Generated Summaries 115,579
+Human-Written Summaries Available
+Train + Validation Dataset Statistics
+# Reddit Posts 21,111
+# Policies 81
+Article Stats # Generated Summaries 107,866
+# Annotators 76
+# Summary-Pairs Rated 64,832
+Validation Subset Statistics
+# Reddit Posts 1,038
+: # Policies 13
+Subset: Details # Generated Summaries 7,713
+# Annotators 32
+Test Dataset (RLHF-Tuned Policies) Statistics
+## Evaluated Policies 4
+Evaluation Stats # Evaluated Reddit Posts 57 (out of 1,038)
+Evaluation Method Indirect Benchmarking
+Annotation and Feedback
+Rating Scale 1-7
+: Confidence Scale 1-9
+Reedbadk Collestion Avg. Ratings per Annotator 1,176
+Annotation Format Summary-Pairs Selection
+
+Table 9: OpenAI TL;DR (Reddit) dataset statistics: The dataset includes 123,169 Reddit posts across
+29 subreddits, with policy-generated and human-written summaries. Evaluation involves summary-pair
+ratings and RLHF-tuned policy benchmarking.
+
+{10}. These generated trajectories are then subsequently used to train user-encoder models (as described in
+
+Section (5.1.2).
+
+C.2 Baseline User-Encoders
+
+In this section We discuss SOTA news headline recommendation models which were used as baseline
+user-encoders to understand the effect of PerAugy generated training data.
+
+NAML. Neural News Recommendation with Attentive Multi-View Learning (NAML)
+is a neural news recommendation approach that learns informative representations of users and news by
+exploiting different kinds of news information. The core of this approach is a user-encoder and a news
+encoder where the news encoder learns unified news representations from titles, bodies, and topic categories
+by regarding them as different perspectives of the news, through an attentive multi-view learning model, and
+the user-encoder learns the representations of users based on their browsing history and applies attention
+mechanism to select informative news for user representation learning.
+
+NRMS. Neural News Recommendation with Multi-Head Self-Attention (NRMS) isa
+neural news recommendation where the core of the encoder is a news encoder that uses multi-head self-
+attention to learn news representations from news titles by modeling the interactions between words and a
+user-encoder which learns user representations from their browsed news and use multi-head self-attention
+
+30
+
+
+to capture relatedness between the news. Additive attention to learn more informative news and user
+representations is used, by selecting important words and news.
+
+EBNR. Embedding-based News Recommendation (EBNR) is an RNN-styled news
+recommendation approach that incorporates implicit negative user feedback by distinguishing positive
+and negative news clicks based on the reading dwell time of the news by the user, and learning the user
+representations from positive and negative samples via a combination of Transformer and additive attention
+network. It computes a final click score as a combination of positive click scores and negative click scores.
+
+TrRMIo. ‘Transfomer-based Recommendation Model [Song et al.| utilizes a personalized news recom-
+mendation model to represent users’ preferences derived from clicked records. The pre-trained transformer
+models are used for both recommendation and headline generation tasks, where a news encoder and a
+user-encoder is adopted for content-based recommendation. The textual information from the news encoder
+is aggregated via Attention Pooling, which is then further integrated by user representation. The user interest
+is defined on the basis of Click Through Rate (CTR) by examining the frequency of news articles in users’
+click histories and positive samples. The assumption is that user history consists of both popular news and
+interested news, where popular news has a higher CTR ranking across the users, while interested news has
+lower CTR ranks, depicting the personalized choice of that user to generate the user representation.This laid
+the foundation for Transformer-based Recommendation Model Interest-Only(TrRMIo), where news histories
+with lower CTR for a particular user is treated as his Interest-Only’ features.
+
+C.3. Baseline Personalized Summarizers
+
+To determine whether PerAugy-generated training data enhances the regularization of specialized Pretrained
+Language Models, improving PerSEval performance in personalized summarization tasks, we benchmark the
+PENS personalized summarization framework (2021) and the recent GTP personalized summarization
+
+framework (2023). We describe each of the frameworks as follows:
+
+PENS. The PENS framework employs a transformer-based encoder to process the news body and a pointer
+network-based decoder to generate headlines. The pointer mechanism is used to dynamically choose between
+generating words from a vocabulary and copying words directly from the news text, which helps in handling
+out-of-vocabulary words and maintaining factual consistency. To personalize the headline generator, three
+distinct injection strategies for incorporating user embeddings (learned from user behavior data using state-
+of-the-art news recommendation models as user-encoders) is proposed: (i) Decoder Initialization where
+the user embedding is used to initialize the decoder’s hidden state, so the generation process is conditioned
+from the very start on the user’s interests, (ii) Attention Perturbation where the user embedding is
+injected into the attention mechanism. This modulates the attention distribution over the news body words,
+effectively guiding the model to focus on parts of the text that align with the user’s preferences, and (iii)
+Generation-Copy Switch Adjustment where the user embedding is also used to perturb the probability
+(or “switch”) that determines whether the decoder generates a word from the vocabulary or copies a word
+from the news body. This helps ensure that the generated headline reflects personalized nuances rather than
+just summarizing the article content.
+
+GTP. General Then Personal (GTP) is a framework that tackles personalized headline generation by
+decoupling the task into two sequential stages. In stage 1, a Transformer-based encoder—decoder model (e.g.,
+BART) is pre-trained on large-scale news article-headline pairs to learn robust, content-focused headline
+generation without any personalization. In stage 2, a separate “headline customizer” takes the general
+headline and refines it by incorporating user-specific preferences. These preferences are encoded (control code)
+by the user-encoder TrRMIo. To bridge the gap between the general generation and personalized refinement,
+the authors introduce two key mechanisms: (i) Information Self-Boosting (ISB) that enhances the
+customization by reintroducing relevant content details from the news article to ensure that personalization
+does not lead to information loss, and (ii) Masked User Modeling (MUM) that helps the model learn to
+recognize and utilize the user control code by randomly masking parts of the user embedding during training
+and then reconstructing them, thereby reducing over-reliance on the general model parameters.
+
+31
+
+
+UIG # u-nodes (trajectories) # d-nodes/trajectory # s-nodes/trajectory Avg. traj. length Max. traj. length
+
+PENS 360K+ 83.78 1.94 85.72 2433
+PENS-SHt 197K 310.56 1.01 321.58 5106
+S3t 360K+ 79.40 2.20 83.20 2167
+SDAInter} 360K+ 87.60 2.80 123.60 1742
+LLaMA-2-13B} 2176 29.00 2.00 13.60 17
+Mistral-7Bt 5711 31.25 2.87 34.13 58
+DeepSeck-R1} 813 37.00 4.23 32.70 35
+OpenAl (Reddit) (OAI) 126K 25.19 4.82 30.02 54
+PerAugy{* 360K+ 123.70 5.10 129.80 200
+PerAugy-OAI* 360K+ 36.92 11.44 48.37 50
+
+Table 10: User-interaction graph (UIG) statistics. Two seed datasets are used: (i) PENS train dataset
+(Table [8) and (ii) OpenAI (Reddit) train dataset (Table [9). Baseline augmentation methods include: (a)
+PENS-synthetic-base (ours, marked *), (b) PENS-SH, (c) LLaMA-2-13B, (d) Mistral-7B, (e) DeepSeek-R1,
+and (f) PerAugy-PENS/OAI (ours). { indicates augmentation followed by UIG abstraction on the PENS
+dataset.
+
+D_ Encoder/Decoder Accuracy Metrics
+
+In this section, we provide a detailed formulation of the user-encoder accuracy metrics in the context of the
+next d-node prediction task.
+
+AUC. The Area Under the Curve (AUC) measures the probability that a randomly chosen positive d-node
+is ranked higher than a randomly chosen negative d-node in the test dataset 7,2... The formula is given as:
+
+1
+AUC = ———_ S° S© (5p > Sn) (13)
+IPLIN| oop new
+
+where:
+
+¢ P is the set of positive interactions (set of clicked d-nodes of all users in test data).
+e N is the set of negative items (set of skipped d-nodes of all users in test data).
+
+* s, is the predicted score for a positive d-node.
+
+e s, is the predicted score for a negative d-node.
+
+¢ 1(s, > Sp) is an indicator function that equals 1 if s, > s,, otherwise 0.
+
+e |P| and |N| are the number of positive and negative d-nodes, respectively.
+
+MRR. Mean Reciprocal Rank (MRR) evaluates how early the ground-truth target d-node appears in the
+
+ranking. It is defined as:
+1
+
+1
+MRR= 14
+|U| >» rank, (14)
+
+where:
+
+e U is the set of users.
+e rank, is the position of the first relevant d-node for user u; in the ranked recommendation list.
+
+e |U| is the total number of users.
+
+A higher MRR indicates that the target d-node is ranked closer to the top of the prediction list, improving
+user experience.
+
+32
+
+
+nDCG@k. Normalized Discounted Cumulative Gain at rank k (nDCG@k) evaluates the ranking quality
+by considering both the prediction score and the position of ground-truth target d-node. It is defined as:
+
+DCG@k sf
+DCGGk = ——"~ ; where: DCG@k = )> ——*!___; IDCG@ — 15
+" TDCGaR yaar CGek= Yate a OM!)
+
+Here:
+
+e s; is the prediction score of the target d-node at rank 7 in the recommended list.
+
+e s* is the actual score of the target d-node at rank in the ideal ranking (sorted by prediction score).
+
+e DCGQk is the Discounted Cumulative Gain up to rank k.
+
+e IDCGQk is the Ideal Discounted Cumulative Gain, representing the best possible ranking.
+
+A higher nDCG@k indicates that the target d-node is ranked higher, improving prediction effectiveness.
+
+E_ Algorithms
+In this section, we discuss the details of the algorithms used in our paper.
+
+UIG Construction We construct the User Interaction Graph (UIG) by parsing interaction logs from
+two types of seed datasets: (i) PENS-styled, where explicit click and skip behaviors are available, and (ii)
+OpenAI(Reddit)-styled, where user preferences are inferred from model confidence and summary quality
+ratings. The algorithm maps user interactions to document (d-node) and summary (s-node) nodes, while
+assigning appropriate behavioral edges such as click, skip, gensum, and sumgen to encode both explicit and
+inferred preferences.
+
+DegreeD Computation of UIGs In section [7.1] we described a special case where for every d-node in an
+UIG we have a corresponding s-node in every trajectory 7, which evidently is unrealistic. In reality, many of
+the d-nodes will not have a corresponding s-node and hence, the calculation of DePS cannot be done at every
+unit time-interval A(;, +,,,). This requires modification in the computing procedure so as to account for the
+
+missing s-nodes. To address this, the first "surrogate" s-node ai for the initial d-node d“) at time-step ty is
+assumed to be the same as the document’s title, as there is no prior preference history of a user at time-step
+t, and hence, subjectivity as a function of preference history does not arise yet. Let the first snode sts)
+
+occur at time-step ty (i-e., the first valid interval is Ai, 4,)). Therefore, DePSO(41-%) for j-th user is calculated
+as:
+
+Acta te) min(5[XO. te) ]q, [XAG | 5, J+
+reas ®]a, [X4%)],,) +e
+k-1
+
+= Lola), ar): 5xA ea], = 0( 5h, 5”)
+
+i=l
+
+DePS,
+
+d
+
+(16)
+
+where: 6[X41t%)]q
+
+DegreeD is then computed over all valid intervals as per equation [7] In this paper, we represent d-nodes
+and s-nodes with their embeddings generated from a lightweight S-BERT model
+and use Manhattan Distance as the distance metric o. It is important to note that DegreeD is
+fundamentally defined as a ratio of relative variations in distances between d- and s-nodes within the same
+interval (Equation [16). This formulation ensures that the metric only depends on how well s-nodes track the
+semantic drift of d-nodes, rather than on the absolute scale of any embedding space or distance function. In
+other words, any embedding model (e.g., SBERT, BERT, or domain-specific encoders) and any valid distance
+metric o (e.g., Manhattan, cosine, Euclidean) merely provide a representation space in which distances
+are computed, but the ratio-based structure of DegreeD cancels out biases due to embedding geometry or
+
+33
+
+
+Algorithm 1 UIG Construction
+
+Require: train data and test data, dataset_type
+Initialize T < 0
+for each user u in train_data do
+Initialize r% «+ 0
+for each interaction in u’s data do
+if dataset_type = PENS then
+Map interaction to d-node with click/skip edge
+else if dataset_type = OPENAI then
+if any model-generated summary for d-node has confidence score > threshold then
+Label as click
+Select best-rated summary by u as surrogate s-node
+Map to d-node and s-node with gensum and sumgen edges
+else
+Label as skip
+end if
+else
+Map rating to d-node with click/skip edge
+if rating is max then
+Map to d-node and s-node with gensum and summGen edges
+end if
+end if
+Append d-node to rT“
+end for
+Add r" to T
+end for
+if dataset_type = PENS then
+for each tT“ in T do
+if d € train data AND d € test data then
+Insert (d-s)-nodes from test_data as genSumm/summGen edges
+end if
+end for7 PENS) <7
+elseT
+end if
+
+metric scaling. Hence, DegreeD remains a model- and metric-agnostic measure of diversity, relying only on
+the relative alignment of document w.r.t. summary dynamics. In section |6} we empirically provide strong
+evidence that higher UIG DegreeD has strong correlation with user-encoder model accuracy when trained on
+such UIGs (DegreeD computation is in Algorithm [2). We compute the DegreeD of the PENS synthetic base
+pool Fem and find a very low DegreeD score of 0.009. The OpenAI (Reddit) synthetic base pool Tey Ol
+
+also shows low DegreeD of 0.0079.
+
+PerAugy: Double Shuffling — Algorithm Details The PerAugy framework enhances user interaction
+generalization by introducing two complementary augmentation strategies: Double Shuffling (DS) and
+Stochastic Markovian Perturbation (SMP). In DS (Algorithm 3), target user trajectories are systematically
+altered by substituting randomly selected segments from other users’ interaction histories. These substitutions
+occur at randomized offsets and are spaced by controlled gap lengths to maintain temporal realism and simulate
+cross-user behavioral blending. This process generates diversified yet structurally plausible trajectories,
+expanding the training distribution without deviating from feasible user behavior patterns.
+
+PerAugy: Stochastic Markovian Perturbation — Algorithm Details Following DS, the SMP stage
+
+(Algorithm [4) further refines the augmented trajectories by focusing on semantic consistency at the summary
+level. Specifically, newly introduced summaries are evaluated within a local Markovian window of recent
+
+34
+
+
+Algorithm 2 Computing DegreeD
+
+1: Input: Users U, Actions A, Summaries $, Documents D, window size w
+2: for each trajectory (U, A, D,S) do
+3: Dtotal = 0, Daist = (I, Duta =0
+for t; = 1 to |A|—1do
+Retrieve Dz, , Ut,
+if A;, is click/skip then
+Daist — o(Di, ) recess, a update Dua
+else if A;, = gen_summ then
+min(D;, ,D¢ €
+Diy = Duta, § = inant ee Daye
+P= se
+11: Deotalt =6:-P- a(U;,, U;,)
+12: end if
+13: end for
+14: D+= Deota/(|A| = 1)
+15: end for
+16: De D/|U|
+
+SPAS oe
+
+Algorithm 3 Double Shuffling (DS)
+
+Require: A UIG trajectory pool Thrace
+Ensure: Modified trajectory set
+- SampleWithoutleplacement (Tee m)
+
+sample size mand gap-length q
+
+ase?
+
+sartiiile base?
+m
+
+2: Ths — O
+
+3: for each target trajectory The net € T.ample 40
+
+4. O+« RandomOffset()
+
+5: Igups <- O
+
+6: for eae source trajectory Tscurce © Tsample: Where 1 # j do
+
+7: Tség * RandomSegment (7.64.0) {Select a trajectory segment of random length at random time-
+steps. I
+
+8: Tharget — Substitute( 73 cots Tigo Lsubs)
+
+9: Tsubs <— O + length(t3é,) + m {Determine substitution indices in tee caste ensuring that two source
+
+segments are separated by gap-length g;.}
+10: end for
+Uj Uj
+ll: Tg Ttarget
+tis
+12: Thg — TES U {ts}
+13: end for75
+
+document interactions, and replaced with top-ranked candidates based on a relevance score computed via
+RMSD (Root Mean Square Distance) similarity. These candidates are weighted by an exponential temporal
+decay factor to prioritize more recent contextual nodes, ensuring that substituted summaries align with
+short-term user interest profiles. Together, DS and SMP act in synergy to produce coherent, high-quality
+augmented data that preserves personalization cues while introducing controlled variability — a crucial
+property for training robust and generalizable user models in recommendation and summarization tasks.
+
+35
+
+
+Algorithm 4 Stochastic Markovian Perturbation (SMP)
+
+Require: DS trajectories 753, window k, decay A, top-p
+Ensure: perturbed set 7TgX;p
+1: Tsmp < 0
+2: for each tT € 734 do
+3: for each step t in tT do
+if s) newly substituted then
+Retrieve d“—), extract {st}, define window {c}
+for each st € d“-)) do
+I(st) — >, RMSD(st, c) e~*? 980)
+end for
+Rank {st}, pick top-p 8), replace s“
+10: end if
+11: end for
+12: Tgmp + Tgmp U {rT}
+13: end for7gmp
+
+Se AS oe
+
+F Stability of DegreeD Correlation Under Divergence Substitution
+
+F.1 Setup
+
+Let us assume a dataset D with users U. For each user j with trajectory length L,, define from
+
+IPC) = o(s(t), silts), 62 @ = o(d(ti), Ati) AY = ps ¥ 6)
+Let the timestep-level ratio be defined as: r) (i) = 5 (i) /69 (3), with
+
+DePS (i) = o(r()),  o(r) =
+At the same time, the penalty term is
+
+o(d(ti), 8j(ti)) +€
+
+(7) =
+pi) =
+o(d(ti+1), 8j(ti41)) +’
+and the expected penalized DePS
+1 ;[DePS”] = 9) (4).
+Finally,
+DegreeD,(D) = "ay — wh AY) . E;[DePS”].
+
+Ul sm
+For datasets {D,}7_,, let Fy = DegreeD, (Dz), Gx = DegreeD,,(Dx), and Ax for accuracy.
+Metric Substitution. Let o’ be the substitute metric of o.
+Assuming o” is Bi-Lipschitz equivalent to 0:0 <A< A <oos.t. Ao(x,y) < o'(a,y) < Ao(z,y), (17)
+
+for all pairs used in DegreeD, with « = A/X. For pure scalings o’ = co, A=A=c.
+
+36
+
+
+F.2 Post-Substitution Time-stepwise Bounds
+
+Lemma 1 (Local distortions). For all i,j,
+
+AAD < ALO SAAD, 2407) < 41) SHo(r), PH() <P OW < wy.
+K K
+
+Proposition 1 (User-level Bounding Inequalities). Let H; = AY. i;[DePS”]. Then, using Lemma 7}
+3 , ASB
+reas 7 <= Hs shee j-
+Corollary 1 (Dataset-level Bounding Inequalities). Aggregating over users, we obtain
+ae AS
+
+Corollary 2 (Pure scaling). Ifo’ = co, then Gy = cF, and all correlations with A are unchanged.
+g
+
+F.3 Post-Substitution Rank Stability
+
+Let us define an ambiguity band 6 that captures the zone of uncertainty where relative rankings between two
+dataset DegreeD-scores F), and G;, may flip under divergence substitution. From Corollary [1] for each dataset
+k we can conclude that for any dataset pair k, Z,
+
+Gr Ee Fy Ky Fy
+
+Ge Ky Fy’ K_ Fol
+If Fe lies outside [Re #4), then the order of Fy and Fy is preserved for all possible distortions, guaranteeing
+rank stability. Conversely, if the ratio falls inside this interval, an inversion is possible: one dataset-DegreeD
+could be stretched to its upper bound while the other shrinks to its lower bound. Substituting the explicit
+
+forms of K gives: K \\5 K ANS
+Kn): eG)
+
+Let the uncertainty interval be defined as Ambiguity Band B = [(\/A)°, (A/A)°].
+
+Proposition 2 (Substitution Stability of DegreeD). If Fi,/Fe ¢ B for allk Z &, then F and G have identical
+rankings; hence p,(F,G) = 7T(F,G) = 1.
+
+While Proposition 2 ensures exact rank preservation whenever all dataset diversity (w.r.t. DegreeD) ratios
+F,/ Fy lie outside the ambiguity band B, in practice some pairs may fall inside B, permitting local inversions.
+We record here two principled ways to quantify partial rank stability.
+
+Exact identity. For any two rankings of m datasets with rank differences {d;}!”,, Spearman’s correlation
+satisfies
+
+(E.G) = = Se (18)
+
+Thus the precise degradation of p, depends on the displacement profile {d?}, not only on the number of
+inversions.
+
+Adjacency-limited inversions. If all inversions correspond to adjacent swaps, then each inversion
+contributes at most 2 to )> d?, implying
+
+12k
+
+m(m? — 1)’
+
+p(F,G) > 1- (19)
+where K is the number of inversions. This yields a computable lower bound under localized perturbations.
+
+37
+
+
+General inversions. Without further assumptions, no nontrivial bound in terms of K alone is possible:
+moving a single element down by t places creates K = t inversions but contributes d? = ¢? +t, which may
+degrade p, substantially more. Hence, robust guarantees require either (a) bounding the displacement profile
+directly from data, or (b) assuming structural restrictions (e.g. inversions are local).
+
+F.4 Pearson Correlations
+
+Proposition 3 (Correlation transfer). Let rr4 = corr(F, A), reg = corr(F,G), r¢4 =corr(G, A). Then
+
+TGA > TFGYFA— t-te fl tha:
+Lemma 2 (Lower bound on reg). From Corollary |
+tra > VK_/Ky = (A/A)?°.
+F.5 Summary Results
+
+Theorem 1 (Correlation stability of DEGREED). Under the bi-Lipschitz equivalence (17), the following hold:
+
+1. Rank stability (from Proposition [Q): If all Fi,/Fe avoid B, then p.(F,G) =7(F,G) =1.
+
+2. Pearson transfer (from Proposition |3| & Lemma (2): For any external accuracy variable A,
+corr(G, A) > Ko corr(F, A) — 4/1 — 62 \/1 —corr(F, A)?, with Ko = (A/A)?”.
+
+3. Scaling invariance (from Corollary [2): If X\ = A, then Gy, = cFy and all correlations are
+preserved exactly.
+
+F.6 Results for 0: RMSD
+
+¢ Euclidean vs. RMSD: ||a — y||2 = Vd RMSD(z, y). This case guarantees pure scaling and hence,
+correlations remain exactly unchanged (Corollary [2).
+
+e Cosine distance: cos_dist(x,y) = ¢ RMSD* (x,y). Here o’ is Lipschitz equivalent to o provided
+RMSD is bounded away from zero; Theorem [I] applies.
+
+e Angular distance: Monotone in cosine similarity, hence Lipschitz related to RMSD in bounded
+domains. Rank stability (Proposition 2) guarantees identical orderings outside B.
+
+e Mahalanobis distance: ||x — y||,, is bi-Lipschitz to Euclidean with constants \/Amin(/) and
+Amax(M), so all conclusions of Theorem |1] apply with & = y/Amax(M)/Amin(M).
+
+By chaining Lemma [I] Proposition[I] Corollary [I] we established the main squeeze bound for DegreeD under
+divergence substitution. Proposition [2] shows that if all dataset-DegreeD ratios F;,/F, avoid the ambiguity
+band 6, then rankings are preserved exactly. In Section [F’.3] we extend this to partial perturbations where we
+show the condition for exact identity w.r.t rank displacements in Spearman correlation. This clarifies how
+DegreeD rankings degrade in controlled ways when some pairs fall inside B.
+
+G_ Implementation Details
+
+Computing Resources. The creation of User Interaction Graphs (UIGs) and computation of DegreeD are
+performed on a standard 4-core CPU with 16GB of RAM. For Stochastic Markovian Perturbation (SMP), we
+
+use the SBERT all-MiniLM-L6-v2 model (Reimers & Gurevych] |2019) to generate embeddings, and the SMP
+
+process takes approximately 16 hours to complete on an NVIDIA A-100 GPU. LLM-based experiments are
+conducted using 3 NVIDIA A-100 GPUs.
+
+38
+
+
+PerAugy Settings. We generate the embeddings of the d-nodes and s-nodes using the SBERT
+’all-MiniLM-L6-v2 model’, which has 22.7M parameters and an embedding size of 384.
+Manhattan distance is used to compute embedding divergence during the DegreeD calculation, chosen for its
+linear scalability and efficiency. For SMP, embeddings of sentences and d-nodes within the context window
+are generated using the same SBERT model, followed by the use of RMSD to compute similarity scores for
+perturbation.
+
+Model Settings. Three user encoders (NAML (Wu et al.) |2019a), EBNR (Okura et al.||2017), NRMS
+
+[2019b)) are trained on PerAugy datasets for 2 epochs, with a learning rate of 0.0001 and batch size
+128 using the Adam optimizer. The models are finetuned on the Tks /DS+SMP datasets in the TrRMIo model
+for one epoch after training from scratch. During training, intermediate s-nodes are modeled as d-nodes to
+integrate them into the user encoders.
+
+LLM Settings for Prompts. Prompting experiments are conducted using two setups: (1) Chain-of-
+Thoughts with LLaMa2-13B and (2) Prompt-Chaining with Mistral-Instruct-v2 and DeepSeek-7B-Chat. For
+LLaMa2-13B, we perform inference using sampling with temperature set to 0.75, top-p to 0.9, and top-k to
+50. For Mistral-Instruct-v2 and DeepSeek-7B-Chat, we use a deterministic sampling strategy (temperature =
+0.0, top-p = 1.0) for controlled generations. Max_tokens are set to 1024 for both setups.
+
+H Correlation Computation
+
+To quantify the relationship between encoder accuracies and diversity metrics, as well as the inter-dependence
+of diversity metrics themselves, we employ three standard correlation measures: Pearson’s correlation
+coefficient, Spearman’s rank correlation coefficient, and Kendall’s 7 coefficient. Their formulations are
+provided below.
+
+Formulations. Given paired observations {(x;, y;)}%_,, we compute:
+
+1. Pearson Correlation:
+
+yoni (2s — 2)(Yi — 9)
+
+— = = = —, (20)
+Vier (ti — 2)? Jia (Yi =a"
+where x and y are the sample means.
+2. Spearman Rank Correlation:
+6", @
+—4y_ i=1% 21
+where d; is the difference between the ranks of x; and yj.
+3. Kendall’s 7: O-pD
+'=7——, (22)
+5n(n — 1)
+
+where C and D denote the number of concordant and discordant pairs, respectively.
+
+Accuracy vs. Diversity Metrics. Let A= {a;}", denote the set of averaged encoder accuracies across
+y NA ISj=1 gs
+
+all encoders for dataset j, and let D* = {d*}i, denote the set of diversity scores corresponding to the k-th
+diversity metric, where k € {PENS, PENS-SH, $3, SDAInter, PerAugy-DS, PerAugy-DS+SMP}. For each k,
+we compute the correlation with accuracy as
+
+Corr? (A,D*) = f ({(a;, df) }741) , (23)
+where f € {r,p,7} corresponds to Pearson, Spearman, or Kendall’s correlation, respectively.
+
+Note that LLM-generated trajectories are excluded from D* due to their inability to produce complete
+trajectory sets with 113K news items, resulting in artificially lower accuracies despite exhibiting topical
+diversity and frequent shifts.
+
+39
+
+
+AUC MRR nDCG@5 nDCG@10
+
+Hyper-parameter —pwat AWM RWM AWM RWM AWM RWM AWM
+
+9 0.018 0.043 0.005 0.021 0.007 0.023 0.007 0.018
+Thexein 0.024 0.064 0.013 0.035 0.011 0.026 0.011 0.028
+k 0.028 0.049 0.016 0.027 0.016 0.032 0.016 0.032
+d 0.019 0.034 0.023 0.047 0.01 0.029 0.01 0.029
+PSMP 0.019 0.04 0.018 0.039 0.023 0.035 0.018 0.04
+
+Table 11: Comparative impact of hyper-parameters. Metrics shown are Relative Win Margin (RWM)
+and Absolute Win Margin (AWM). Observation: Shorter gap-length leads to consistent wins across encoders
+w.r.t AUC, but for prediction ranking, higher perturbation probability and context-window length matter more.
+
+Inter-Correlation of Diversity Metrics. Let M = {TP,RTC,DegreeD} denote the set of inter-diversity
+metrics. For each dataset j, we obtain the metric values Dj = {d"}mem. For any pair (mi,m2) € M x M,
+we compute
+
+Corr) (D™,D™) = fF ({(d™, di”) }84,) , (24)
+
+j=
+where f € {r, p,T}.
+
+This formulation allows us to construct a correlation matrix across M, thereby quantifying the degree of
+alignment or divergence among different internal diversity measures (including those derived from LLMs).
+
+| Detailed Results
+
+1.1 Ablation Studies (RQ-1)
+
+We ablate on the mixed training data Ths P to analyze the effect of DS hyper-parameters~ gap-length q
+(section [5.1.1) and train history-segment length Th,,.;,: {1/2, 51/8, 31/4, 71/8,1 — 3} (I: trajectory length). For
+SMP hyper-parameters (k: {10, 15,20}, A: {0.3,0.8,1}, psmp: {0.5, 0.8, 1}), we ablate on Fa. ae Results
+are in Figure [6
+
+Effect of 7n,,..,, & g We fix gq to 25 and observe that 7p,,,,, has a major impact across all
+user-encoders with the longest 7p,,,;, (J — 3) having the highest mean boost (0.064 ¢ w.r.t AUC,
+0.035 + w.r.t MRR, 0.011 + w.r.t nDCG@5/10) against the least scores, thereby confirming that
+longer preference history in train is better. g; (I fixed at 150) also matters particularly w.r.t AUC with
+best at 40. This shows that synthetic profiles having longer original user segments are better.
+
+Effect of k,,& pgmp We observe that psyp has the maximum impact (fixing k = 10; \ = 0.5), particularly
+for ranking metrics (MRR, nDCG@5/10). We find that psyp = 0.8/1 have highest boost (0.04 t w.r.t
+nDCG@10). This shows that SMP smoothing is mostly required during augmentation. We also observe that
+the length of the context window (7¢,"*'; A = 0.5; psmp = 0.8) also has a significant effect on the overall
+AUC (0.05 t) and nDCG@5/10 (0.032 +) with the best at k = 10. With the best k and psgyp (0.8), we
+find the best » to be 0.3, particularly for MRR (0.047 +) and nDCG@5 (0.032 +). This shows that (a)
+
+long context window is not useful for SMP smoothing and (b) smoothing cannot be strictly Markovian.
+
+1.2 DegreeD Ablations
+
+We ablate various hyperparameters of PerAugy, including gap length g and trajectory length | for Tag Pas
+well as context length k, decay constant A, and perturbation probability pgjzp for Tis oe A summary of
+our findings is given in Figure
+
+Gap Length g; and Trajectory Length /. Smaller values of g generally lead to higher DegreeD, with
+gi = 10 yielding the best results (DegreeD of 0.163). This suggests that frequent substitutions in source’
+
+40
+
+
+—— AUC —— MRR —— NDCG X-axis: Hyperparameter Values Y-axis: Metric Scores |
+
+NAML EBNR NRMS TrRMlo
+0.9
+
+Q os sig | | tga | ac garg
+(}
+O o7 ——,
+1")
+a °° Cy,
+0.5
+To 15 20 25 40 10 15 20 25 40 10 15 20 25 40 10 15 20 25 40
+0.9
+—
+Ol gh ee —_—_—___,
+0.8] —__ > —_—_———__
+= o7
+LV)
+[a)
+
+= i —
+os a iil ni ig ee adil
+
+V2 5/8*1 3/4*1 7/841 3 V2 5/8*1 3/4*1 7/8*1 13 V/2 5/8*1 3/4*1 7/8*1 3 W/2 5/8" 3/4*1 7/8*1 3
+
+J 0.9
+s ete aes| One
+ee is a _s, ° || ee
+t= =
+QO 07
+i] |
+QO o6 ee te oe
+= Sg
+WN o5
+10 15 20 10 15 20 10 15 20 10 15 20
+0.9
+> a
+Q 0o7
+= 0.6 i
+——————__—_——_,
+Wn ss, SS
+0.5
+03 0.8 Lo 03 0.8 10 0.3 0.8 10 03 08 Lo
+0.9
+oO 987
+QO o7
+a
+wn a
+0.5
+0.5 0.8 Lo 05 0.8 10 0.5 0.8 10 0.5 0.8 10
+
+Figure 6: Effect of PerAugy hyper-parameters on User-Encoder Accuracy: All encoder models are
+trained-from-scratch; results summarized in Table [Ii] Observation-1: Best hyper-parameter values perform
+consistently across models; Observation-2: For DS, g; = 40 and Tn,,,,, = 4—3 favor longer profile/history
+retention; Observation-3: For SMP, k = 10, psup = 0.8, A = 0.3 control abrupt diffusion best, and
+non-Markovian smoothing is preferred.
+
+segments boost thematic divergence. Similarly, increasing | results in higher DegreeD, with the highest score
+(0.158) observed at 1 = 175. This indicates that the length of ’source’ segments plays a crucial role in
+promoting diversity.
+
+SMP Parameters. We observe that smaller values of the context window k& and the decay constant >
+lead to higher DegreeD, while higher psjyp improves DegreeD, with the optimal setup being k = 10, A = 0.3,
+and psyp = | (with a score of 0.278). This suggests that, while there is a Markovian effect (as a lower
+k results in higher diversity), the role of higher-order influence should not be overlooked. In other words,
+user-generated subjective summaries are not solely governed by a Markovian process (as evident from the fact
+that lower \ corresponds to higher DegreeD), and might have long-term dependencies. We conclude that user
+behavior exhibits a tendency toward diffusion (random or exploratory variation in a user’s reading behavior);
+
+41
+
+
+DS: Gap Length (9) DS: Trajectory Length (/) SMP: Context-Window (k) SMP: Decay Constant (A) SMP: Perturbation Probability (psmp)
+
+——]|—__ |
+
+°
+w
+a
+
+gs es gs
+NN Ww
+ou 6
+
+a
+
+"geg| (gee
+
+DegreeD Score
+Se P
+
+bo
+
+°
+
+°
+f=}
+a
+
+4
+°
+co)
+
+10 20 30 40 50 100 150 200 100 125 15.0 17.5 20.0 0.4 0.6 0.8 1.0 0.6 0.8 1.0
+Values Values Values Values Values
+
+Figure 7: Ablation effect of hyper-parameters on DegreeD: Diversity analysis for all hyper-parameters of
+PerAugy; Observation-1: lower gap length increases diversity due to diffusion into different topics across a
+trajectory; Observation-2: Longer context window may not lead to sufficient perturbation; Observation-3:
+stricter Markovian does not yield higher diversity; & Observation 4: frequent SMP on s-nodes lead to higher
+diversity.
+
+i NAML EBNR
+O-Al w/o PerAugy O-Al w/o PerAugy
+@m O-AI DS | m= O-Al DS
+0.9) gam DS + SMP wm DS + SMP
+08 — oe — =
+
+074 4 =
+
+0.6 7
+
+0.4
+
+Score
+
+AUC MRR NDCG@5 NDCG@10 AUC MRR NDCG@5 NDCG@10
+
+NRMS TrRMlo
+10
+O-Al w/o PerAugy O-Al w/o PerAugy
+Gi O-Al DS @@@ 0-Al DS
+
+0.94
+
+@m@m™ Ds + SMP WL YL, | mmm Ds + SMP ace] ite
+
+| =
+
+0.54
+
+Score
+
+0.4
+
+AUC MRR NDCG@5 NDCG@10 AUC MRR NDCG@5 NDCG@10
+Metric Metric
+
+Figure 8: User-encoder performance (OpenAI (Reddit)): Impact of Double Shuffling (DS) and
+DS+SMP on OpenAlI seed base 7,24! (SMP hyper-parameters: k=10, \=0.3, psup=0.8). TrRMIo is
+finetuned; others are trained from scratch. Observation-1: Vanilla OpenAI lags behind DS and DS+SMP,
+indicating that random augmentation is less effective than PerAugy; Observation-2: DS achieves performance
+boosts as in PerAugy-PENS; Observation-3: DS+SMP further boosts performance, demonstrating the cross-
+
+domain strength of PerAugy.
+
+however, an abrupt diffusion does not necessarily lead to higher diversity. This underscores the importance of
+SMP as a smoothing mechanism to regulate diffusion. The comparative analysis of the ablations on different
+hyperparameters w.r.t DegreeD are in Table [IJ]
+
+Comparative Impact of Hyperparameters. We conduct a detailed ablation to understand the influence
+of each hyperparameter of PerAugy on user-encoder model performance across AUC, MRR, nDCG@5 & 10
+using Relative Win Margin (the difference between the best and second-best performance for a hyperparameter)
+and Absolute Win Margin (difference between best and worst). History Length exhibits the strongest effect
+on AUC with an Absolute Win Margin of 0.064 and a Relative Win Margin of 0.024, indicating that longer
+historical context is crucial for general user modeling. Context-Length k provides the highest Relative Win
+
+42
+
+
+Margin of 0.028 for AUC and consistent gains across all ranking metrics, showing the importance of larger
+context windows. Decay Constant » achieves the highest MRR Absolute Win Margin of 0.047 and a strong
+Relative Win Margin of 0.023, highlighting the impact of temporal recency weighting. Perturbation Probability
+psmp leads in ranking metrics, with nDCG@5 Relative=0.023, Absolute=0.035 and nDCG@10 Absolute=0.04,
+suggesting higher perturbation improves top-k relevance. Finally, Gap Length contributes stable gains to AUC
+(Abs.=0.043), indicating that shorter gaps between actions lead to consistent encoder performance. Overall,
+each hyperparameter uniquely benefits different objectives, and careful tuning is vital for optimal performance.
+The detailed results are in Table [LI]
+
+J Comparative Study
+
+In this section, we provide a comparative analysis of SOTA relatable data augmentation techniques based on
+the operations they perform on trajectory-like datasets. In terms of operations, the methods are divided
+into two main categories: Intra-Trajectory Augmentation and Cross-Trajectory Augmentation, serving the
+purpose of sequential recommendation tasks.
+
+J.1 Intra-Trajectory Augmentation
+
+S3 (2024): Segment-ShufHe-and-Stitch is an intra-trajectory augmentation where non-
+
+overlapping segments within same trajectory sequences are segmented, shuffled and finally concatenated
+(stitched) to form a new optimal trajectory. Since our goal is to generate diverse synthetic trajectories,
+shuffling among the segments within same sequence does not guarantee a smooth thematic transition of
+s-nodes w.r.t the historical interactions. Also, in our case, Shuffling does not enhance diversity w.r.t. DegreeD.
+
+MBASR (2024a): Multi-behavior Augmentation for Sequential Recommendation method
+
+employs an intra-trajectory augmentation technique by performing pairwise swapping of segments to generate
+diversity. However, in our case, the base historical dataset has highly monotonous trajectories. Therefore
+swapping nearby subsequences fails to produce sufficient diversity, and additional operations like order
+perturbation or redundancy reduction do not effectively smoothen the s-node content in line with historical
+preferences and might inject (or remove) unrealistic time-step information thereby disrupting the flow of the
+trajectory. For these reasons, we do not adopt MBASR.
+
+STEAM (2023): STEAM operates in an intra-trajectory manner by deciding whether to drop
+
+or insert nodes within a trajectory to create augmented data. However, the method is not scalable to longer
+trajectories, and the insertion or deletion of nodes can disrupt the historical sequence, ultimately undermining
+the realistic flow of the synthetic user profiles. Hence, we do not use STEAM.
+
+L2Aug|Wang et al.) (2022): Learning-to-Augment is an intra-trajectory augmentation method where
+
+a node is deleted from the sequence of core users to generate sequence of synthetic casual users through a
+reinforcement learning-based policy mechanism. Node deletion is irrelevant in our case as it can disrupt the
+sequential flow of the trajectories.
+
+BTBR (2023): Bi-directional Transformer Basket Recommendation model incorporates masking
+strategies and swapping operation to train the model for Next Novel Basket Recommendation’. Despite some
+similarity in the purpose at broader level, our goal is not to create a model/encoder that encodes the input
+sequence but to generate a diverse input sequence to make the existing encoders learn the representations.
+
+J.2. Cross-Trajectory Augmentation
+
+SDA inter (2024): SDAinter is a cross-trajectory technique that matches anchor items (e.g.,
+
+identical start and end d-nodes or s-nodes) across trajectories to facilitate segment exchange. However,
+the reliance on anchor-based matching does not effectively capture the subjective nuances of individual
+user interests, limiting its applicability in personalized summarization. For this reason, we do not consider
+SDAinter suitable for historical interaction sequence-based tasks.
+
+43
+
+
+DR4SR (2024): Data-Regeneration-for-Sequential-Recommendation is a transformer-styled
+
+cross-trajectory sequence regeneration model where the pertaining task is constructed for to extract patterns
+from given set of sequences and feed the patterns to the model to regenerate other set of possible sequences.
+However, patterns in our case would mean reading and summarizing habits of two different users, where the
+s-nodes are subjective. Therefore, this technique might incorporate redundant s-nodes, defeating the goal of
+personalized summarization.
+
+TiCoSeRec |Dang et al.| (2024): Time Interval Aware Augmentation technique ensures uniform time-
+
+interval distribution in the sequence based on the time-aware traditional operations like Crop, Mask, Insert,
+Reorder and Substitute. However, our trajectories are primarily assumed to be uniform in terms of time-steps
+(unit time between two successive interactions).
+
+FDA |Chen et al.| (2023a): | Fairness-oriented Data Augmentation is used to generate synthetic user
+
+profiles from the realistic profiles to balance between realistic data and pseudo pseudo data. However,
+modeling historical preference trajectories by generating fake interaction sequences will not lead to diversified
+trajectories as the ’complemented’ sequence will also remain monotonous. Also, ideal datasets for personalized
+summarization tasks must have intermediate summary nodes for supervised learning setup, which makes the
+generation of fake interactions challenging.
+
+divSPA-styled methods (2023): These methods use a cross-trajectory augmentation strategy
+by exchanging segments between trajectories based on similarity metrics. Despite this, the exchanged segments
+
+often lack sufficient variation with respect to the overall degree (DegreeD), resulting in minimal diversity
+gains. This limitation makes the approach less effective for our needs.
+
+K Prompt Details
+
+Chain-of-Thoughts. Chain-of-thought (CoT) prompting is a powerful technique that guides large language
+models to decompose complex problems into a series of intermediate reasoning steps before emitting their
+final answer. CoT prompting was shown to significantly improve multi-step arithmetic, commonsense, and
+symbolic reasoning tasks by eliciting explicit rationale chains that mirror human logic (2024).
+Subsequent work in ACL demonstrated that CoT can be extended to address hallucination and faithfulness
+
+issues by injecting structured knowledge during rationale generation (Wang et al.||2024). EMNLP findings
+further confirmed that structured CoT variations, such as state-based prompting, yield substantial gains in
+
+content-grounded dialogue systems by promoting intermediate subtask decomposition [Sultan et al.| (2024).
+Another EMNLP study introduced prompt tuning of masked language models to generate both intermediate
+and final reasoning steps jointly, striking a balance between interpretability and performance without full
+fine-tuning (2023). Across these efforts, a consistent insight is that CoT acts as a bridge,
+enabling LLMs to expose latent reasoning processes. The method is particularly effective for tasks demanding
+logical coherence and multi-hop inference, such as math word problems and question answering. Although
+CoT relies on large model scale to be effective, research shows that even generated exemplars (e.g. “Let’s
+think step by step”) can approximate few-shot behavior. In the context of our work, CoT prompting with
+LLaMA-2-13B is used to craft personalized user summaries by breaking down interactions step by step, so as
+to enhance transparency and accuracy, making LLM reasoning more interpretable and reliable.
+
+Prompt Chaining. Prompt chaining is an effective prompting strategy where a complex task is decomposed
+into a sequence of smaller, well-defined prompts, with the output of one prompt becoming the input to the next,
+thereby guiding the model through a structured reasoning pipeline. It improves performance on multi-step
+tasks by reducing cognitive load on the model and increasing transparency at each stage—developers can
+verify and debug intermediate outputs, enhancing controllability and reliability. Academic research, such as ,
+shows prompt chaining excels in iterative summarization by orchestrating drafting, critiquing, and refining
+phases via discrete prompts, outperforming one-shot or stepwise alternatives 2024). Across these
+efforts, the core insight is that chaining leverages the model’s strengths at each subtask rather than relying on
+single-shot reasoning, leading to superior performance, especially when task complexity or input length is high.
+
+44
+
+
+Chain-of-Thoughts (COT) Prompt
+
+You are an AI model generating synthetic user interaction trajectories with news articles.
+
+### Task Definition
+
+Each user follows a sequence of interactions with news articles. The dataset consists of:
+
+* "UserID" : Unique identifier for the user.
+
+« "Sequence of Docs": Ordered list of news article IDs the user interacts with.
+
+* "Sequence of Actions" : Ordered list of actions taken (click, skip, gensum, sumgen ).
+
+* "Number of Summary Nodes" : The count of summary nodes (e.g., S-1, S-2 ) generated during the trajectory.
+
+### Rules for Interaction Generation
+1. Each User's Trajectory is 100-200 Interactions Long
+- The user interacts with a sequence of news articles.
+- The sequence follows logical decision-making based on relevance and interest.
+
+2. Action Types
+- "click" — User reads the article.
+- "skip" — User ignores the article.
+- "gensum" — User generates a rewritten headline for that document.
+- "sumgen" — User written personalized headline.
+
+3. Summary Node Constraints
+- "sumgen" must immediately follow "gensum" .
+- Each "sumgen" introduces a new summary node ( S-{id} )in the document sequence.
+- Each user must have 3 to 50 summary nodesin their trajectory.
+
+### Step-by-Step Thought Process
+1. Assign a UserID
+
+- Generate a unique identifier for the user.
+
+2. Generate a Long Sequence of Interactions
+- Select 100-200 news articlesfrom various categories.
+- Apply logical reasoning to assign "click", "skip", "gensum", or "sumgen" actions.
+
+3. Ensure Summary Nodes are Introduced Properly
+- When "gensum" occurs, assign it a new summary node ( S- {id} ).
+- The next "sumgen" action must refer to a previously generatedsummary node.
+- Ensure there are at least 3 summary nodes per user.
+
+4. Output the Structured Dataset
+- "UserID"
+- "Sequence of Docs" : Ordered list of article IDs and summary nodes.
+- "Sequence of Actions" : Corresponding user actions.
+- "Number of Summary Nodes"
+
+### Expected Output Format (JSON)
+"UserID": "U001",
+"Does": ["N101", "N102", "N103", "S-1", "N104", "N105", "S-2", "S-1", "N106"],
+"Actions": ["click", "skip", "gensum", "sumgen", "click", "gensum", "sumgen", "sumgen", "click"],
+"Num_ Summary Nodes": 3
+
+Figure 9: Chain-of-Thoughts (CoT) prompt template used in LLM-based experiments.
+
+In our context, prompt chaining is implemented via two steps—user behavior simulation followed by summary
+generation—amirroring the validated pattern of decomposition for enhanced LLM task performance.
+
+45
+
+
+HH# Task
+
+Generate a sequence of interactions for User {user_id}.
+Document IDs: {doc_sequence}
+
+Actions: [click, skip]
+
+HH## Rules:
+1) Each action corresponds to a document in the sequence.
+2) The sequence should only contain "click" or "skip" actions at this stage.
+
+### Expected Output Format (JSON)
+{
+
+document_1 : action_1, document_2 : action_2, document_n, action _n
+
+}.
+
+### Examples
+Below are examples of personalized headlines generated for different users based on their document
+content:
+
+{fewshot_examples}
+
+H## Task:
+
+Generate a personalized headline based on the document content. Ensure that the headline aligns with the
+user's preferences and effectively captures the essence of the document.
+
+User: {user_id}
+
+Document: {doc_id}
+
+Document Content: {doc_content}
+
+### Expected Output Format (JSON)
+Strictly return a JSON object in the following format:
+
+"headline": "your generated headline"
+
+}
+
+Figure 10: Prompt-Chaining template used in LLM-based experiments.
+
+46
+

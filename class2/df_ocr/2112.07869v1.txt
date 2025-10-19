@@ -1,0 +1,1064 @@
+2112.07869v1 [cs.CL] 15 Dec 2021
+
+“main” — 2021/12/16 1:43 page 1 #1
+
+Bioinformatics
+
+doi.10.1093/bioinformatics/xxxxxx
+
+Advance Access Publication Date: Day Month Year
+Original Paper
+
+Data and text mining
+
+Fine-Tuning Large Neural Language Models for
+Biomedical Natural Language Processing
+
+Robert Tinn !*, Hao Cheng '*, Yu Gu', Naoto Usuyama', Xiaodong Liu’,
+Tristan Naumann", Jianfeng Gao! and Hoifung Poon '**
+
+‘Microsoft Research, Redmond, WA 98052 USA.
+
+*These authors contributed equally.
+**To whom correspondence should be addressed.
+
+Associate Editor: XXXXXXX
+
+Received on XXXXX; revised on XXXXX; accepted on XXXXX
+
+Abstract
+
+Motivation: A perennial challenge for biomedical researchers and clinical practitioners is to stay abreast
+with the rapid growth of publications and medical notes. Natural language processing (NLP) has emerged
+as a promising direction for taming information overload. In particular, large neural language models
+facilitate transfer learning by pretraining on unlabeled text, as exemplified by the successes of BERT
+models in various NLP applications. However, fine-tuning such models for an end task remains challenging,
+especially with small labeled datasets, which are common in biomedical NLP.
+
+Results: We conduct a systematic study on fine-tuning stability in biomedical NLP. We show that fine-
+tuning performance may be sensitive to pretraining settings, especially in low-resource domains. Large
+models have potential to attain better performance, but increasing model size also exacerbates fine-
+tuning instability. We thus conduct a comprehensive exploration of techniques for addressing fine-tuning
+instability. We show that these techniques can substantially improve fine-tuning performance for low-
+resource biomedical NLP applications. Specifically, freezing lower layers is helpful for standard BERT-BASE
+models, while layerwise decay is more effective for BERT-LARGE and ELECTRA models. For low-resource
+text similarity tasks such as BIOSSES, reinitializing the top layer is the optimal strategy. Overall, domain-
+specific vocabulary and pretraining facilitate more robust models for fine-tuning. Based on these findings,
+we establish new state of the art on a wide range of biomedical NLP applications.
+
+Availability and implementation: To facilitate progress in biomedical NLP, we release our state-of-the-art
+
+pretrained and fine-tuned models:
+
+Contact: hoifung@microsoft.com
+
+1 Introduction potentially accelerate clinical research and improve clinical care. Manual
+
+Biomedical text has been growing at an explosive rate. PubMed] adds curation, however, can require tials for each Paper Bab Pane. SHARED 8
+ae ene hard to scale given the rapid growth of biomedical text.
+
+thousands of papers every day and over a million every year. Similarly, : .
+
+the digitization of patient records has created steadily growing resources . Natural language PIOSeSSIne (NLP) has emerged aS a PLOUSe
+
+. ay: direction to accelerate curation by automatically extracting candidate
+
+of clinical text. For example, every year there are about two million new
+
+arXiv
+
+cancer patients in the U.S. alone, each with hundreds of clinical notes
+such as pathology reports and progress notes. By curating cutting-edge
+knowledge and longitudinal patient information from such text, we can
+
+“http: //www.ncbi.nlm.nih.gov/pubmed
+
+findings for human experts to validate 2012
+
+(2021). However, standard supervised learning typically requires a large
+amount of training data. Consequently, task-agnostic self-supervised
+learning is rapidly gaining traction. By pretraining on unlabeled text, large
+neural language models facilitate transfer learning and have demonstrated
+spectacular success for a wide range of NLP applications (Deviin et al]
+
+2019 2019). Fine-tuning these large neural models for
+
+specific tasks, however, remains challenging, as has been shown in the
+
+© The Author 2021. Published by Oxford University Press. All rights reserved. For permissions, please e-mail: journals.permissions@oup.com 1
+
+
+“main” — 2021/12/16
+
+general domain (GrieBhaber et al.||2020||Mosbach et al.||2021
+2021). For biomedicine, the challenge is further exacerbated by
+the scarcity of task-specific training data because annotation requires
+
+domain expertise and crowd-sourcing is harder to apply. For example,
+
+BIOSSES (Sogancioglu et al.||2017), a semantic similarity task in the
+
+biomedical domain, contains only 100 annotated examples in total. By
+contrast, STS (Cer et af.)[2017}, a similar dataset in the general domain,
+contains 8,628 examples.
+
+In this paper, we conduct a systematic study on fine-tuning stability
+in biomedical NLP. We ground our study in BLURB, a recently-proposed
+comprehensive benchmark for biomedical NLP comprising 6 tasks and 13
+datasets (Gu et al] /2021).
+
+We first study how pretraining settings impact fine-tuning performance.
+We show that for all applications, skipping next-sentence prediction (NSP)
+in pretraining has negligible effect, thus saving significant compute time, a
+
+finding consistent with general-domain observations by|Liu et af] 2019);
+Aroca-Ouellette and Rudzicz| (2020). However, modeling segment IDs
+
+during pretraining may have large impact on certain semantic tasks, such
+as text similarity and question answering, especially when training data
+is scarce. Larger models (e.g., BERT-LARGE) significantly increase fine-
+tuning instability, and their use often hurts downstream performance.
+Interestingly, changing the pretraining objective from masked language
+model (MLM) to ELECTRA has demonstrated improved performance in
+general-domain applications [2020), but it may exacerbate
+fine-tuning instability in low-resource biomedical applications.
+
+We then conduct a comprehensive exploration of stabilization
+techniques to establish the best practice for biomedical fine-tuning. We
+show that conventional general-domain techniques, such as longer training
+and gradient debiasing, help but layerwise adaptation methods are key to
+restoring fine-tuning stability in biomedical applications. Interestingly,
+their efficacy may vary with pretraining settings and/or end tasks. For
+example, freezing lower layers is helpful for standard BERT-BASE
+models, whereas layerwise decay is more effective for BERT-LARGE
+and ELECTRA models. For low-resource text similarity tasks, such as
+BIOSSES, reinitializing the top layer is the optimal strategy. Overall, we
+find that domain-specific vocabulary and pretraining produce more robust
+language models. Based on these findings, we attain new state-of-the-art
+performance on a wide range of biomedical NLP tasks.
+
+Finally, we show that the best biomedical language models not only
+cover a much wider range of applications, but also substantially outperform
+off-the-shelf biomedical NLP tools on their currently available tasks. To
+facilitate biomedical research and applications, we will release our state-
+of-the-art pretrained and task-specific fine-tuned models.
+
+2 Methods
+In this paper, we focus our study on BERT 2019) and its
+
+variants, which have become a mainstay of neural language models in
+NLP applications. In this section, we review core technical aspects in
+neural language model pretraining and fine-tuning, providing a basis for
+the key research questions of our fine-tuning study.
+
+2.1 Neural Language Models
+
+The input to a neural language model consists of text spans, such as
+sentences, separated by special tokens [SEP]. To address the problem of
+out-of-vocabulary words, neural language models generate a vocabulary
+from subword units, using Byte-Pair Encoding (BPE;Sennrich et al.||2016
+
+or variants such as WordPiece (Kudo and Richardson|[2018). Essentially,
+the BPE algorithm tries to greedily identify a small set of subwords that
+can compactly form all words in a given corpus. It does this by initializing
+
+1:43 page 2 — #2
+
+R. Tinn, H. Cheng, et al.
+
+the vocabulary with all characters and delimiters found in the corpus. It
+then iteratively augments the vocabulary with a new subword that is most
+frequent in the corpus and can be formed by concatenating two existing
+subwords, until the vocabulary reaches the pre-specified size—e.g., 30,000
+in standard BERT models or 50,000 in ROBERTa In
+this paper, we use the WordPiece algorithm, which is a BPE variant that
+augments the vocabulary using likelihood in a unigram language model
+rather than frequency in choosing which subwords to concatenate.
+
+The text corpus and vocabulary may preserve the original case (cased)
+or convert all characters to lower case (uncased). Prior work, such as[Gu|
+etal. \(2021}, finds that case doesn’t have significant impact on downstream
+tasks, so we simply use uncased in our work.
+
+BERT 2019) is a state-of-the-art neural language model
+based on transformer 2017). The transformer model
+
+introduces a multi-layer, multi-head self-attention mechanism, which has
+demonstrated superiority in leveraging GPU computation and modeling
+long-range text dependencies. Standard BERT pretraining inputs two text
+spans (e.g., sentences) and assigns a distinct segment ID to each. The input
+token sequence is first processed by a lexical encoder, which combines
+a token embedding, a position embedding and a segment embedding
+by element-wise summation. This embedding layer is then passed to
+multiple layers of transformer modules. In each transformer layer, a
+contextual representation is generated for each token by summing a non-
+linear transformation of the representations of all tokens in the prior layer,
+weighted by attentions computed using a given token’s representation in
+the prior layer as query. The final layer outputs contextual representations
+for all tokens, which combines information from the whole text span.
+BERT models come with two standard configurations: BASE uses 12
+layers of transformer modules and 110 million parameters, LARGE uses
+24 layers of transformer modules and 340 million parameters. Prior work
+applying BERT to biomedical NLP focuses on BASE models. We conduct
+a systematic study on LARGE models as well, which reveals additional
+challenges for fine-tuning neural language models in biomedical NLP.
+
+2.2 Pretraining Objectives
+
+Similar to other language models, the key idea of BERT pretraining is
+to predict held-out words in unlabeled text. Unlike most prior language
+models, BERT does not adhere to a generative model. Instead,
+introduces two self-supervised objectives: Masked Language
+Model and Next Sentence Prediction. Masked language model (MLM)
+randomly replaces a subset of tokens by a special token (e.g., [MASK]),
+and asks the language model to predict them. The training objective is
+the cross-entropy loss between the original tokens and the predicted ones.
+Typically, 15% of the input tokens are chosen, among which a random 80%
+are replaced by [MASK], 10% are left unchanged and 10% are randomly
+replaced by a token from the vocabulary. Next sentence prediction (NSP)
+is a binary classification task that determines for a given sentence pair
+whether one sentence follows the other in the original text. While MLM
+is undoubtedly essential for BERT pretraining, the utility of NSP has been
+called into question in prior work . As such, we conduct
+ablation studies to probe how NSP and the use of segment IDs in pretraining
+might impact downstream fine-tuning performance.
+
+Aside from standard BERT pretraining objectives, we also consider
+
+ELECTRA (Clark ef al.| 2020), which has shown good performance
+in general-domain datasets such as GLUE 2019a) and
+SQuaAD (Rajpurkar et al.||2016}/2018). ELECTRA introduces an MLM-
+
+based generator to help pretrain a discriminator for use in end tasks.
+Specifically, given sample masked positions, first the generator predicts the
+most likely original tokens as in MLM, then the discriminator classifies,
+for all tokens, whether each is the original one. While ELECTRA shares
+some superficial similarity with generative adversarial network (GAN;
+
+
+“main” — 2021/12/16
+
+1:43 — page 3 — #3
+
+Fine-Tuning Large Neural Language Models for Biomedical Natural Language Processing 3
+
+Table 1. Summary of techniques for fine-tuning stabilization in recent studies
+and our investigation.
+
+. Longer ADAM Layer Layer-wise Layer
+Domain _ «e Po
+training debiasing freeze decay reinit
+IGrieBhaber et al, J2020) General 4
+(GLUE)
+G l
+Mosbach et al. 2021 ener Y
+(GLUE)
+General
+Zhang et al. |2021 enera ~ Va ~ ~
+(GLUE)
+Biomedical ,
+Ours Va ~ Va ~
+(BLURB)
+, Task-specific Encoder Embedding
+layer O layer layer
+INGG SS f ISS ]
+
+Reinitialized
+ay layer
+
+Frozen
+layers
+
+Layer freeze Layer-wise decay Layer reinit
+
+Fig. 1. Illustration of major layer-specific adaptation methods for fine-tuning stabilization:
+
+freezing lower layers, adopting layerwise decay of learning rate, reinitializing the top layer.
+
+Goodfellow et al.||2014), the roles of generator and discriminator are
+
+very different. After pretraining, the generator in ELECTRA is discarded
+and the discriminator is used for downstream fine-tuning, whereas GAN
+typically discards the discriminator and uses the generator. The training
+objective is not adversarial, but a weighted combination of MLM for the
+generator and classification accuracy for the discriminator. By classifying
+on all tokens rather than just the masked ones, ELECTRA can potentially
+learn more from each example while adding little overhead as the majority
+of compute lies in transformer layers before classification. The generator,
+on the other hand, does incur additional compute. Also, if the generator
+becomes very accurate early on, there will be little learning signal for
+the discriminator. Therefore, ELECTRA typically uses lower capacity in
+the generator compared to the discriminator (e.g., one third in BASE and
+one fourth in LARGE for contextual representation dimension and attention
+head number).
+
+2.3 Domain-Specific Pretraining
+
+The study of neural language model pretraining originates in the general
+domain, including newswire and web. For example, the original BERT
+model was pretrained on Wikipedia and BooksCorpus :
+RoBERTa [2019), another representative BERT model, was
+pretrained on a larger web corpus. Biomedical text is quite different from
+general domain text and domain-specific pretraining has been shown to
+substantially improve performance in biomedical NLP applications
+fal] [20206) Peng et aZ]|BOT9) [Gu er af2021}. tn particular [Gu er a}
+conducted a thorough analysis on domain-specific pretraining,
+which highlights the utility of using a domain-specific vocabulary and
+
+pretraining on domain-specific text from scratch. We build on their
+work and study how domain-specific pretraining might impact fine-tuning
+stability, especially for larger models and/or with alternative pretraining
+settings. To facilitate our investigation, we pretrained PubMedBERT-
+LARGE and PubMedELECTRA (BASE and LARGE) following the same
+
+setting of PubMedBERT (BASE) in{Gu et al] 2021).
+
+2.4 Fine-Tuning Stability
+
+Prior work studying fine-tuning stability and mitigation methods tends
+to focus on general domain—e.g., using BERT models pretrained on
+
+general-domain corpora and evaluating on GLUE (Wang et al.||2019a
+or SuperGLUE 2019b).|Table 1/summarizes representative
+
+recent work and common stabilization techniques. Small adjustments to
+
+the conventional optimization process may have surprisingly significant
+effect. For example,|Mosbach eg al.|{2021) and show
+that simply training for longer time helps reduce fine-tuning instability
+with small training datasets. They also show that bias correction, which
+was proposed in the original ADAM algorithm but
+was not used in fine-tuning from the original BERT paper (Devlin et al]
+[2019}, can enhance fine-tuning stability by effectively reducing learning
+rates in the first few iterations.
+
+Such minor adaptations are already highly effective for general-
+domain applications (Mosbach et al. )[2021). However, biomedical datasets
+are often much smaller than their general-domain counterparts. For
+example, as aforementioned for text similarity, the biomedical dataset
+
+BIOSSES is much smaller than the general-
+domain dataset STS (Cer et al.|[2017). Similarly, the question-answering
+datasets in BLURB have only a few hundred instances, compared to over
+one hundred thousand in SQUAD (Rajpurkar et al.|[2016}.
+
+Therefore, we systematically study advanced layer-specific adaptation
+techniques previously studied in the general domains: freezing pretrained
+
+parameters in the lower layers (GrieBhaber e7 al.[2020), adopting layerwise
+learning-rate decay (Clark et al.[2020), and reinitializing parameters in the
+top layer (Zhang e7 al.|[2021). See[Figure 1] Essentially, these techniques
+represent various ways to alleviate the vanishing gradient problem in
+training deep neural networks (Singh et al] [2015), where optimization
+suffers from severe ill conditioning and requires adapting learning rates
+for individual layers. Interestingly, we find that their efficacy may interact
+with the pretraining setting and the end task.
+
+3 Results
+
+In this section, we conduct a systematic study on fine-tuning stability
+and mitigation methods in the presence of various pretraining settings
+and large models. We ground our study on the Biomedical Language
+Understanding & Reasoning Benchmark (BLURB; [2021).
+BLURB is a comprehensive benchmark for biomedical NLP, spanning six
+tasks and thirteen datasets, including applications with very small training
+datasets, such as text similarity and question answering. To facilitate a
+head-to-head comparison, we follow the train/dev/test setup from BLURB
+in all our experiments.
+
+3.1 Instability with Alternative Pretraining Settings
+
+We first conduct an ablation study to evaluate the impact of pretraining
+settings on fine-tuning stability. Prior work on fine-tuning stability focuses
+almost exclusively on LARGE models; we show that BASE models also
+suffer instability if we deviate from standard BERT pretraining settings.
+
+Specifically, we experiment with skipping next-sentence prediction
+(NSP) during pretraining. Standard BERT pretraining inputs two text
+sequences (with two distinct segment IDs). We also experiment with
+inputting a single sequence at a time (with same segment ID). For a head-
+to-head comparison, we pretrained all language models from scratch on
+PubMed abstracts (i.e., using the same settings as PubMedBERT) and
+adopted the same fine-tuning settings as in{Gu et aZ.](2021).
+
+[fable 2]shows the results. In general, NSP has relatively little impact
+on end task performance. However, pretraining with single sequences
+leads to a substantial performance drop in the sentence similarity task
+(BIOSSES). Presumably performance degrades because this task requires
+comparison of two sentences and the training set is very small, therefore
+
+
+“main” — 2021/12/16
+
+Table 2. Comparison of BLURB test performance with various
+pretraining settings: standard BERT pretraining; BERT pretraining
+without NSP (i.e., MLM only); BERT pretraining with MLM only
+and single-sequence (single segment ID); ELECTRA.
+
+BERT BERT BERL (no NSP, ELECTRA
+
+(no NSP) single seq)
+BCS5-chem 93.33 93.21 93.20 93.00
+BCS-disease 85.62 85.29 85.44 84.84
+NCBI-disease 87.82 88.29 88.68 87.17
+BC2GM 84.52 84.41 84.63 84.03
+JNLPBA 79.10 79.01 79.10 78.57
+EBM PICO 73.38 73.87 73.64 73.57
+ChemProt 77.24 76.82 76.88 76.34
+DDI 82.36 82.64 82.45 80.58
+GAD 83.96 82.30 83.24 83.40
+BIOSSES 93.46 93.12 75.50 80.24
+HoC 82.32 82.37 81.91 81.28
+PubMedQA 55.84 56.40 66.66 64.96
+BioASQ 87.56 83.57 85.64 88.93
+BLUBE 81.35 81.00 79.04 79.61
+score
+
+Table 3. Ablation study on optimization adjustments in fine-tuning
+by comparing BIOSSES test performance under various pretraining
+settings. Improved optimization used bias correction in ADAM and
+up to 100 epochs in fine-tuning (vs. up to five epochs in standard
+setting), all with BASE models.
+
+a : Improved Standard No bias
+
+Pretraining Setting rccBeccdl ‘
+optimization epochs correction
+
+BERT 93.46 92.64 91.75
+
+BERT (no NSP) 93.12 91.31 92.35
+
+BERT (no NSP, single seq) 75.50 0.65 70.50
+
+ELECTRA 80.24 49.87 80.41
+
+pretraining with two text segments helps. Surprisingly, pretraining with
+single sequences substantially improves test performance on PubMedQA,
+even though the task also inputs two text segments. Interestingly, even
+with the original pretraining setting (with NSP and two segments), simply
+using a single segment ID in fine-tuning for PubMedQA would result in a
+similarly large gain in test performance (F1 63.92, not shown in the table).
+However, the standard setting (using separate segment ID) is still better
+for BIOSSES and BioASQ.
+
+We also evaluate using the ELECTRA objective. Unlike in the general
+domain, ELECTRA does not show clear improvements over the MLM
+objective in the biomedical domain. In fact, ELECTRA performs worse
+on most tasks and suffers a catastrophic performance drop in text similarity.
+We note that these tasks also happen to have relatively small training sets.
+This may appear contradictory with some recent work that demonstrates
+superior results using ELECTRA in biomedical NLP (Kanakarajan et a/.|
+. Later, we show that it is indeed possible to attain higher performance
+with ELECTRA, but doing so requires various techniques to stabilize
+and improve fine-tuning. Compared to BERT with the MLM objective,
+ELECTRA is generally more difficult to fine-tune and demonstrates no
+significant advantage for biomedical NLP.
+
+1:43 page 4 — #4
+
+R. Tinn, H. Cheng, et al.
+
+Table 4.
+(SS) and Question Answering (QA) tasks with major layer-specific
+
+Comparison of test performance on Sentence Similarity
+
+adaptation methods, all with BASE models.
+
+Prehraining Baseline Layer Layerwise Layer
+setting freeze decay reinit
+SS QA| SS QA| SS QA] SS QA
+BERT 93.5 71.7| 92.9 76.3 | 93.4 74.3 | 94.5 69.3
+BERT (no NSP) | 93.1 70.0 | 94.0 73.2 | 93.0 71.8] 92.9 69.3
+BERT (20 NSP. |75.5 762/721 78.0| 74.1 77.5| 85.0 72.8
+single seq)
+ELECTRA 80.2 77.0 | 83.1 78.7 | 83.6 79.1 | 88.7 74.7
+
+Table 5. Comparison of test performance on Sentence Similarity (SS) and
+Question Answering (QA) tasks with layer-specific adaptation methods on
+LARGE models.
+
+Layer
+freeze
+
+Layerwise
+decay
+
+Layer
+
+Baseline ce
+reinit
+
+SS QA|SS QA] SS QA] SS QA
+
+BioBERT-LARGE 84.9 60.9 | 88.7 65.4] 90.1 67.0 | 91.5 64.8
+BlueBERT-LARGE | 82.4 59.9 | 84.6 62.7 | 84.8 63.7 | 86.2 63.0
+PubMedBERT
+-LARGE
+PubMedELECTRA
+-LARGE
+
+91.1 77.8] 91.2 79.3} 90.9 80.4 | 92.7 76.9
+
+71.6 67.6 | 86.4 76.5 | 86.2 79.1 | 90.3 76.0
+
+3.2 Stabilization by Adjusting Standard Optimization
+
+As previously mentioned, prior studies conclude that small optimization
+adjustments often suffice to restore fine-tuning stability in LARGE models.
+In biomedical NLP, however, we found that such adjustments are necessary
+to prevent catastrophic performance drops, but are not always sufficient for
+stabilizing fine-tuning, even with BASE models.[Table 3]shows an ablation
+study on BIOSSES. In this case, forgoing either adjustment leads to a
+significant performance drop. But, as noted in the last subsection, even
+if both are used, fine-tuning remains unstable with alternative pretraining
+settings, which requires more advanced stabilization techniques.
+
+3.3 Stabilization by Layer-Specific Adaptation
+
+Next, we study various layer-specific adaptation methods in fine-tuning.
+Given that most models suffer from high instability on sentence similarity
+(BIOSSES) and question answering (BioASQ and PubMedQA), we focus
+on those tasks. For question answering, we report the mean performance.
+[Table 4] shows the results. All three methods are broadly beneficial, but
+their effects vary substantially with tasks and pretraining settings. Freezing
+lower layers is helpful for BERT models with the standard MLM objective,
+whereas layerwise decay is more effective for ELECTRA models. For
+sentence similarity, reinitializing the top layer is the optimal strategy. We
+focus our study on sentence similarity and question answering tasks, as
+other datasets in BLURB are relatively large and do not suffer from stability
+issues. We explored a combination of layer-specific adaptation methods
+but found little gain in preliminary experiments.
+
+3.4 Stabilization for Larger Models
+
+It is well known that larger models are more finicky to fine-tune
+
+2019). Again, we focus on sentence similarity (BIOSSES) and
+question answering (BioASQ and PubMedQA). Indeed, we observe a
+
+substantial drop in test performance on sentence similarity and question
+
+
+“main” — 2021/12/16
+
+1:43 — page 5 — #5
+
+Fine-Tuning Large Neural Language Models for Biomedical Natural Language Processing 5
+
+Table 6. Comparison of BLURB test performance using LARGE models (24 layers,
+300M+ parameters), with optimal layer-specific stabilization methods.
+
+BioBERT BlueBERT PubMedBERT PubMedELECTRA
+
+-LARGE -LARGE -LARGE -LARGE
+
+BCS5S-chem 93.05 90.24 93.23 92.90
+BCS-disease 84.97 82.93 85.77 84.82
+NCBI-disease 88.76 86.44 88.25 87.93
+BC2GM 84.21 80.86 84.72 83.87
+JNLPBA 78.83 77.59 79.44 78.77
+EBM PICO 73.81 72.43 73.61 73.95
+ChemProt 77.79 71.31 78.77 76.80
+DDI 81.53 78.99 82.39 78.92
+GAD 82.47 75.80 83.57 83.93
+BIOSSES 91.53 86.18 92.73 90.33
+HoC 81.57 81.35 82.57 82.37
+PubMedQA 55.16 55.24 67.38 65.02
+BioASQ 78.93 72.21 93.36 93.14
+BLURB score _—_ 80.09 T7AL 82.86 81.88
+ALBEE -0.59 +0.15 +0.58 +0.37
+model
+
+answering tasks for most large models (see . Note that to avoid
+clutter, we only show the average scores for the question-answering tasks.
+
+Surprisingly, PubMedBERT-LARGE is a notable exception because
+it doesn’t suffer any catastrophic performance drop. In fact, it actually
+gains slightly on the question-answering tasks. This stands in stark
+
+contrast with other models such as BioBERT 2020b) and
+BlueBERT 2019). We hypothesize that its robustness
+
+stems from domain-specific vocabulary and pretraining. Interestingly,
+although PubMedELECTRA-LARGE is also pretrained in the same domain-
+specific fashion, it suffers a similar performance drop, which provides
+further evidence that the ELECTRA pretraining objective may exacerbate
+fine-tuning instability.
+
+Optimization adjustments (longer training time and ADAM bias
+correction) have been used in all these experiments. Unlike in the general
+domain, they are not sufficient to restore stability. As in the case of BASE
+models, layer-specific adaptation methods can substantially reduce fine-
+tuning instability, in some cases enabling LARGE models to attain even
+higher performance than BASE (e.g., PubMedBERT-LARGE on QA and
+PubMedELECTRA-LARGE on SS). See[Table 5]
+
+Like[Gu ef al,(2021}, we also observe that domain-specific vocabulary
+and pretraining are far superior, as PubMedBERT-LARGE substantially
+outperforms BioBERT-LARGE and BlueBERT-LARGE
+(2019). Again, while ELECTRA models can perform
+
+reasonably well with advanced stabilization techniques, they are still
+finicky to fine-tune and are not superior over BERT models with the
+standard MLM pretraining objective. As with BASE models, reinitializing
+the top layer is still the optimal strategy for sentence similarity. However,
+for question answering, layerwise decay is superior for LARGE models.
+
+[Table 6|compares overall BLURB test performance for LARGE models
+with both improved optimization and layer-specific adaptation. They help
+stabilize fine-tuning, with no LARGE model suffers significant instability
+issues. With domain-specific vocabulary and pretraining, PubMedBERT-
+LARGE and PubMedElectra-LARGE benefit the most and attain significant
+gain over BASE.
+
+Table 7. Ablation study on the impact of model pruning
+
+by comparing test performance on BLURB tasks after
+removing top layers of PubMedBERT.
+Layers removed Performance
+
+0 2 4 6 Drop
+BCS5-chem 93.3 93.2 93.0 92.4 -0.93
+BCS5-disease 85.6 85.4 85.2 84.3 -1.33
+NCBI-disease 87.8 88.4 88.0 87.4 -0.44
+BC2GM 84.5 84.3 83.5 82.1 -2.47
+JNLPBA 79.1 78.9 78.9 78.1 -1.03
+EBM PICO 73.4: 73.4 :73.3. - 73.4 -0.05
+ChemProt 77.2 76.1 73.4 72.7 -4.50
+DDI 82.4 82.2 79.7 79.3 -3.06
+GAD 84.0 82.3 80.2 79.2 -4.75
+BIOSSES 92.3 92.7 92.8 92.1 -0.18
+HoC 82.3 82.5 82.4 82.0 -0.31
+PubMedQA = 55.8 51.2 49.8 50.1 -6.08
+BioASQ 87.6 83.7 77.5 74.0 -13.56
+
+3.5 Ablation Study on Layer Removal
+
+Rising concerns about computation cost of large pretrained models have
+spawned research in model pruning, such as removing top layers of
+a BERT model (Sajjad et al.| |2020). We thus conducted an ablation
+study on BLURB tasks to assess the impact of removing top layers from
+PubMedBERT [Table 7]shows the results. Indeed, pruning barely impacts
+fine-tuning efficacy for many tasks, such as named entity recognition,
+evidence-based medical information extraction, sentence similarity, and
+document classification. Test performance does not substantially drop
+even when the top half of the layers were removed, suggesting that these
+tasks are relatively easy and do not require deep semantic modeling. By
+contrast, test performance in relation extraction and question answering
+was substantially impacted by layer removal, dropping up to 3-4 absolute
+points for the former and up to 6-13 points for the latter. This suggests
+model pruning may make sense for simpler tasks, but not for semantically
+more challenging tasks.
+
+3.6 New State of the Art in Biomedical NLP
+
+To further improve test performance for low-resource tasks, a common
+technique is to combine the training set and development set to train the
+final model—after hyperparameter search is done. We found that for most
+biomedical NLP tasks, this was not necessary, but it had a significant effect
+on BIOSSES. This is not surprising given that this dataset is the smallest.
+
+By combining all our findings on optimal fine-tuning strategy, we
+establish a new state of the art in biomedical NLP [Table 8]and[Table 9]show
+the results. PubMedBERT with the MLM pretraining objective remains the
+best model, consistently outperforming ELECTRA in most tasks, although
+the latter does demonstrate some advantage in question answering tasks,
+as can be seen in its superior performance with BASE models. With more
+extensive hyperparameter tuning, the gap between BASE and LARGE is
+smaller, compared to more standard fine-tuning {Table 5}, which is not
+surprising. Overall, we were able to significantly improve the BLURB
+score by 1.6 absolute points, compared to the original PubMedBERT
+
+results in[Gu et al] (from 81.35 to 82.91).
+
+3.7 Comparison with Off-the-Shelf Tools
+
+While there are many off-the-shelf tools for general-domain NLP tasks,
+there are few available for the biomedical domain. An exception is
+
+
+“main” — 2021/12/16
+
+Table 8. Comparison of BLURB test performance with
+BASE models: standard fine-tuning vs optimal fine-tuning
+with advanced stabilization methods PLUS extensive
+
+hyperparameter search.
+
+| PubMedBERT PubMedELECTRA
+Fine-tuning | Standard Optimal | Standard Optimal
+BCS5-chem 93.33 93.33 93.19 93.32
+BCS5-disease 85.62 85.62 84.99 85.16
+NCBI-disease | 87.82 88.21 87.68 87.73
+BC2GM 84.52 84.55 83.79 83.79
+JNLPBA 79.10 79.16 78.60 78.64
+EBM PICO 73.38 73.45 73.70 73.72
+ChemProt 77.24 7741 76.54 76.74
+DDI 82.36 83.17 80.58 81.09
+GAD 83.96 84.01 83.40 83.98
+BIOSSES | 92.30 94.49 80.24 92.01
+HoC | 82.32 83.02 81.45 82.57
+PubMedQA 55.84 63.92 67.64 67.64
+BioASQ 87.56 91:79 87.71 92.07
+BLURB | 81.16 82.75 79.81 82.41
+score
+
+Table 9. Comparison of BLURB test performance with
+LARGE models:
+tuning with advanced stabilization methods PLUS extensive
+
+standard fine-tuning vs optimal fine-
+
+hyperparameter search.
+
+| PubMedBERT PubMedELECTRA
+Fine-tuning | Standard Optimal | Standard Optimal
+BCS5-chem 93.23 93.23 92.90 93.25
+BC5-disease 85.77 85.77 84.82 85.23
+NCBI-disease | 88.25 88.25 87.93 88.19
+BC2GM 84.72 84.72 83.87 84.47
+JNLPBA 79.44 79.44 78.77 78.77
+EBM PICO 73.61 73.61 73.95 74.02
+ChemProt 78.77 78.77 76.80 77.26
+DDI 82.39 82.78 78.92 80.37
+GAD 83.57 83.76 83.93 83.93
+BIOSSES | 90.29 92.73 86.17 92.69
+HoC | 82.57 82.70 82.37 82.37
+PubMedQA 63.18 67.38 60.18 65.02
+BioASQ 92.36 93.36 81.71 93.14
+BLUEP | 82.02 82.91 79.83 82.44
+score
+
+scispaCy (Neumann e7 al.|[2019}, with a limited scope focusing on named
+entity recognition (NER).[Table T0|compares sciSpaCy performance with
+PubMedBERT on BLURB NER tasks. scispaCy comes with two versions,
+trained on JNLPBA and BCSCDR, respectively. We compare individually
+and to an oracle version that picks the optimal between the two for
+each evaluation dataset. While scispaCy performs well, PubMedBERT
+fine-tuned models attain substantially higher scores. We note that many
+scispaCy errors stem from imperfect entity boundaries. We thus further
+compare the two using a lenient score that regards overlapping predictions
+as correct {Table Tip.As expected, the gap shrinks but PubMedBERT
+models still demonstrate overwhelming improvement, raising the average
+score by over 10 points.
+
+1:43 — page 6 — #6
+
+R. Tinn, H. Cheng, et al.
+
+Table 10. Comparison of PubMedBERT fine-tuned
+models and scispaCy on BLURB named entity recognition
+tasks (standard entity-level test Fl score).
+
+scispaCy PubMedBERT
+
+jnlpba beScdr max | BASE LARGE
+
+BC5-chem 3.60 86.49 86.49 | 93.33 93.23
+BC5-disease 1.35 80.03 80.03 | 85.62 85.77
+NCBI-disease 1.77 57.18 57.18 | 87.82 88.25
+BC2GM 51.98 6.73 51.98} 84.52 84.72
+JNLPBA 77.31 10.28 77.31] 79.10 79.44
+Mean Score 27.20 48.14 70.60] 86.08 86.28
+
+Table 11. Comparison of PubMedBERT fine-tuned
+models and scispaCy on BLURB named entity recognition
+tasks (relaxed entity-level test Fl score - overlap counted
+
+as correct).
+scispaCy PubMedBERT
+jnipba beScdr max | BASE LARGE
+BC5-chem 7.70 91.42 91.42]95.18 95.37
+BCS5-disease 2.09 88.88 88.88] 93.34 93.74
+NCBI-disease 12.94 74.64 74.64] 95.22 95.24
+BC2GM 68.87 15.92 68.87}95.56 96.05
+JNLPBA 87.25 20.50 87.25 | 88.79 88.81
+Mean Score 35.77 58.27 82.21] 93.62 93.84
+
+4 Discussion
+
+Studies on pretraining and fine-tuning large neural language models
+originated in general domain, such as newswire and the web. Recently,
+there has been increasing interest in biomedical pretraining (Lee et al.
+
+2020b 2019} |Alsentzer et al.||2019\|Gu et al.||2021) and
+applications (Bressem et al.||2020}|Trieu et al.||2020). In particular, [Gu]
+
+2021) conducted an extensive evaluation of pretrained models on
+wide-ranging biomedical NLP tasks. However, they focus on domain-
+
+specific pretraining, whereas we study fine-tuning techniques and explore
+how they might interact with tasks and pretraining settings.
+
+Prior studies on fine-tuning stability focus on general domain
+and LARGE models,
+adjustments, such as longer training time and ADAM debiasing, suffice
+
+and often conclude that simple optimization
+
+for stabilization. By contrast, we show that in biomedical NLP, even BASE
+models may exhibit serious instability issues and simple optimization
+adjustments are necessary, but not sufficient, to restore stabilization. We
+systematically study how fine-tuning instability may be exacerbated with
+alternative pretraining settings such as using single sequences and the
+ELECTRA objective. We show that layer-specific adaptation methods help
+substantially in stabilization and identify the optimal strategy based on
+tasks and pretraining settings.
+
+Multi-task learning can also mitigate the challenge presented by low-
+resource biomedical tasks (Zuo and Zhang||2020}, but doing so generally
+requires applications with multiple related datasets, such as named-entity
+recognition (NER). As we can see from prior sections, NER tasks are
+relatively easy and domain-specific pretrained models can attain high
+scores without specific adaptation.
+
+Other relevant methods include Mixout 2020a), which
+
+hasn’t been found to consistently improve performance, and fine-tuning
+
+on intermediate tasks (Pruksachatkun et al.||2020), which is not always
+
+applicable and incurs substantial computation. We focus on layer-specific
+adaptation techniques that are generalizable and easily implemented.
+
+
+“main” — 2021/12/16
+
+1:43 page 7 #7
+
+Fine-Tuning Large Neural Language Models for Biomedical Natural Language Processing 7
+
+Adversarial training can also help instability issues 2020:
+2020] |Cheng ef al.) |2021) and prompt-based learning has
+
+been shown to work well in low-resource settings (Schick and Schiitze’
+
+2021 2021). We leave the exploration of these techniques in
+
+biomedical NLP to future work.
+
+5 Conclusion
+
+We present a comprehensive study on fine-tuning large neural language
+models for biomedical NLP applications. We show that fine-tuning
+instability is prevalent for low-resource biomedical tasks and is further
+exacerbated with alternative pretraining settings and LARGE models.
+In thorough evaluation of optimization adjustments and layer-specific
+adaptation techniques, we identify the best practice for fine-tuning
+stabilization, establishing new state of the art in the BLURB benchmark
+for biomedical NLP. Future directions include: applications to other
+biomedical tasks; exploring fine-tuning stability in clinical NLP; further
+study on model pruning and compression for practical use cases.
+
+Data Availability
+
+The BLURB benchmark underlying this article is available at{https :|
+
+//aka.ms/BLURB, The models underlying this article will be made
+available atthttps://huggingface.co/microsoft
+
+Conflict of Interest: none declared.
+
+References
+
+Alsentzer, E., Murphy, J., Boag, W., Weng, W.-H., Jin, D.,
+Naumann, T., and McDermott, M. (2019). Publicly available clinical
+BERT embeddings. In Proc. of ClincalNLP Workshop, pages 72-
+78, Minneapolis, Minnesota, USA. Association for Computational
+Linguistics.
+
+Aroca-Ouellette, S. and Rudzicz, F. (2020). On Losses for Modern
+
+In Proc. of EMNLP, pages 4970-4981, Online.
+Association for Computational Linguistics.
+
+Bressem, K. K., Adams, L. C., Gaudin, R. A., Tréltzsch, D., Hamm,
+B., Makowski, M. R., Schiile, C.-Y., Vahldiek, J. L., and Niehues, S. M.
+(2020). Highly accurate classification of chest radiographic reports using
+
+Language Models.
+
+a deep learning natural language model pre-trained on 3.8 million text
+reports. Bioinformatics, 36(21), 5255-5261.
+
+Cer, D., Diab, M., Agirre, E., Lopez-Gazpio, I., and Specia, L. (2017).
+SemEval-2017 task 1: Semantic textual similarity multilingual and
+crosslingual focused evaluation. In Proc. of SemEval-2017, pages 1-14,
+Vancouver, Canada. Association for Computational Linguistics.
+
+Cheng, H., Liu, X., Pereira, L., Yu, Y. and Gao, J. (2021).
+Posterior differential regularization with f-divergence for improving
+model robustness. In Proc. of NAACL-HLT, pages 1078-1089, Online.
+Association for Computational Linguistics.
+
+Clark, K., Luong, M.-T., Le, Q. V., and Manning, C. D. (2020). Electra:
+Pre-training text encoders as discriminators rather than generators. In
+Proc. of ICLR.
+
+Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K. (2019). Bert: Pre-
+training of deep bidirectional transformers for language understanding.
+In Proc. of NAACL-HLT, Volume 1 (Long and Short Papers), pages
+4171-4186.
+
+Gao, T., Fisch, A., and Chen, D. (2021). Making pre-trained language
+models better few-shot learners. In Proc. of ACL-IJCNLP (Volume 1:
+
+Long Papers), pages 3816-3830, Online. Association for Computational
+Linguistics.
+
+Goodfellow, I., Pouget-Abadie, J., Mirza, M., Xu, B., Warde-Farley, D.,
+Ozair, S., Courville, A., and Bengio, Y. (2014). Generative adversarial
+nets. In Proc. of NeurIPS, pages 2672-2680.
+
+GrieBhaber, D., Maucher, J., and Vu, N. T. (2020). Fine-tuning BERT
+for low-resource natural language understanding via active learning. In
+Proc. of 28th International Conference on Computational Linguistics,
+pages 1158-1171, Barcelona, Spain (Online). International Committee
+on Computational Linguistics.
+
+Gu, Y., Tinn, R., Cheng, H., Lucas, M., Usuyama, N., Liu, X.,
+Naumann, T., Gao, J., and Poon, H. (2021). Domain-specific language
+model pretraining for biomedical natural language processing. ACM
+Transactions on Computing for Healthcare, 1(1).
+
+Jiang, H., He, P., Chen, W., Liu, X., Gao, J., and Zhao, T. (2020). SMART:
+Robust and efficient fine-tuning for pre-trained natural language models
+through principled regularized optimization. In Proc. of ACL, pages
+2177-2190, Online. Association for Computational Linguistics.
+
+Kanakarajan, K. r., Kundumani, B., and Sankarasubbu, M. (2021).
+BioELECTRA:pretrained biomedical text encoder using discriminators.
+In Proc. of BioNLP Workshop, pages 143-154, Online. Association for
+Computational Linguistics.
+
+Kingma, D. P. and Ba, J. (2015). Adam: A method for stochastic
+optimization. In Y. Bengio and Y. LeCun, editors, 3rd International
+Conference on Learning Representations, ICLR 2015, San Diego, CA,
+USA, May 7-9, 2015, Conference Track Proceedings.
+
+Kudo, T. and Richardson, J. (2018).
+language independent subword tokenizer and detokenizer for neural text
+
+SentencePiece: A simple and
+
+processing. In Proc. of EMNLP: System Demonstrations, pages 66-71,
+Brussels, Belgium. Association for Computational Linguistics.
+
+Lee, C., Cho, K., and Kang, W. (2020a). Mixout: Effective regularization
+to finetune large-scale pretrained language models. In Proc. of ICLR.
+OpenReview.net.
+
+Lee, J., Yoon, W., Kim, S., Kim, D., Kim, S., So, C. H., and Kang,
+J. (2020b). Biobert: a pre-trained biomedical language representation
+model for biomedical text mining. Bioinformatics, 36(4), 1234-1240.
+
+Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., Levy, O., Lewis,
+M., Zettlemoyer, L., and Stoyanov, V. (2019). Roberta: A robustly
+optimized bert pretraining approach. arXiv preprint arXiv: 1907.11692.
+
+Mosbach, M., Andriushchenko, M., and Klakow, D. (2021). On the
+stability of fine-tuning {bert}: Misconceptions, explanations, and strong
+baselines. In Proc. of ICLR.
+
+Neumann, M., King, D., Beltagy, I., and Ammar, W. (2019). ScispaCy:
+Fast and Robust Models for Biomedical Natural Language Processing.
+pages 319-327.
+
+Peng, Y., Yan, S., and Lu, Z. (2019). Transfer learning in biomedical
+natural language processing: An evaluation of BERT and ELMo on ten
+benchmarking datasets. In Proc. of BioNLP Workshop and Shared Task,
+pages 58-65, Florence, Italy. Association for Computational Linguistics.
+
+Pruksachatkun, Y., Phang, J., Liu, H., Htut, P. M., Zhang, X., Pang, R. Y.,
+Vania, C., Kann, K., and Bowman, S. R. (2020). Intermediate-task
+transfer learning with pretrained language models: When and why does
+it work? In Proc. of ACL, pages 5231-5247, Online. Association for
+Computational Linguistics.
+
+Rajpurkar, P., Zhang, J., P. (2016).
+SQuAD: 100,000+ questions for machine comprehension of text. In
+Proc. of EMNLP, pages 2383-2392, Austin, Texas. Association for
+Computational Linguistics.
+
+Rajpurkar, P., Jia, R., and Liang, P. (2018). Know what you don’t
+know: Unanswerable questions for SQUAD. In Proc. of ACL (Volume
+2: Short Papers), pages 784-789, Melbourne, Australia. Association for
+
+Lopyrev, K., and Liang,
+
+Computational Linguistics.
+
+
+“main” — 2021/12/16
+
+Sajjad, H., Dalvi, F, Durrani, N., and Nakov, P. (2020). Poor man’s bert:
+Smaller and faster transformer models.
+
+Schick, T. and Schiitze, H. (2021). It’s not just size that matters: Small
+language models are also few-shot learners. In Proc. of NAACL-HLT,
+pages 2339-2352, Online. Association for Computational Linguistics.
+
+Sennrich, R., Haddow, B., and Birch, A. (2016).
+translation of rare words with subword units. In Proc. of ACL (Volume
+
+Neural machine
+
+1: Long Papers), pages 1715-1725, Berlin, Germany. Association for
+Computational Linguistics.
+
+Singh, B., De, S., Zhang, Y., Goldstein, T., and Taylor, G. (2015). Layer-
+specific adaptive learning rates for deep networks. In Proc. of IEEE
+ICMLA, pages 364-368. IEEE.
+
+Sogancioglu, G., Oztiirk, H., and Ozgiir, A. (2017).
+semantic sentence similarity estimation system for the biomedical
+domain. Bioinformatics, 33(14), i49-158.
+
+Trieu, H.-L., Tran, T. T., Duong, K. N. A., Nguyen, A., Miwa, M., and
+Ananiadou, S. (2020). DeepEventMine: end-to-end neural nested event
+extraction from biomedical texts. Bioinformatics, 36(19), 4910-4917.
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez,
+A.N., Kaiser, L., and Polosukhin, I. (2017). Attention is all you need.
+In Proc. of NeurIPS, pages 5998-6008.
+
+Wang, A., Singh, A., Michael, J., Hill, F, Levy, O., and Bowman, S. R.
+(2019a). GLUE: A multi-task benchmark and analysis platform for
+
+Biosses: a
+
+1:43 page 8 #8
+
+R. Tinn, H. Cheng, et al.
+
+natural language understanding. In Proc. of ICLR. OpenReview.net.
+Wang, A., Pruksachatkun, Y., Nangia, N., Singh, A., Michael, J., Hill,
+F, Levy, O., and Bowman, S. R. (2019b).
+benchmark for general-purpose language understanding systems. In
+Proc. of NeurIPS, pages 3261-3275.
+Wei, C.-H., Harris, B. R., Donghui Li and, T. Z. B., Huala, E., Kao, H.-
+Y., and Lu, Z. (2012). Accelerating literature curation with text-mining
+
+Superglue: A stickier
+
+tools: acase study of using PubTator to curate genes in PubMed abstracts.
+Database.
+
+Wong, C., Rao, R., Yin, T., Statz, C., Mockus, S., Patterson, S., and
+Poon, H. (2021). Breaching the curation bottleneck with human-machine
+reading symbiosis. MedRxiv.
+
+Zhang, T., Wu, F., Katiyar, A., Weinberger, K. Q., and Artzi, Y. (2021).
+Revisiting few-sample {bert} fine-tuning. In Proc. of ICLR.
+
+Zhu, C., Cheng, Y., Gan, Z., Sun, S., Goldstein, T., and Liu, J. J.
+(2020). Freelb: Enhanced adversarial training for natural language
+understanding. In Proc. of ICLR.
+
+Zuo, M. and Zhang, Y. (2020).
+approaches for biomedical named entity recognition. Bioinformatics,
+36(15), 4331-4338.
+
+Dataset-aware multi-task learning

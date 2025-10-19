@@ -1,0 +1,1310 @@
+arXi1v:2202.04824v2 [cs.CL] 18 Nov 2022
+
+AdaPrompt: Adaptive Model Training for Prompt-based NLP
+
+Yulong Chen®”* Yang Liu®*, Li Dong* , Shuohang Wang* ,
+Chenguang Zhu* , Michael Zeng* , Yue Zhang’°’
+
+* Zhejiang University
+* Microsoft Research
+
+° Westlake University
+
+© Westlake Institute for Advanced Study
+
+yulongchen1010@ gmail.com — yaliul0@microsoft.com yue.zhang @ wias.org.cn
+
+Abstract
+
+Prompt-based learning, with its capability to
+tackle zero-shot and few-shot NLP tasks, has
+gained much attention in community. The
+main idea is to bridge the gap between
+NLP downstream tasks and language model-
+ing (LM), by mapping these tasks into natu-
+ral language prompts, which are then filled by
+pretrained language models (PLMs). However,
+for prompt learning, there are still two salient
+gaps between NLP tasks and pretraining. First,
+prompt information is not necessarily suffi-
+ciently present during LM pretraining. Second,
+task-specific data are not necessarily well rep-
+resented during pretraining. We address these
+two issues by proposing AdaPrompt, adap-
+tively retrieving external data for continual pre-
+training of PLMs by making use of both task
+and prompt characteristics. In addition, we
+make use of knowledge in Natural Language
+Inference models for deriving adaptive verbal-
+izers. Experimental results on five NLP bench-
+marks show that AdaPrompt can improve over
+standard PLMs in few-shot settings. In addi-
+tion, in zero-shot settings, our method outper-
+forms standard prompt-based methods by up
+to 26.35% relative error reduction.
+
+1 Introduction
+
+Prompt-based methods (Brown et al., 2020; Liu
+et al., 2021; Schick and Schiitze, 2021a; Li and
+Liang, 2021) have received increasing attention
+in Natural Language Processing (NLP) recently.
+The main idea is to make the most use of pre-
+trained language models (PLMs) by adapting an
+NLP task into a natural language prompt, which
+can then be filled by PLMs. Take sentiment classifi-
+cation (Socher et al., 2013; Bai et al., 2021) for ex-
+ample. Given the sentence “J love the movie.”’, the
+standard task is to make a binary classification on
+its sentiment polarity (i.e., positive or negative).
+
+*Yulong Chen completed this work during his internship
+at Microsoft.
+
+The acting, costumes, music,
+cinematography and sound are
+all astounding...
+L
+
+In summary, the movie is
+outstanding.
+
+J
+
+input text prompt & label word
+( J
+
+Y
+prompt-aware query
+
+general data
+domain data
+» task data
+
+» prompt data
+
+_ target data for
+prompt learning
+
+Figure 1: The distributions of data in prompt-based
+models. Task data, domain data, prompt data, and gen-
+eral data (for LM pretraining) are usually sampled from
+different distributions while remaining certain overlap
+(target data for prompt training). We aim to explore
+data from the overlapping area to bridge the gap be-
+tween PLM and downstream tasks in prompt-based sys-
+tems.
+
+Prompt-based methods first transform the sentence
+into “I love the movie. The movie is (mask).” (the
+underlined text is called prompt), and then iden-
+tify its polarity by checking whether PLMs tends
+to predict “good” or “bad” for the (mask) token
+(where the predicted words are then verbalized into
+class labels). The prompt-based task formulation
+is close to masked language modeling (Schick and
+Schiitze, 2021a,b), which is the mainstream pre-
+training strategy, allowing PLMs to provide rich
+language knowledge seamlessly. Prompt-based
+methods have been shown particularly useful in
+zero-shot and few-shot settings (Petroni et al., 2019;
+Yin et al., 2019; Min et al., 2022), where with lim-
+ited direct task data, prompt-based inference ben-
+efits more from large-scale pretraining than task-
+oriented fine-tuning.
+
+Existing methods, however, still suffer from sev-
+eral potential limitations. First, large raw text
+data used for pretraining do not necessarily con-
+
+
+tain sufficient patterns that are directly related to
+task specific prompts (illustrated in Figure 1). For
+instance, the prompt for a question classification
+task is “Can you tell me the (mask): What are the
+twin cities?”, where (mask) should be a class la-
+bel word, e.g., location, person, etc (the correct
+label for this sample is definition). However, LM
+pretraining data are typically BOOKCORPUS (Zhu
+et al., 2015) plus WIKIPEDIA corpus, where such
+prompts can occur scarcely in the literal or para-
+phrased form. As a result, directly using PLMs to
+fill such handcrafted prompts across domains can
+lead to poor performance. Second, to project label
+words to task labels, most existing work (Schick
+and Schiitze, 2021a,b; Cui et al., 2021) uses a
+pre-defined verbalizer. However, it often requires
+expert knowledge to build a verbalizer that can
+thoroughly cover candidate words and a poorly-
+designed verbalizer limits the accuracy of predic-
+tions. These problems become even more serious
+under zero-shot or very-few-shot settings, where
+prompt-based models highly rely on the generaliza-
+tion ability of PLMs to new tasks and domains.
+
+We propose AdaPrompt, a framework that adapts
+PLMs for end tasks considering both the prompts
+and the verbalizer. We are interested in addressing
+the above issues under a zero-shot setting, where
+little or no labeled training data are available for a
+particular task. The main idea is to adapt a PLM
+to a strong prompt-based model for an end task
+by exploring knowledge from its raw input data.
+In particular, as shown in Figure 2, given a raw
+test set without labels, we first ask a PLM to fill
+a prompt template for each input (e.g., “Jn sum-
+mary, the movie is great.”, where “great” is filled
+by PLMs). Then, we use the resulting text (input
+text + prompt + PLM output) as a prompt-aware
+query to retrieve relevant data from a large unla-
+beled corpus. In this manner, we can obtain a large
+dataset that contain both task and prompt charac-
+teristics, and we adaptively continual pretrain (Gu-
+rurangan et al., 2020) the PLM on the retrieved
+data, which can substantially benefit prompt-based
+methods on downstream NLP tasks.
+
+Meanwhile, we found current way of building
+verbalizers is also not optimal. Given a specific
+task, different words can be verbalized into the
+same class labels. For example, a large number
+of adjectives can express the positive sentiment,
+and the best-performing candidates depend on the
+domain, PLM and context. In AdaPrompt, we pro-
+
+pose to adaptively augment verbalizers by making
+use of knowledge from PLMs and Natural Lan-
+guage Inference (NLI) models. Take sentiment
+analysis for example, given “good” and “bad” as
+seed verbalizers, we first let PLMs to predict more
+candidate words, such as “amazing” and “great”.
+Then, to identify if these candidates are suitable
+to verbalizer, we refer to an NLI model to predict
+whether “This movie is amazing.” entails the mean-
+ing of “This movie is good.”. In this way, we can
+automatically expand the verbalizers.
+Experiments on five text classification tasks
+show that AdaPrompt outperforms baseline prompt-
+based methods by 2.29%-5.79% in very-few-shot
+setting and 2.46%-15.00% in zero-shot setting on
+accuracy. To our knowledge, we are the first to
+consider how to bridge the gap between LM pre-
+training and NLP downstream tasks for prompt-
+based NLP. We release our code and data at
+https: //github.com/cylnlp/AdaPrompt.
+
+2 Related work
+
+2.1 Zero/Few-shot Prompt-based NLP
+
+Although prompt-based methods have been used
+for multiple NLP tasks (Brown et al., 2020; Raf-
+fel et al., 2020; Brown et al., 2020; Cui et al.,
+2021), most of existing work focus on text clas-
+sification (Shin et al., 2020; Gao et al., 2021;
+Min et al., 2022; Hu et al., 2022). A typical re-
+lated work is PET (Schick and Schiitze, 2021a),
+where Schick and Schiitze (2021a) formally de-
+fine pattern-verbalizer pairs that have been widely
+adopted by successive works. By using such pairs,
+Schick and Schiitze (2021a,b) develop a series of
+work to explore the potential of PLMs, includ-
+ing annotating soft labels for raw training data,
+and data augmentation iteratively. However, dif-
+ferent from PET that assumes the availability of
+large silver training set for downstream tasks, we
+focus on zero and very-few-shot settings, where
+even unannotated task-relevant dataset is also lim-
+ited (Perez et al., 2021). Therefore, following Hu
+et al. (2022), we simply focus on standard pattern-
+verbalizer pairs for text classification.
+
+Prompt engineering (Jiang et al., 2020; Gao et al.,
+2021) focuses on how to create prompts that can
+better induce PLMs to make correct predictions.
+Discrete prompt engineering works by replacing,
+deleting, inserting or paraphrasing parts of the
+prompt (Wallace et al., 2019; Yuan et al., 2021).
+Those methods can efficiently adapt PLMs to end
+
+
+tasks, but they highly reply on annotated data for
+tuning parameters. Different from the above stud-
+ies, we are interested in narrowing the gap between
+LM pretraining and NLP tasks for prompting learn-
+ing in zero or very-few-shot settings.
+
+It has been shown that using different verbal-
+izers can also be a key factor for prompt learn-
+ing (Hu et al., 2022; Cui et al., 2021). However,
+manually exploring label words is time-consuming
+and may neglect potential candidates. Recently,
+Hu et al. (2022) uses multiple external knowledge
+bases, such as related words and sentiment dictio-
+naries, to augment verbalizers for corresponding
+tasks. Different from them, we focus on exploring
+knowledge in PLMs themselves. By making use
+of external NLI models AdaPrompt can select ver-
+balizers automatically without the need of labeled
+task data, which is useful in zero-shot settings.
+
+2.2 Continual Pretraining for Domain
+Adaptation
+
+Continual pretraining (Gururangan et al., 2020) has
+shown benefit of optimizing a PLM to a target do-
+main before further fine-tuning. It can be cate-
+gorised into domain adaptive continual pretraining
+and task adaptive continual pretraining. The differ-
+ence is that, domain adaptive pretraining (DAPT)
+uses domain relevant data while task adaptive pre-
+training (TAPT) uses task-specific data.
+
+Similar to continual pretraining, many recent
+methods highlight the merits of relying on lan-
+guage modeling objectives for domain adaptation.
+Chronopoulou et al. (2019) and Radford et al.
+(2018) propose to train task-specific parameters for
+PLMs by using an auxiliary LM loss on target do-
+mains. Models like SciBERT (Beltagy et al., 2019),
+DialogLM (Zhong et al., 2021), AMRBART (Bai
+et al., 2022a), SARA-BERT (Bai et al., 2022b)
+and Dict-BERT (Yu et al., 2022) are PLMs that
+are continually pretrained on large amounts of
+domain/task-specific corpora.
+
+Data selection is a common practice in do-
+main adaption for NLP models (Moore and Lewis,
+2010; Ruder and Plank, 2017; van der Wees et al.,
+2017). It has been used in machine transla-
+tion (van der Wees et al., 2017; Wang et al., 2018),
+parsing (Plank and van Noord, 2011; Ruder and
+Plank, 2017) and sentiment analysis (Ruder et al.,
+2017). The main idea is to have a selection model
+that can distinguish in-domain and out-of-domain
+data. The selection model can be a supervised
+
+classifier (Aharoni and Goldberg, 2020), similarity-
+based metric (Plank and van Noord, 2011) or lan-
+guage model perplexity (Moore and Lewis, 2010).
+Very recently, Yao et al. (2021) propose to retrieve
+a small set of training data from general corpora
+with labeled task data as queries, finding that us-
+ing LM objective on this data as an auxiliary loss
+can help train task-specific NLP models without
+pretraining.
+
+3 Method
+
+Our method is based on prompt-based text classi-
+fication methods (Section 3.1). The overall proce-
+dure of AdaPrompt is shown in Figure 2, which can
+be divided into two parts: PLM adaptation (Sec-
+tion 3.2) and verbalizer adaptation (Section 3.4).
+In Section 3.3, we introduce a method that adapts
+both PLMs and verbalizers in an iterative way for
+continual improvements.
+
+3.1 Prompt-based Text Classification
+
+Given an input text, x = (19, %1,..., Un), we con-
+sider various tasks to classify the sentence into a
+class label 1 € £. As mentioned in Section 1,
+the standard prompt-based method reformulates
+the input into a cloze-style question and identi-
+fies its label by checking PLMs’ predictions. Ta-
+ble 1 shows the prompt templates and verbalizer
+patterns for the SST-2 (Socher et al., 2013), Yelp
+(Zhang et al., 2015), AGNews (Zhang et al., 2015),
+TREC (Voorhees and Tice, 2000) and DBPedia
+(Lehmann et al., 2015) datasets, which cover sen-
+timent classification, topic classification and ques-
+tion classification tasks. Formally, let M be a lan-
+guage model pretrained on large-scale general data,
+and (mask) be the mask token. The prompt-based
+method first defines a pattern function, Prompt,
+that converts x into a cloze-style question contain-
+ing (mask). Then, it defines a verbalizer function
+v, which maps a small set of pre-defined verbalizer
+words (V) predicted at the position of <mask> into
+class labels, i.e., vu: Vio CL.
+
+Take sentiment classification for movie review
+for instance. The task is to classify the sentiment
+polarity, where £ = {positive, negative}. For
+an input x, we choose the pattern:
+
+Prompt =x. In summary, the movie is
+(mask).”
+
+Then we define a verbalizer that maps VY =
+{ “good”, “bad’’} into L:
+
+u(“good”) = positive;
+
+
+It’s a charming and often affecting journey.
+
+~C- pattern
+
+It’s a charming and often affecting journey. In
+summary, the movie is <mask>.
+
+~<T& PLM mask prediction
+
+predicted label words
+
+TL NL filter
+
+verbalizer augmentation
+
+positive
+good bad
+
+negative
+
+so
+
+Adapted Verbalizers
+
+Prompt-aware query
+
+Sb aery
+
+Search Engine
+
+~b retrieve
+
+Jb continual pretrain
+
+Adapted Pretrained Language Model
+
+Figure 2: Overall framework of AdaPrompt.
+
+u(“bad”) = negative
+Given an example:
+x = “It’s a charming journey.’ ,
+we can convert the input into a cloze-style ques-
+tion using Prompt:
+Prompt(x) = “It’s a charming journey. In
+summary, the movie is (mask).”
+Using such pattern-verbalizer pairs, we ask M
+to directly give scores s for each label  € £ as:
+
+s(I|x) = Pr|<mask> = y|Prompt(x),M] (1)
+where | = u(y). The predicted label is:
+
+i = arg max s(I|x) (2)
+EL
+
+3.2 Adaptively Retrieve Data for Continual
+Pretraining
+
+As discussed in the Section 1, the lack of domain
+adaptation can be a potential challenge for prompt-
+based NLP models, especially under zero-shot and
+very-few-shot settings. To tackle this problem, we
+propose to build a continual pretraining dataset by
+retrieving from general corpora, with unannoated
+test texts, designed prompts and label words as
+queries. In this way, we can obtain task-relevant
+data for any tasks or domains, using only test input.
+Meanwhile, prompt and verbalzier information is
+also considered during the retrieval process, lead-
+ing to a more comprehensive dataset for prompt-
+aware continual pretraining.
+
+Formally, given a retrieval query gq, a retrieval
+engine Ep indexed on a large general dataset D can
+return a set of similar text d, = Ep(q). To obtain
+prompt-aware data that can not only adapt PLMs
+to target domains but also make PLMs more sensi-
+tive to prompts, we include both task and prompt
+characteristics when building queries. As shown
+in Figure 2, for a raw input text x in text data, we
+first convert it into Prompt(x), and obtain a set of
+predicted label words using a PLM M:
+
+O = M(Prompt(x)) (3)
+
+where O = {01, 02,.-., Ojo} are the top-|O| pre-
+dictions. We replace the mask token in P(x) with
+o;, to form a list Q of queries. For example:
+
+where g; = “x. In summary, the movie is 0;.”
+
+With this set of prompt-based queries, we re-
+trieve prompt-aware data D,, which is a small sub-
+set of the general data. In this work, we use Elas-
+ticSearch! indexed on a large general corpus as the
+search engine and we ask it to return a list of top-k
+texts that match the query. As shown in Figure 2,
+one test input can lead to multiple prompt-aware
+queries because the masked token in the prompt
+can be replaced by the |O]| predictions. In addi-
+tion, given one query, ElasticSearch can also give
+multiple returns with demanded k.
+
+‘https://www.elastic.co
+
+
+Algorithm 1 Verbalizer Adaptation
+
+Input: prompt P, seed verbalizer words y € i, candidate
+words c € C and an NLI system VV
+for cin C do
+if N(f(P, y), fill(P, c)) = Entail
+or N(fill(P, c), f(P,y)) = Entail then
+add cin yj
+end if
+end for
+Return y,
+
+We continue to pretrain the PLM M on D,
+with masked language modeling loss and obtain
+an adapted PLM Mp,,. Mp, now contains richer
+knowledge of both the target domain and the
+prompts. It can be used to replace M in Eq. |
+for zero-shot text classification.
+
+3.3 Iterative Adaptation
+
+After obtaining Mp,, we can iterate the process
+by replacing M with Mp, in Eq. 3, and obtain
+an iterative set of predicted words and a list of
+queries marked as O’ and Q’. Given that 0’ con-
+tains more in-domain knowledge, we can retrieve
+higher quality pretraining data with more task rel-
+evant information, using Q’ to query the Ep. In
+this way, we obtain a new version of D>» and a new
+continual pretrained PLM M/, 7 which can also be
+used for zero-shot predictions using Eq. 1. In this
+work, we conduct this procedure twice.
+
+3.4 Adaptive Verbalizer Augmentation
+
+As described in Section 3.1, the regular prompt-
+based method defines the verbalizer that maps pre-
+dicted label word into task classes, such as “good”
+for positive and “bad” for negative. However,
+predefined verbalizer can be limited. To expand
+this verbalizer, we first infer top-|O| label words
+at mask token position over all inputs in test set.
+We filter the predicted words and obtain a set of
+high frequent words C as candidates for verbalizer
+augmentation. Then, we propose a new method for
+exploring useful verbalizer words by using knowl-
+edge from a Natural Language Entailment model.
+
+Specifically, given a seed verbalizer word y; €
+Y, for label J, and a candidate word c € C, we com-
+pare whether a prompt filled by y is entailed with
+the prompt filled by c. The pseudo code is shown
+in Algorithm 1. If entailment relation holds for this
+pair, we add c add to Yj. And the new Y which can
+be considered as an augmented verbalizer.
+
+After obtaining the augmented set of verbalizer
+
+words, Eq. | can be rewritten as:
+
+s(I|x) = 5H 2d Pr|<mask> = y|Prompt(x), M|]
+(5)
+
+and we can still use Eq. 2 for prediction.
+
+4 Experiments
+
+4.1 Datasets and Prompts
+
+To evaluate our methods, we conduct experiments
+on five benchmarks: SST-2 (Socher et al., 2013),
+Yelp (Zhang et al., 2015), AGNews (Zhang et al.,
+2015), TREC (Voorhees and Tice, 2000) and DBPe-
+dia (Lehmann et al., 2015) datasets. Table 1 shows
+prompt templates and seed verbalizer words that we
+use for each dataset. For AGNews and YELP, we
+adapt patterns and verbalizers from PET (Schick
+and Schiitze, 2021a) since it is the basic prompt-
+based method that has been mostly widely used.
+
+AGNevws is a text classification dataset in the
+domain of News. Given a headline and a main
+text body, the model is require to classify the news
+into one of the classes: (1) World, (2) Sports, (3)
+Business or (4) Science/Tech.
+
+YELP is a sentiment analysis dataset. Given a
+restaurant review, the task is to predict whether the
+review is positive or negative.
+
+SST-2 is a sentiment analysis dataset similar to
+YELP but its domain is movie reviews. Thus, we
+use the same seed prompt and verbalizer words
+as for YELP, but change “restaurant” in prompt
+template to “movie”.
+
+DBPedia 2014 is an ontology classification
+dataset, extracted from DBPedia 2014 with 14 non-
+overlap classes, such as Educational Institution and
+Office Holder. We define two patterns for this task:
+
+P1(x) = “Description to the (mask) x”
+P2(x) = “Introduction to the (mask) x”
+
+and we use P2 as the seed pattern.
+
+TREC-10 is a question classification dataset.
+Given a question, the task is identify the objec-
+tive that the question asks, and classify it into one
+of six classes, such as a definition question or a
+numeric question. We define two patterns for this
+task:
+
+P1(x) = “Tell me the (mask) x”
+P2(x) = “Can you tell me the (mask): x”
+and P2 as the seed prompt.
+
+4.2 Settings
+
+In this work, we take ROBERTA-large (Liu et al.,
+2019) as our foundation PLM and adopt pattern-
+
+
+Dataset | Class | Objective Prompt Template Verbalizer
+SST-2 2 sentiment Text In summary, this movie is (mask). “good”, “bad”
+Yelp 2 sentiment | Text In summary, this restaurant is (mask). “good”, “bad”
+AGNews 4 news topic [Category: (mask) ] Title , Body “Sport”, “Tech”, “Business”, “World”
+TREC 6 question Can you tell me the (mask) Text xP (anation % fh escrip HON person,
+location”, “number”, “entity
+“company”, “school”, “artist”, “film”,
+DBPedia 14 ontology Introduction to the (mask) Text book > PB lan > 'bailding ° village ’
+animal”, “sport”, “album”,
+“officer”, “scenery”, “transportation”
+
+Table 1: Datasets used in this paper with seed prompts and verbalizer words. Each seed verbalizer word corre-
+
+sponds to a class label.
+
+Dataset | test set Top-|O| Espace Resulting Data
+TREC 500 20 100 60k
+SST-2 872 20 100 205k
+AGNews | 7,600 10 50 414k
+YELP 38,000 1 50 267k
+DBPedia | 70,000 1 50 1,301k
+
+Table 2: Data statistics for datasets. Espace corre-
+sponds to the ElasticSearch space. Note that the result-
+ing data size is calculated after data de-duplication.
+
+verbalizer pairs from (Schick and Schiitze, 2021a)
+(Section 3.1) as the baseline setting which is widely
+used and can be easily extended to other meth-
+ods (Shin et al., 2020).
+
+We conduct experiments in zero-shot and few-
+shot settings. In the zero-shot setting, we directly
+use PLMs to infer label words at masked posi-
+tions. Under the few-shot setting, we follow Schick
+and Schiitze (2021la) and Hu et al. (2022) and
+use prompt-tuning, which directly fine-tunes a LM
+given a small set of annotated data and prompts.
+
+For zero-shot settings, the choice of hyper-
+parameters is based on previous work (Gao et al.,
+2021; Schick and Schiitze, 2021a,b). For all con-
+tinual pretraining, we use a learning rate of le~°,
+batch size of 96. We train each model for 3 epochs
+and use the checkpoint at 500 steps for evaluation.
+
+For few-shot settings, we evaluate our models
+with 10, 50, 100 training samples. We follow pre-
+vious work (Hu et al., 2022; Schick and Schiitze,
+2021a; Gao et al., 2021) and repeat the training
+and evaluation for 5 times using different seed, and
+report the averaged scores for each datasets.
+
+Prompt-Aware Data Retrieval We take pre-
+train data of the ROBERTA model ( BOOK-
+CORPUS (Zhu et al., 2015), WIKIPEDIA, CC-
+NEWS (Nagel, 2016), STORIES (Trinh and Le,
+2018), and OPENWEBTEXT (Gokaslan and Cohen,
+2019)) as the general dataset to query from. We
+index them on sentence level with ElasticSearch
+
+and consider TF-IDF as the similarity metric.
+
+Table 2 presents the statistics of evaluation
+datasets used in this paper. TREC and SST contain
+smaller test sets, while YELP and DBPedia contain
+much larger test sets. To balance the retrieved data
+size, we set different top-|O| for predicted words
+and ElasticSearch space (k) for different datasets
+based on our practical experience. In other words,
+given one test input, we have |O| x k data. After
+de-duplication, the resulting retrieved data sizes are
+shown in Table 2.
+
+Verbalizer Augmentation To obtain possible
+verbalizers that can better represent classes, we
+first obtain top-NV predicted words given a test sam-
+ple (N = 20 for SST-2 and TREC, N = 10 for
+AGNews and N = 5 for YELP and DBPedia, con-
+sidering their test set sizes). We set the number of
+candidate words |C| = 20 x |£|, where |£| is num-
+ber of classes. We use a ROBERTA-large model
+fine-tuned on MNLI (Williams et al., 2018), as
+the entailment model for identifying potential ver-
+balizer words for augmentation. Candidate with
+probability higher than a threshold ¢ is then added
+to the augmented verbalizer. We set t = 0.4 by
+experiments.
+
+For comparison, we also use Word2Vec
+(Mikolov et al., 2013) to obtain word vectors and
+explore potential verbalizer words by their similar-
+ity with the seed verbalizer words.
+
+4.3 Results
+4.3.1 Main Results
+
+Zero-shot Performance In zero-shot setting, we
+compare AdaPrompt with prompt-based methods
+using ROBERTA (Schick and Schiitze, 2021a),
+GPT-2 (Gao et al., 2021) and GPT-3 (Zhao et al.,
+2021), respectively. The Channel refers to noisy
+channel model (Min et al., 2022) based on GPT-
+2. Table 3 presents the results under zero-shot set-
+
+
+Models SST-2 Yelp AGNEWS DBPedia TREC Avg.
+GPT-2 |63.00/  NA(NA) — 59.80/ NA(NA) 32.30/ NA(NA) 38.70/ NA(NA)|] ——
+Channel | 77.10/ NA(NA) -- 61.80/ NA(NA) 51.40/ NA(NA) 30.50/ NA(NA)|) ——
+GPT-3 | 75.80/ 0.00(75.80) —— 73.90/0.00(73.90) 59.70/0.00(59.70) 57.40/0.00(57.40) | ——
+R. 64.56/16.77(88.99) 72.63/ 6.34(87.97) 69.52/6.96(78.76) 56.32/0.49(56.67) 45.50/0.14(45.60) | 61.71
+Ada 75.92/17.36(91.28) 75.09/17.57(89.25) 76.55/7.28(84.95) 70.95/8.80(77.17) 60.50/3.54(63.00) | 71.80
+iAda 77.18/17.96(91.74) 75.81/18.05(90.41) 74.28/9.00(83.37) 73.01/6.70(77.92) 61.10/1.27(62.00) | 72.28
+
+Table 3: Zero-shot results. We report average accuracy and standard deviation of different patterns here. Results
+of the best patterns are shown in brackets. The Avg. reports the overall averaged results. R. stands for ROBERTA-
+large. Ada and iAda denote to AdaPrompt and iterative AdaPrompt based on ROBERTA~-large, respectively. The
+results of GPT-2 large and Channel are from (Min et al., 2022), and Channel is based on GPT-2 large. GPT-3
+results are reported by Zhao et al. (2021), using GPT-3 (175B). NA denotes to that results are not reported. For
+GPT-3 (Zhao et al., 2021), they only use a fixed prompt format.
+
+|T| Models SST-2 Yelp AGNEWS DBPedia TREC Avg.
+10 ROBERTA | 84.97+9.88 86.84+16.08 78.42+6.23 86.78+1.10 45.5649.55 | 76.51
+AdaPrompt | 90.42+1.63 89.13+13.30 84.21+2.00 91.6841.84 57.5647.85 | 82.60
+50 ROBERTA | 92.5641.31 95.874 0.57 85.5041.36 94.72+0.49 73.884 3.13 | 88.51
+AdaPrompt | 92.75+1.03 95.74+ 0.89 86.29+0.80 9459+40.71 78.42+6.17 | 89.56
+100 ROBERTA | 92.40+1.04 95.89+ 0.68 87.29+1.31 95.59+0.52 86.304 2.14 | 91.49
+AdaPrompt | 92.75+0.68 95.93+ 0.95 87.98+0.65 95.6040.51 87.58+1.38 | 91.97
+
+Table 4: Average accuracy and standard deviation on SST-2, YELP, AGNews, DBPedia and TREC under few-shot
+
+settings. |7| is the training set size. Each experiment is repeated 5 times using different seeds.
+
+ting. Following previous work (Schick and Schiitze,
+2021a,b), we report average accuracy, standard de-
+viation and accuracy of the best pattern over differ-
+ent patterns.
+
+First, compared with our foundation model,
+ROBERTA-large, we see that AdaPrompt consis-
+tently outperforms regular prompt-based methods
+on all datasets with better average performance and
+best pattern performance, bringing a 2.46 ~ 14.63
+improvement. It is noticeable that AdaPrompt out-
+performs GPT-3 in zero-shot setting, which is a
+huge model with 175B parameters pretrained on
+a gigantic corpus. This confirms the effective-
+ness of AdaPrompt in domain adaptation. We ob-
+serve that iterative AdaPrompt can further bring
+improvements on most datasets (SST-2, YELP and
+DBPedia). This directly demonstrates that PLMs
+continual pretrained on the retrieved data can be
+more adaptive to downstream tasks, and thus gen-
+erate more task relevant label words, which can
+serve as a source to find better texts. Performance
+of iterative AdaPrompt (iAda) decreases on AG-
+NEWS, we believe this is because this news dataset
+is similar with general data used for pretraining
+ROBERTA, and thus continual pretraining on such
+retrieved data can be less useful. Finally, we see
+that AdaPrompt improves over 10.09 accuracy of
+the overall performance.
+
+Few-shot Performance Table 4 reports the ex-
+perimental results in few shot setting. Each ex-
+periment is repeated 5 times using different seeds
+and we report the average accuracy and standard
+deviation. To explore whether AdaPrompt can con-
+sistently bring improvement to ROBERTA, we con-
+duct experiments using 10, 50, 100 samples, respec-
+tively.
+
+Compared with ROBERTA-large baseline, un-
+der few-shot setting, AdaPrompt can still improve
+model performance. Although the relative im-
+provement decreases as the size of training set im-
+proves, we can see that AdaPrompt outperforms
+ROBERTA over all tasks in all few-shot settings.
+In particular, AdaPrompt outperforms standard
+ROBERTA models by 2.29 ~ 5.79% in 10-shot
+setting, showing that it is useful in the very-few-
+shot setting.
+
+4.3.2 Ablation Study
+
+To study the effectiveness of continual pretrain-
+ing on prompt-aware data and verbalier augmenta-
+tion, we conduct ablation experiments by removing
+continual pretraining (CP) or verbalizer augmenta-
+tion (va). As shown in Table 5, We can see that
+compared with foundation model (-CP-va, 61.71
+acc. on average), continual pretraining and ver-
+balizer augmentation can both bring improvement
+to model performance (5.31 and 5.89 acc. on av-
+erage, respectively), and the model has the best
+
+
+Models SST-2 Yelp AGNEWS DBPedia TREC Avg.
+AdaPrompt | 75.92 + 17.36 75.09 + 17.57 76.55 + 07.28 70.95 + 08.80 60.50 + 03.54] 71.80
+-va 71.07 413.58 71.04+ 15.57 72.164 05.78 65.90 + 02.71 45.40 + 01.13 | 65.11
+-CP 72.16 + 16.35 75.72417.79 75.70 + 07.88 50.95 + 00.09 58.70 + 03.25 | 66.65
+-PR 71.22415.55 74.85+ 17.51 75.12 + 05.71 70.40 + 07.48 58.60 + 00.57 | 70.04
+-CP-va 64.56 + 16.77 72.63 + 16.34 69.52 + 06.96 56.32 + 00.49 45.50 + 00.14 | 61.71
+
+6699
+
+Table 5: Experimental results of ablation study.
+
+means “without” here. va: verbalizer augmentation, CP:
+
+Continual Pretraining, PR: Prompt-aware Retrieval. Note that -PR means we do not use prompt-aware retrieval, but
+simply use raw test input data for retrieval and continual pretraining, refered as in-domain adaptation.
+
+Model SST-2 DBPedia
+ROBERTA | 64.82 + 11.62 | 56.49 + 00.41
+AdaPrompt | 73.05 + 13.08 | 70.97 + 08.87
+
+Table 6: Model performance tested on unseen test set.
+We report averaged accuracy and standard deviation.
+
+SST-2
+Bias I 10 50 100
+Size 3k 23k 98k 205K
+Accuracy | 224 15.06 75.95 75.92
++16.77 417.34 +17.73  +17.36
+DBPedia
+Espace I 5 25 50
+Size 58k 235k 708k _1,301k
+Accuracy | 1004 7139 74.13 70.95
++9.66 +10.78 +751 +8.80
+
+Table 7: Analysis on retrieved data size. Data sizes are
+calculated after de-duplication.
+
+results when two methods are combined together
+(AdaPrompt), suggesting these two methods can
+benefit each other.
+
+In addition, we investigate the influence on
+model performance by removing prompt-aware re-
+trieval and only retrieving with raw texts. From the
+table we can see that on all datasets, using prompt-
+augmented queries (AdaPrompt) give substantially
+stronger results. Take SST-2 for example, the ac-
+curacy is 71.22 (SST-2 -PR) given only raw input
+queries, but 75.92 with prompt-augmented queries,
+with a 4.7 absolute improvement. This shows that
+continual pretraining using prompt-aware data is
+highly beneficial to zero-shot prompt-based NLP.
+
+4.4 Analysis
+
+Generalization Capability For experiments in
+section 4.3.1, we use task test set as the sources to
+build queries for retrieving pretraining data. How-
+ever, in a more general setting, we want to learn
+when the query data and test set are different,
+whether AdaPrompt can still generalize to this test
+set. To this end, we build an unseen test set by
+using the original training set of SST-2 and DB-
+Pedia. We then evaluate models (trained using
+
+queries from the origin test set) on this unseen test
+set. As shown in Table 6, AdaPrompt achieves
+73.05 and 70.97 accuracy on SST-2 and DBPedia,
+respectively. Compared with performance on orig-
+inal test set (Table 3), although the performance
+of AdaPrompt sightly decreases when evaluated
+on SST-2 unseen test set, it can still outperform
+ROBERTA by a large margin (+8.23). It demon-
+strates that AdaPrompt has a strong generalization
+ability when query data and test set are different.
+
+Size of Retrieved Data As stated, Elasticsearch
+returns top-k texts in the order of matching scores.
+Using a smaller k, the retrieved data are more tex-
+tual related to the query, while using a larger k, the
+retrieved data can contain certain noise. To com-
+pare the effects of different sizes of retrieved data
+for continual pretraining, We set k to 1, 10, 50 100
+for the SST-2 and set k to 1, 5, 25, 50 for DBPe-
+dia, respectively. As shown in Table 7, we see that
+accuracy rises in the beginning when retrieval size
+increases. But as the retrieval size grows bigger,
+the accuracy starts to decrease slightly. This can be
+explained by that the lower-ranked retrieved data
+have a lower relevance to the target task, which
+introduces more noise in continual pretraining. We
+use fixed & for our experiments in zero-shot set-
+tings (Section 4.2), due to lack of a validation set.
+In few-shot settings, in practice, / can be consid-
+ered as a hyperparameter and tuned over validation
+data.
+
+The Effect of Verbalizer Strategies Table 8
+compares the model performance when using dif-
+ferent verbalizer augmentation strategies, namely
+using NLI model and word similarity (Section 4.2).
+Additional, we compare AdaPrompt with a verbal-
+izer augmentation method using knowledge base
+(KB) (Hu et al., 2022) 7. To set a fair compari-
+son, we limit the verbalizer word set for each label
+
+>For sentiment analysis tasks, we take sentiment words
+shown in (Hu et al., 2022), which are adopted from https: //
+
+www. enchantedlearning.com/wordlist/; for other tasks,
+we use most related words: https: //relatedwords.org/.
+
+
+Dataset SST-2 YELP AGNEWS DBPedia TREC Avg.
+Vaw 74.91 411.71 75.39417.47 69.07+06.70 55.32+11.33 60.60+ 03.39 | 67.06
+Vam 75.92 £17.36 75.09417.57 76.55+07.28 70.95+08.80 60.50+ 03.54 | 71.80
+Uk 69.07 + 15.80 74.64417.55 60.15407.79 74.85417.50 24.00+ 00.57 | 60.54
+Table 8: Model performance of AdaPrompt using different verbalizer augmentation strategies. vay: using
+
+word2vec similarity. va,,: using ROBERTA trained on MNLI. va;: using most related words/sentiment dic-
+
+tionary. Avg. refers to overall averaged results.
+
+Model Size SST-2
+
+Albert 17M [54.674 3.30(58.94)
+Albert+AdaPrompt 17M |58.51+ 5.79(63.99)
+Bert 340M | 58.03 £ 6.18(63.53)
+Bert+AdaPrompt 340M | 68.89 + 16.11(85.67)
+ROBERTA 355M | 64.56 £ 16.77(88.99)
+ROBERTA+AdaPrompt | 355M | 77.18 + 17.96(91.74)
+
+Table 9: We report average accuracy and standard de-
+viation here. Results of best patterns are shown in the
+bracket.
+
+within 5. We report average accuracy and standard
+deviation here.
+
+Results show that, compared with using word
+similarity to select candidate words and directly us-
+ing KBs to augment verbalizer words, using NLI to
+augment verbalizer words gives better performance
+on most tasks, and is also more stable. We also
+find that using KBs to augment verbalizer words
+gives better performance on the DBPedia tasks, but
+much worse performance on the TREC task. This
+can be because TREC is less close to topic classi-
+fication (Min et al., 2022), and directly using the
+most related words can be noisy. This also suggests
+that more sophisticated strategy that cares of tasks
+and prompt information can be useful, which we
+leave for future work.
+
+AdaPrompt with different PLMs We ap-
+ply AdaPrompt with different PLMs (Bert-large,
+Albert-large and ROBERTA-large). We report
+experimental results on the SST-2 dataset in Ta-
+ble 9. Although the performance of different mod-
+els varies, we observe that AdaPrompt can consis-
+tently bring huge improvement over all models. We
+also find that model performance increases with
+model size. AdaPrompt using ROBERTA-large
+outperforms other models overall performance by
+a large margin (8.29 ~ 18.67) and achieves 91.74
+accuracy with the best pattern.
+
+5 Conclusion
+
+We investigated AdaPrompt, a zero-shot prompt-
+based method for NLP that makes use of test input
+data and prompts for adaptive continual pretraining
+
+and verbalizer selection. Results on five classi-
+fication datasets show that AdaPrompt improves
+over a standard prompt method by large margins.
+In particular, retrieving relevant data for contin-
+ual pretraining of a language model can serve to
+warm-up the model for both domain adaptation and
+prompt-filling tasks. In addition, an NLI model al-
+lows effective selection of filled tokens to achieve
+improved performance.
+
+Limitation
+
+We acknowledge two major limitations of this
+work:
+
+1. We only tested AdaPrompt on text classifica-
+tion tasks. The intention is to use this clear
+setting to compare with other prompt-based
+models. However, it is possible to extend
+AdaPrompt to other natural language under-
+standing tasks or languages, which we leave
+for future exploration.
+
+2. We only tested with ElasticSearch as the
+search method. However, there are signals
+showing the quality of retrieved text is con-
+strained to the search engines. A better config-
+uration or model of the search method might
+further improve AdaPrompt.
+
+Acknowledgements
+
+Yue Zhang is the corresponding author. We appre-
+ciate all reviewers for their comments.
+
+References
+
+Roee Aharoni and Yoav Goldberg. 2020. Unsupervised
+domain clusters in pretrained language models. In
+Proceedings of the 58th Annual Meeting of the Asso-
+ciation for Computational Linguistics, pages 7747—-
+7763, Online. Association for Computational Lin-
+guistics.
+
+Xuefeng Bai, Yulong Chen, and Yue Zhang. 2022a.
+Graph pre-training for AMR parsing and generation.
+In Proceedings of the 60th Annual Meeting of the
+Association for Computational Linguistics (Volume
+
+
+1: Long Papers), pages 6001-6015, Dublin, Ireland.
+Association for Computational Linguistics.
+
+Xuefeng Bai, Pengbo Liu, and Yue Zhang. 2021. Inves-
+tigating typed syntactic dependencies for targeted
+sentiment classification using graph attention neu-
+ral network. JEEE/ACM Transactions on Audio,
+Speech, and Language Processing, 29:503-514.
+
+Xuefeng Bai, Linfeng Song, and Yue Zhang. 2022b.
+Semantic-based pre-training for dialogue under-
+standing. In Proceedings of the 29th International
+Conference on Computational Linguistics, pages
+592-607, Gyeongju, Republic of Korea. Interna-
+tional Committee on Computational Linguistics.
+
+Iz Beltagy, Kyle Lo, and Arman Cohan. 2019. SciB-
+ERT: A pretrained language model for scientific text.
+In Proceedings of the 2019 Conference on Empirical
+Methods in Natural Language Processing and the
+9th International Joint Conference on Natural Lan-
+guage Processing (EMNLP-IJCNLP), pages 3615—
+3620, Hong Kong, China. Association for Computa-
+tional Linguistics.
+
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,
+Clemens Winter, Christopher Hesse, Mark Chen,
+Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin
+Chess, Jack Clark, Christopher Berner, Sam Mc-
+Candlish, Alec Radford, Ilya Sutskever, and Dario
+Amodei. 2020. Language models are few-shot learn-
+ers. In Advances in Neural Information Processing
+Systems 33: Annual Conference on Neural Informa-
+tion Processing Systems 2020, NeurIPS 2020, De-
+cember 6-12, 2020, virtual.
+
+Alexandra Chronopoulou, Christos Baziotis, and
+Alexandros Potamianos. 2019. An embarrassingly
+simple approach for transfer learning from pre-
+trained language models. In Proceedings of the
+2019 Conference of the North American Chapter of
+the Association for Computational Linguistics: Hu-
+man Language Technologies, Volume 1 (Long and
+Short Papers), pages 2089-2095, Minneapolis, Min-
+nesota. Association for Computational Linguistics.
+
+Leyang Cui, Yu Wu, Jian Liu, Sen Yang, and Yue
+Zhang. 2021. Template-based named entity recog-
+nition using BART. In Findings of the Association
+for Computational Linguistics: ACL-IJCNLP 2021,
+pages 1835-1845, Online. Association for Computa-
+tional Linguistics.
+
+Tianyu Gao, Adam Fisch, and Danqi Chen. 2021.
+Making pre-trained language models better few-shot
+learners. In Proceedings of the 59th Annual Meet-
+ing of the Association for Computational Linguistics
+and the 11th International Joint Conference on Nat-
+ural Language Processing (Volume 1: Long Papers),
+pages 3816-3830, Online. Association for Computa-
+tional Linguistics.
+
+Aaron Gokaslan and Vanya Cohen. 2019. Openweb-
+text corpus.
+
+Suchin Gururangan, Ana Marasovi¢é, Swabha
+Swayamdipta, Kyle Lo, Iz Beltagy, Doug Downey,
+and Noah A. Smith. 2020. Don’t stop pretraining:
+Adapt language models to domains and tasks. In
+Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics, pages
+8342-8360, Online. Association for Computational
+Linguistics.
+
+Shengding Hu, Ning Ding, Huadong Wang, Zhiyuan
+Liu, Jingang Wang, Juanzi Li, Wei Wu, and
+Maosong Sun. 2022. Knowledgeable prompt-
+tuning: Incorporating knowledge into prompt ver-
+balizer for text classification. In Proceedings of the
+60th Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers), pages
+2225-2240, Dublin, Ireland. Association for Com-
+putational Linguistics.
+
+Zhengbao Jiang, Frank F. Xu, Jun Araki, and Graham
+Neubig. 2020. How can we know what language
+models know? Transactions of the Association for
+Computational Linguistics, 8:423—438.
+
+Jens Lehmann, Robert Isele, Max Jakob, Anja Jentzsch,
+Dimitris Kontokostas, Pablo N Mendes, Sebastian
+Hellmann, Mohamed Morsey, Patrick Van Kleef,
+Soren Auer, et al. 2015. Dbpedia—a large-scale, mul-
+tilingual knowledge base extracted from wikipedia.
+Semantic web, 6(2):167-195.
+
+Xiang Lisa Li and Percy Liang. 2021. _ Prefix-
+tuning: Optimizing continuous prompts for genera-
+tion. arXiv preprint arXiv:2101.00190.
+
+Pengfei Liu, Weizhe Yuan, Jinlan Fu, Zhengbao Jiang,
+Hiroaki Hayashi, and Graham Neubig. 2021. Pre-
+train, prompt, and predict: A systematic survey of
+prompting methods in natural language processing.
+arXiv preprint arXiv:2107.13586.
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Dangi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. ArXiv preprint, abs/1907.11692.
+
+Tomas Mikolov, Kai Chen, Greg S Corrado, and Jeffrey
+Dean. 2013. Efficient estimation of word represen-
+tations in vector space.
+
+Sewon Min, Mike Lewis, Hannaneh Hajishirzi, and
+Luke Zettlemoyer. 2022. Noisy channel language
+model prompting for few-shot text classification. In
+Proceedings of the 60th Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 5316-5330, Dublin, Ireland.
+Association for Computational Linguistics.
+
+Robert C. Moore and William Lewis. 2010. Intelligent
+selection of language model training data. In Pro-
+ceedings of the ACL 2010 Conference Short Papers,
+pages 220-224, Uppsala, Sweden. Association for
+Computational Linguistics.
+
+
+Sebastian Nagel. 2016. Cc-news.
+
+Ethan Perez, Douwe Kiela, and Kyunghyun Cho. 2021.
+True few-shot learning with language models. ArXiv
+preprint, abs/2105.11447.
+
+Fabio Petroni, Tim Rocktischel, Sebastian Riedel,
+Patrick Lewis, Anton Bakhtin, Yuxiang Wu, and
+Alexander Miller. 2019. Language models as knowl-
+edge bases? In Proceedings of the 2019 Confer-
+ence on Empirical Methods in Natural Language
+Processing and the 9th International Joint Confer-
+ence on Natural Language Processing (EMNLP-
+IJCNLP), pages 2463-2473, Hong Kong, China. As-
+sociation for Computational Linguistics.
+
+Barbara Plank and Gertjan van Noord. 2011. Effec-
+tive measures of domain similarity for parsing. In
+Proceedings of the 49th Annual Meeting of the As-
+sociation for Computational Linguistics: Human
+Language Technologies, pages 1566-1576, Portland,
+Oregon, USA. Association for Computational Lin-
+guistics.
+
+Alec Radford, Karthik Narasimhan, Tim Salimans, and
+Ilya Sutskever. 2018. Improving language under-
+standing by generative pre-training.
+
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+Wei Li, and Peter J Liu. 2020. Exploring the lim-
+its of transfer learning with a unified text-to-text
+transformer. Journal of Machine Learning Research,
+21:1-67.
+
+Sebastian Ruder, Parsa Ghaffari, and John G Breslin.
+2017. Data selection strategies for multi-domain
+sentiment analysis. ArXiv preprint, abs/1702.02426.
+
+Sebastian Ruder and Barbara Plank. 2017. Learning to
+select data for transfer learning with Bayesian opti-
+mization. In Proceedings of the 2017 Conference on
+Empirical Methods in Natural Language Processing,
+pages 372-382, Copenhagen, Denmark. Association
+for Computational Linguistics.
+
+Timo Schick and Hinrich Schiitze. 2021a. Exploiting
+cloze-questions for few-shot text classification and
+natural language inference. In Proceedings of the
+16th Conference of the European Chapter of the As-
+sociation for Computational Linguistics: Main Vol-
+ume, pages 255-269, Online. Association for Com-
+putational Linguistics.
+
+Timo Schick and Hinrich Schiitze. 2021b. It’s not just
+size that matters: Small language models are also
+few-shot learners. In Proceedings of the 2021 Con-
+ference of the North American Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies, pages 2339-2352.
+
+Taylor Shin, Yasaman Razeghi, Robert L Logan IV,
+Eric Wallace, and Sameer Singh. 2020. Eliciting
+knowledge from language models using automati-
+cally generated prompts. In Proceedings of the 2020
+Conference on Empirical Methods in Natural Lan-
+guage Processing (EMNLP), pages 4222-4235.
+
+Richard Socher, Alex Perelygin, Jean Wu, Jason
+Chuang, Christopher D. Manning, Andrew Ng, and
+Christopher Potts. 2013. Recursive deep models
+for semantic compositionality over a sentiment tree-
+bank. In Proceedings of the 2013 Conference on
+Empirical Methods in Natural Language Processing,
+pages 1631-1642, Seattle, Washington, USA. Asso-
+ciation for Computational Linguistics.
+
+Trieu H Trinh and Quoc V Le. 2018. A simple
+method for commonsense reasoning. ArXiv preprint,
+abs/1806.02847.
+
+Marlies van der Wees, Arianna Bisazza, and Christof
+Monz. 2017. Dynamic data selection for neural ma-
+chine translation. In Proceedings of the 2017 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 1400-1410, Copenhagen, Den-
+mark. Association for Computational Linguistics.
+
+Ellen M Voorhees and Dawn M Tice. 2000. Building
+a question answering test collection. In Proceedings
+of the 23rd annual international ACM SIGIR confer-
+ence on Research and development in information
+retrieval, pages 200-207.
+
+Eric Wallace, Shi Feng, Nikhil Kandpal, Matt Gardner,
+and Sameer Singh. 2019. Universal adversarial trig-
+gers for attacking and analyzing NLP. In Proceed-
+ings of the 2019 Conference on Empirical Methods
+in Natural Language Processing and the 9th Inter-
+national Joint Conference on Natural Language Pro-
+cessing (EMNLP-IJCNLP), pages 2153-2162, Hong
+Kong, China. Association for Computational Lin-
+guistics.
+
+Wei Wang, Taro Watanabe, Macduff Hughes, Tetsuji
+Nakagawa, and Ciprian Chelba. 2018. Denois-
+ing neural machine translation training with trusted
+data and online data selection. In Proceedings of
+the Third Conference on Machine Translation: Re-
+search Papers, pages 133-143, Brussels, Belgium.
+Association for Computational Linguistics.
+
+Adina Williams, Nikita Nangia, and Samuel Bowman.
+2018. A broad-coverage challenge corpus for sen-
+tence understanding through inference. In Proceed-
+ings of the 2018 Conference of the North American
+Chapter of the Association for Computational Lin-
+guistics: Human Language Technologies, Volume
+I (Long Papers), pages 1112-1122, New Orleans,
+Louisiana. Association for Computational Linguis-
+tics.
+
+Xingcheng Yao, Yanan Zheng, Xiaocong Yang, and
+Zhilin Yang. 2021. Nlp from scratch without large-
+scale pretraining: A simple and efficient framework.
+ArXiv preprint, abs/2111.04130.
+
+Wenpeng Yin, Jamaal Hay, and Dan Roth. 2019.
+Benchmarking zero-shot text classification:
+Datasets, evaluation and entailment approach.
+In Proceedings of the 2019 Conference on Empiri-
+cal Methods in Natural Language Processing and
+the 9th International Joint Conference on Natural
+
+
+Language Processing (EMNLP-IJCNLP), pages
+3914-3923, Hong Kong, China. Association for
+Computational Linguistics.
+
+Wenhao Yu, Chenguang Zhu, Yuwei Fang, Donghan
+Yu, Shuohang Wang, Yichong Xu, Michael Zeng,
+and Meng Jiang. 2022. Dict-BERT: Enhancing lan-
+guage model pre-training with dictionary. In Find-
+ings of the Association for Computational Linguis-
+tics: ACL 2022, pages 1907-1918, Dublin, Ireland.
+Association for Computational Linguistics.
+
+Weizhe Yuan, Graham Neubig, and Pengfei Liu. 2021.
+Bartscore: Evaluating generated text as text genera-
+tion. ArXiv preprint, abs/2106.11520.
+
+Xiang Zhang, Junbo Jake Zhao, and Yann LeCun. 2015.
+Character-level convolutional networks for text clas-
+sification. In Advances in Neural Information Pro-
+cessing Systems 28: Annual Conference on Neural
+Information Processing Systems 2015, December 7-
+12, 2015, Montreal, Quebec, Canada, pages 649-
+657.
+
+Zihao Zhao, Eric Wallace, Shi Feng, Dan Klein, and
+Sameer Singh. 2021. Calibrate before use: Im-
+proving few-shot performance of language models.
+In Proceedings of the 38th International Confer-
+ence on Machine Learning, ICML 2021, 18-24 July
+2021, Virtual Event, volume 139 of Proceedings of
+Machine Learning Research, pages 12697-12706.
+PMLR.
+
+Ming Zhong, Yang Liu, Yichong Xu, Chenguang Zhu,
+and Michael Zeng. 2021. Dialoglm: Pre-trained
+model for long dialogue understanding and summa-
+rization. ArXiv preprint, abs/2109.02492.
+
+Yukun Zhu, Ryan Kiros, Richard S. Zemel, Ruslan
+Salakhutdinov, Raquel Urtasun, Antonio Torralba,
+and Sanja Fidler. 2015. Aligning books and movies:
+Towards story-like visual explanations by watching
+movies and reading books. In 2015 IEEE Interna-
+tional Conference on Computer Vision, ICCV 2015,
+Santiago, Chile, December 7-13, 2015, pages 19-27.
+IEEE Computer Society.

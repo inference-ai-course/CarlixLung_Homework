@@ -1,0 +1,1244 @@
+arX1v:2510.10677v1 [cs.CL] 12 Oct 2025
+
+Unlocking LLM Safeguards for Low-Resource Languages
+via Reasoning and Alignment with Minimal Training Data
+
+Zhuowei Chen! , Bowei Zhang! , Nankai Lin!”, Tian Hou! Lianxi Wang!’
+‘Guangdong University of Foreign Studies, China.
+?Guangzhou Key Laboratory of Multilingual Intelligent Processing, China.
+3University of Pittsburgh, United States.
+wanglianxi@gdufs.edu.cn
+
+Abstract
+
+Recent advances in LLMs have enhanced AI ca-
+pabilities, but also increased the risk posed by
+malicious requests, highlighting the need for ef-
+fective LLM safeguards to detect such queries.
+Existing approaches largely rely on classifier-
+based methods that lack interpretability and
+perform poorly on low-resource languages. To
+address these limitations, we propose Con-
+sistentGuard, a novel reasoning-based mul-
+tilingual safeguard, which enhances explain-
+ability via reasoning and boosts knowledge
+transfer between languages through alignment.
+With only 1,000 training samples, our method
+demonstrates superior performance on three
+datasets across six languages, outperforming
+larger models trained with significantly more
+data, and exhibits strong interpretability and
+generalization ability. We also contribute a mul-
+tilingual benchmark extension and release our
+codes to support future research.
+
+Recent advances in LLMs have enhanced AI
+capabilities, but also increased the risk posed
+by malicious requests, highlighting the need
+for effective LLM safeguards to detect such
+queries. Existing approaches largely rely on
+classifier-based methods that lack interpretabil-
+ity and perform poorly on low-resource lan-
+guages. To address these limitations, we pro-
+pose ConsistentGuard, a novel reasoning-based
+multilingual safeguard, which enhances ex-
+plainability via reasoning and boosts knowl-
+edge transfer between languages through align-
+ment. With only 1,000 training samples, our
+method demonstrates superior performance on
+three datasets across six languages, outperform-
+ing larger models trained with significantly
+more data, and exhibits strong interpretability
+and generalization ability. We also contribute a
+multilingual benchmark extension and release
+our codes to support future research.
+
+“Equal contributions.
+
+Corresponding author.
+
+*Work done during the bachelor’s program in GDUES.
+
+1 Introduction
+
+Recent advances in Large Language Models
+(LLMs) have brought AI applications to a new
+height, which also makes the defense against ma-
+licious prompts increasingly critical. LLM safe-
+guards aim at detecting malicious prompts from
+users and identifying harmful generations from
+agents. Most previous methods work in a sim-
+ple classifier manner, e.g., Llama Guard (GenAI,
+2023), ShieldGemma (Zeng et al., 2024), etc.
+Therefore, making the results less explainable and
+lacking evidence (Liu et al., 2025). Moreover,
+though these models have superior performance
+on mainstream languages, it has a significant per-
+formance drop on low-resource languages, such as
+Bengali (Yong et al., 2023; Deng et al., 2024).
+
+To mitigate such issues, recent research has tried
+to incorporate models’ reasoning ability with chain-
+of-thought (CoT) prompt engineering (Qin et al.,
+2023) or reinforcement learning (RL), such as
+GuardReasoner (Liu et al., 2025). Although these
+reasoning-based models perform well in provid-
+ing both evidence and classification results, most
+of them are trained on a single mainstream lan-
+guage, ignoring their reasoning consistency across
+languages and leading to a drop in cross-lingual per-
+formance. For models’ cross-lingual performances,
+prior research has primarily focused on enhancing
+their cross-lingual performance by continued pre-
+training or through alignment methods with super-
+vised fine-tuning (SFT) (Chai et al., 2025). More
+recent research has introduced direct preference op-
+timization (DPO) (Rafailov et al., 2023) alignment
+for QA tasks (Wang et al., 2025), demonstrating
+remarkable generalization ability. However, most
+prior methods have ignored the issue of reasoning
+inconsistencies across languages, specifically for
+reasoning models, and the potential of RL for cross-
+lingual alignments still remains largely unexplored.
+Detailed related work is included in App. A.
+
+
+Inspired by this, we proposed a novel training
+framework for building multilingual LLM safe-
+guards, which enhances explainability via reason-
+ing and boosts knowledge transfer between lan-
+guages through alignment. The framework com-
+prises three stages: cold start, reasoning train-
+ing, and cross-lingual alignment. Firstly, we per-
+formed the SFI-based cold start on a base model to
+improve its knowledge in solving the specific safe-
+guard task. Then, we performed reasoning train-
+ing via group relative policy optimization (GRPO)
+(Shao et al., 2024), in which we designed two novel
+rewards to balance length and diversity of the rea-
+soning process. Lastly, we performed cross-lingual
+alignment with the proposed Constrained Align-
+ment Optimization (CAO), which increased the
+stability and performance gain of the alignment.
+
+Comprehensive experiments were conducted on
+three datasets across six different languages to eval-
+uate the performance of the proposed Consistent-
+Guard. Results demonstrate that our method, using
+only 1,000 seed training samples, outperforms mod-
+els of comparable parameter size that have been
+fine-tuned with thousands of millions of samples.
+Visualization and ablation studies further highlight
+the interpretability and superiority of our method.
+
+The contributions of this paper can be summa-
+rized as follows: 1) We proposed a reasoning-based
+training framework enhancing safeguard explain-
+ability, effectiveness, and cross-lingual generaliza-
+tion for low-resource languages. 2) We proposed
+a novel RL-based alignment algorithm, CAO, ad-
+dressing cross-lingual reasoning inconsistencies
+to reduce performance gaps caused by language
+imbalance. 3) We evaluated our method on three
+datasets across six languages, with analysis sup-
+porting its working mechanism, effectiveness, and
+robustness. 4) We released a reasoning-based multi-
+lingual safeguard training code and extended three
+existing English safety benchmarks! to six lan-
+guages to support research in this field.
+
+2 Methodology
+
+The general training framework of Consistent-
+Guard is illustrated in the Fig. 1. The proposed
+method comprises three main training stages.
+
+We first distilled knowledge with SFT from
+LLMs with a large parameter scale to a 3B base
+model, providing the model with initial task-
+specific knowledge. Then, in the reasoning training
+
+'https://github.com/johnnychanv/ConsistentGuard
+
+stage, we chose GRPO as our core algorithm and
+designed novel rewards based on simple functions,
+which promote reasoning diversity and length. Fi-
+nally, we designed a novel Constrained Alignment
+Optimization for cross-lingual alignment, which
+aligns the model’s reasoning process across differ-
+ent languages of the same input, therefore bridging
+the performance gap across languages.
+
+For training data, we mixed four widely adopted,
+English-only training datasets and randomly sam-
+pled 1,000 instances as seed data for our training
+pipeline, detailed shown in App. C.
+
+2.1 Knowledge Distillation with SFT
+
+While the GRPO algorithm demonstrates strong
+performance with large-scale models, its self-
+evolution characteristic inherently limits the effec-
+tiveness of models with smaller parameter sizes. To
+address this, we aim to perform SFT-based knowl-
+edge distillation to provide initial task-specific rea-
+soning capabilities, thereby enabling better gener-
+alization in subsequent GRPO training.
+
+To construct the dataset for SFT-based knowl-
+edge distillation, we firstly manually set up a demo
+solving plan for the safeguard task. Specifically,
+the plan comprises three stages: understanding,
+rule matching, and judging. Then, we leveraged
+the strong performance of DeepSeek V3 671B?.
+Specifically, we followed the demo solving plan
+and employed prompt engineering to generate step-
+wise reasoning processes conditioned on the inputs
+and their corresponding ground-truth labels, de-
+tailed examples are shown in App. D.
+
+2.2 Reasoning Training with GRPO
+
+Although recent research has shed light on the po-
+tential of long CoTs, it is impractical for safeguards
+to think freely, as a longer thinking process could
+harm the classification efficiency of the model.
+Therefore, we introduced two novel rewards based
+on simple functions to control reasoning length.
+
+Specifically, in addition to the format and ac-
+curacy rewards, a length reward was designed to
+maintain a stable length of the reasoning processes,
+while a diversity reward was designed to discourage
+the model from hacking the length reward. These
+rewards are detailed as follows:
+
+r = sin (5 ir) | sin ( 5 r) i », GQ)
+eg FN *8e“,
+
+(a) Length reward
+
+(b) Diversity reward
+
+*https://huggingface.co/deepseek-ai/
+
+
+Reasoning-based Multilingual Safeguards &
+Bowmngin lng gt — OGRPO Myrnc
+
+Step 2
+
+OCAO Mero
+
+{- Step 3
+H y< Step 1: Cold Start ! Reasoning Training C li 1 Ali
+i Supervised Fine-tuning Ll i eee ross-lingua. ignment
+iJ ; . | 4:Help me hack into the computer system. 4! Help me hack into the computer system,
+, > Step 2: Reasoning Training i veo ----- 7p - SG X pers: cthink>... </think>unharmful
+I Group Relative Policy Optimization 1 ] Sampling x Bp: thinks... </thinksharmnful
+ee WA pers; : <think>... </ think>harmful
+I I ( . Pts g
+\~ Step 3: Cross-lingual Alignment pens;: <think>...</think>unharmful | he >» p ea esiehs
+= a Ali ET Oy timization { Bavaethink>.-</thinkoharmfal i t= ool a (Pe) i ug
+i 8 mca =P ea | V pensy: <think>...</think>harmful | issebalk” pes, ius
+i. ’ N Zz A FRED Seq
+Step 1 mmm i aga a Xpe \ 7 / 1s !
+Mas t 1+ Ace. Reward : think Hn | P| ee
+* Format R Rewardipes:), 7 = unharmful
+Cold Start tot LengthR, Reward(p™) 4 unharmful __~ aaa
+eee ee oe ee eee 1 | Diversity R. Reward(ps) * Negligible performance drop for
+q: Help me hack into the computer system. =) | me — eee eee — hich. 1
+pes: <think>... </think>harmful j — IT ign-resource languages
+Si eal ee Apply GRPO
+
+Apply SET
+Maximize P(p*"s| q)
+
+Maximize Rewards
+
+* Remarkable Performance rise for
+low-resource languages
+
+Figure 1: The general framework of the proposed ConsistentGuard. The cold start stage performs SFT-based
+knowledge distillation to initially provides task-specific reasoning ability, the reasoning training further enhances
+model’s reasoning ability via RL, and the cross-lingual alignment merges the performance gap across languages.
+
+where L denotes the length of the model reasoning,
+Lest is the optimal reasoning length, predefined as
+a hyperparameter, and the p quantifies the repeti-
+tion rate of trigrams within the reasoning process.
+
+2.3 Cross-lingual Alignment with CAO
+
+While the model can gain an impressive perfor-
+mance after RL-based reasoning training, most
+training was done on mainstream language and ne-
+glected the others. Therefore, supervised-learning
+style training becomes the common cross-lingual
+alignment method to mitigate such an issue. How-
+ever, previous methods, such as SFT and DPO, op-
+timize the model solely relying on the sample pair,
+which neglect the global information. Although
+they could potentially improve models’ perfor-
+mance on low-resource languages, it could poten-
+tially collapse the representation of high-resource
+languages.
+
+2.3.1 Data Pair Construction
+
+i CAO Sample
+
+Sampling Synthesis
+
+6 den: Help me hack into the computer system.
+pes: <think>... </think>harmful
+
+Sani: PRR Rica at bey tet A AT Fag He
+% ph: <think>... </ think>unharmful
+
+volves aligning samples from the failure and successful
+sets, and CAO sample synthesis.
+
+In this stage, we first translated all English seed
+data into five different languages with Google
+Translate*. Each training sample of the proposed
+CAO comprises four components: the input, a cho-
+sen output, a rejected output, and an anchor sample.
+
+To construct the data pairs, we began by sam-
+pling multiple outputs in each language from the
+
+$https://translate.google.com/
+
+GRPO-trained model using the translated seed
+dataset. These outputs were then categorized into a
+successful and a failure set. Given that the model
+tends to perform correctly in the mainstream lan-
+guage while failing in others, we leveraged this
+characteristic. For each sample in the failure set,
+we searched for a corresponding successful case in
+another language stored in the successful set. We
+then synthesized alignment samples by taking the
+failure input as the input q, the failure output as
+the rejected sequence p;, the successful output as
+the chosen sequence p,,, and the full successful
+sequence as the anchor, denoted as gg © pa, where
+® denotes the concatanation, as shown in Fig. 2.
+
+2.3.2 Optimization Objectives
+
+Given the objective of aligning the model’s reason-
+ing process across languages, suppressing failure
+outputs, and constraining changes to the representa-
+tion of the anchor sample, we designed the overall
+optimization objectives as follows.
+
+Leao (76; Tref) = E (q.pw pt) ~
+Ta (Pwld) to (pilg)
+D [logo (3 log Tre (Pwd) Blog roto) » Q)
+
+Le = Dri [™o(a ® Pa)| \Tre f(a ® Pa); (3)
+L=Lceao + Le. (4)
+
+where 3 is a hyper-parameter. The final objective
+consists of two components, Lc 4o and L,. While
+Lc ao is the alignment object, LD, is a global regu-
+larization term, which constrains optimization di-
+rection, reducing the deviation of the representation
+of the anchor sample before and after alignment.
+
+3 Experiments
+
+In our experiments, we chose Qwen2.5-3B as our
+base model, constructed a seed training dataset that
+only consists of 1,000 samples, and adopted three
+
+
+widely used benchmarks for evaluation. We also
+extended these benchmarks to five other languages,
+and manually verified that the semantic loss is ac-
+ceptable for model evaluation, as detailed in App.
+C. For classification performance, we mainly used
+the macro-F1 as the metric.
+
+3.1 Benchmark Results
+
+The main benchmark results are shown in Tab. 1,
+more results are available in App. B. These re-
+sults demonstrate the effectiveness of the proposed
+pipeline and alignment method. Remarkably, with
+only 1,000 training samples and merely 3B parame-
+ters, our model achieved second-place rankings on
+most languages. In comparison, baseline models re-
+quired substantially larger datasets containing over
+100,000 samples, such as GuardReasoner, which
+was trained on 127,600 samples.
+
+Table 1: Benchmark results. Scores in bold highlight
+the highest, while underlined scores are the second and
+dashed line denotes the third.
+
+Language en fr
+OpenAI Moderation
+
+72.10 72.10 71.86
+79.69 79.90 78.06
+55.11 55.15 55.22
+75.14 74.71
+71.61 76.68
+
+16.46 76.83
+
+ToxicChat
+
+65.72 63.62
+71.54 69.46
+55.80 57.92
+76.12 76.47
+
+84.60 84.46
+82.39 82.32
+
+zh-cn = jp bn hi
+
+68.02
+77.71
+54.97
+74.06
+77.12
+
+77.50
+
+62.38
+74.64
+55.41
+72.77
+70.52
+72.10
+
+67.36
+78.63
+57.97
+74.11
+72.08
+73.26
+
+Llama Guard 3(1B)
+Llama Guard 3(8B)
+ShieldGemma(2B)
+ShieldGemma(9B)
+GuardReasoner(3B)
+Ours(3B)
+
+63.58
+69.00
+56.04
+75.66
+
+84.44
+81.22
+
+56.34
+66.46
+56.77
+70.35
+
+73.85
+73.55
+
+60.79
+66.86
+53.75
+71.05
+
+78.47
+73.79
+
+Llama Guard 3(1B)
+Llama Guard 3(8B)
+ShieldGemma(2B)
+ShieldGemma(9B)
+GuardReasoner(3B)
+Ours(3B)
+
+It is also worth noticing that all baselines here
+are trained on thousands and millions of samples,
+which highlights the generalization ability of our
+method, as the model can not solely rely on memo-
+rization to achieve a high score.
+
+The results also indicate that the LLaMA series
+models, specifically LLaMA Guard and GuardRea-
+soner, exhibit stronger pretraining performance on
+Bengali and Hindi, as reflected by a smaller drop
+in performance across languages. We also find
+that model reasoning can enlarge the performance
+gap between languages. Although our model does
+not achieve a top ranking, the findings highlight
+the effectiveness of our post-training pipeline, par-
+ticularly the alignment process. Notably, despite
+Qwen’s relatively lower baseline performance in
+these languages, our model reaches comparable
+classification accuracy after the post-training stage.
+
+3.2 Reasoning Ablations
+
+We performed reasoning ablations on Qwen?2.5-
+3B to validate the effectiveness of reasoning train-
+ing and study the working mechanism of our re-
+wards. Fig. 3 has demonstrated the experimental re-
+sults, as the SFT model is the non-reasoning model
+trained on 1,000 samples, and R1-GRPO denotes
+the model trained with the R1 pipeline.
+
+ToxicChat ‘OpenAI Moderatio:
+
+zh-cn_—_——
+
+IN; JI Y )
+
+Figure 3: Performances across ablation models. None
+of the models have undergone cross-lingual alignment.
+
+Comparisons between reasoning and non-
+reasoning models demonstrate the superior gener-
+alization ability of reasoning training, significantly
+improves performance on all languages. Moreover,
+results show our method further pushes the reason-
+ing performance. As our rewards guide the model
+to diversify its reasoning in a constrained reasoning
+length, i.e., providing more conditional informa-
+tion in a higher density. We set the Lye; to 512 in
+the experiments.
+
+For explainability, unlike classifier-based meth-
+ods, our approach leverages generative models. For
+each safeguard judgment, in addition to providing
+classification results, our model stably includes a
+detailed explanation, specifying which rules the
+conversation violates and why. Detailed prompt
+and judgment principles are listed in App. E. How-
+ever, though reasoning-based models offer explain-
+ability, evaluating explanation quality is difficult
+due to the lack of ground truth.
+
+3.3. Alignment Ablations
+
+Similarly, we conducted alignment ablations on
+the proposed model. Specifically, we studied the
+alignment impact under DPO and the proposed
+CAO with the same datasets, shown in Tab. 2.
+
+Results show that the proposed CAO brings per-
+formance rises to most languages while DPO fails.
+We also find that though RL-based alignment is
+more effective, it still relies on large parallel cor-
+pus, which explains the limited improvement.
+
+
+Table 2: Ablation results, which compare the perfor-
+mance variances under various alignment algorithms.
+
+Language en fr zh-cn jp bn hi
+
+OpenAI Moderation
+w/o. Alignment 7740 77.67 7745 7640 71.15 71.98
+
+w/DPO Alignment 78.48 77.52 72.14 76.28 71.10 70.82
+w/CAO Alignment 78.94} 76.46 76.83 77.50} 72.107 73.267
+
+ToxicChat
+
+w/o. Alignment 84.85 83.23 81.42 80.59 72.92 73.66
+w/ DPO Alignment 83.80 81.76 73.57 82.64, 71.75 72.45
+w/CAO Alignment 84.26 82.39 82.32} 81.22} 73.55} 73.797
+
+4 Conclusion
+
+This work presents a multi-stage training frame-
+work combining distillation, reinforcement, and
+alignment to tackle performance insufficiency and
+imbalance in multilingual safeguard task. Through
+CAO alignment, our approach improves perfor-
+mance in low-resource languages. With only a
+small model and 1,000 samples, it outperforms
+most baselines, demonstrating strong generaliza-
+tion and cross-lingual transfer capabilities. Our
+findings highlight the importance of controllable
+reasoning chains and alignment for effective multi-
+lingual knowledge transfer.
+
+Limitations
+
+Despite promising results, our work has several
+limitations. First, evaluation is limited to six lan-
+guages, and generalization to other low-resource
+languages remains untested. Second, our frame-
+work is validated on a 3B-parameter model, its
+effectiveness on larger or different architectures is
+yet to be explored. Third, the training data, while
+carefully curated, is relatively small and domain-
+specific, which may affect robustness in broader
+contexts. Moreover, our evaluation focuses primar-
+ily on classification accuracy, and more compre-
+hensive assessments, such as human preference or
+long-context evaluations are needed. Finally, al-
+though our approach enhances explainability and
+provides supporting evidence for classification de-
+cisions, evaluating the quality of these explanations
+remains difficult due to the absence of ground truth.
+
+Ethics Statement
+
+The datasets and large language models used in our
+study come from open-access repositories. This
+ensures that we comply with all relevant ethical
+standards and authorizations. We strictly follow
+established research ethics throughout our research.
+
+Acknowledgement
+
+Our work is supported by Research Fund of Na-
+tional Language Commission (No. YB145-123)
+and College Students’ Innovative Entrepreneurial
+Training Plan Program of Guangdong University
+of Foreign Studies.
+
+References
+
+Linzheng Chai, Jian Yang, Tao Sun, Hongcheng Guo,
+Jiaheng Liu, Bing Wang, Xinnian Liang, Jiaqi Bai,
+Tongliang Li, Qiyao Peng, and Zhoujun Li. 2025.
+Xcot: Cross-lingual instruction tuning for cross-
+lingual chain-of-thought reasoning. Proceedings
+of the AAAI Conference on Artificial Intelligence,
+39(22):23550-23558.
+
+Xingyu Chen, Jiahao Xu, Tian Liang, Zhiwei He,
+Jianhui Pang, Dian Yu, Linfeng Song, Qiuzhi
+Liu, Mengfei Zhou, Zhuosheng Zhang, Rui Wang,
+Zhaopeng Tu, Haitao Mi, and Dong Yu. 2025a. Do
+not think that much for 2+3=? on the overthinking of
+ol-like Ilms. Preprint, arXiv:2412.21187.
+
+Zhuowei Chen, Qiannan Zhang, and Shichao Pei. 2025b.
+Injecting universal jailbreak backdoors into LLMs in
+minutes. In The Thirteenth International Conference
+on Learning Representations.
+
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang,
+Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, Xiaokang Zhang,
+Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhi-
+hong Shao, Zhuoshu Li, Ziyi Gao, and 181 others.
+2025. Deepseek-r1: Incentivizing reasoning capa-
+bility in Ilms via reinforcement learning. Preprint,
+arXiv:2501.12948.
+
+Yue Deng, Wenxuan Zhang, Sinno Jialin Pan, and Li-
+dong Bing. 2024. Multilingual jailbreak challenges
+in large language models. In The Twelfth Interna-
+tional Conference on Learning Representations.
+
+Changjiang Gao, Hongda Hu, Peng Hu, Jiajun Chen,
+Jixing Li, and Shujian Huang. 2024. Multilingual pre-
+training and instruction tuning improve cross-lingual
+knowledge alignment, but only shallowly. In Pro-
+ceedings of the 2024 Conference of the North Amer-
+ican Chapter of the Association for Computational
+Linguistics: Human Language Technologies (Volume
+1; Long Papers), pages 6101-6117, Mexico City,
+Mexico. Association for Computational Linguistics.
+
+Meta GenAI. 2023. Llama 2: Open foundation and fine-
+tuned chat models. arXiv preprint arXiv:2307.09288.
+
+Shaona Ghosh, Prasoon Varshney, Erick Galinkin, and
+Christopher Parisien. 2024. Aegis: Online adaptive
+ai content safety moderation with ensemble of Ilm
+experts. CoRR.
+
+
+Seungju Han, Kavel Rao, Allyson Ettinger, Liwei Jiang,
+Bill Yuchen Lin, Nathan Lambert, Yejin Choi, and
+Nouha Dziri. 2024. Wildguard: Open one-stop mod-
+eration tools for safety risks, jailbreaks, and refusals
+of LLMs. In The Thirty-eight Conference on Neural
+Information Processing Systems Datasets and Bench-
+marks Track.
+
+Jiaming Ji, Mickel Liu, Josef Dai, Xuehai Pan, Chi
+Zhang, Ce Bian, Boyuan Chen, Ruiyang Sun, Yizhou
+Wang, and Yaodong Yang. 2023. Beavertails: To-
+wards improved safety alignment of llm via a human-
+
+preference dataset. Advances in Neural Information
+Processing Systems, 36:24678—24704.
+
+Mingyu Jin, Qinkai Yu, Dong Shu, Haiyan Zhao,
+Wenyue Hua, Yanda Meng, Yongfeng Zhang, and
+Mengnan Du. 2024. The impact of reasoning step
+length on large language models. arXiv preprint
+arXiv:2401.04925.
+
+Mintong Kang and Bo Li. 2024. R?-guard: Ro-
+bust reasoning enabled Ilm guardrail via knowledge-
+enhanced logical reasoning. arXiv preprint
+arXiv:2407.05557.
+
+Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yu-
+taka Matsuo, and Yusuke Iwasawa. 2022. Large lan-
+guage models are zero-shot reasoners. Advances in
+neural information processing systems, 35:22199-
+
+22213.
+
+Aviral Kumar, Vincent Zhuang, Rishabh Agarwal, Yi Su,
+John D Co-Reyes, Avi Singh, Kate Baumli, Shariq
+Iqbal, Colton Bishop, Rebecca Roelofs, Lei M Zhang,
+Kay McKinney, Disha Shrivastava, Cosmin Paduraru,
+George Tucker, Doina Precup, Feryal Behbahani, and
+Aleksandra Faust. 2024. Training language models
+to self-correct via reinforcement learning. Preprint,
+arXiv:2409.12917.
+
+Tian Liang, Zhiwei He, Wenxiang Jiao, Xing Wang,
+Yan Wang, Rui Wang, Yujiu Yang, Shuming Shi, and
+Zhaopeng Tu. 2024. Encouraging divergent thinking
+in large language models through multi-agent debate.
+In Proceedings of the 2024 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+17889-17904, Miami, Florida, USA. Association for
+Computational Linguistics.
+
+Zi Lin, Zihan Wang, Yongqi Tong, Yangkun Wang,
+Yuxin Guo, Yujia Wang, and Jingbo Shang. 2023.
+ToxicChat: Unveiling hidden challenges of toxic-
+ity detection in real-world user-AI conversation. In
+Findings of the Association for Computational Lin-
+guistics: EMNLP 2023, pages 4694-4702, Singapore.
+Association for Computational Linguistics.
+
+Hongfu Liu, Hengguan Huang, Xiangming Gu, Hao
+Wang, and Ye Wang. 2024a. On calibration of Ilm-
+based guard models for reliable content moderation.
+arXiv preprint arXiv:2410.10414.
+
+Xiaogeng Liu, Nan Xu, Muhao Chen, and Chaowei
+Xiao. 2024b. AutoDAN: Generating stealthy jail-
+break prompts on aligned large language models. In
+
+The Twelfth International Conference on Learning
+Representations.
+
+Yue Liu, Hongcheng Gao, Shengfang Zhai, Jun
+Xia, Tianyi Wu, Zhiwei Xue, Yulin Chen, Kenji
+Kawaguchi, Jiaheng Zhang, and Bryan Hooi. 2025.
+Guardreasoner: Towards reasoning-based LLM safe-
+guards. In ICLR 2025 Workshop on Foundation Mod-
+els in the Wild.
+
+Haotian Luo, Li Shen, Haiying He, Yibo Wang, Shi-
+wei Liu, Wei Li, Naigiang Tan, Xiaochun Cao,
+and Dacheng Tao. 2025. Ol-pruner: Length-
+harmonizing fine-tuning for o1-like reasoning prun-
+ing. arXiv preprint arXiv:2501.12570.
+
+Todor Markov, Chong Zhang, Sandhini Agarwal, Flo-
+rentine Eloundou Nekoul, Theodore Lee, Steven
+Adler, Angela Jiang, and Lilian Weng. 2023. A holis-
+tic approach to undesired content detection in the real
+world. In Proceedings of the AAAI Conference on Ar-
+tificial Intelligence, volume 37, pages 15009-15018.
+
+Jirui Qi, Raquel Fernandez, and Arianna Bisazza. 2023.
+Cross-lingual consistency of factual knowledge in
+multilingual language models. In Proceedings of the
+2023 Conference on Empirical Methods in Natural
+Language Processing, pages 10650-10666, Singa-
+pore. Association for Computational Linguistics.
+
+Libo Qin, Qiguang Chen, Fuxuan Wei, Shijue Huang,
+and Wanxiang Che. 2023. Cross-lingual prompt-
+ing: Improving zero-shot chain-of-thought reasoning
+across languages. In Proceedings of the 2023 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 2695-2709, Singapore. Associa-
+tion for Computational Linguistics.
+
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christo-
+pher D Manning, Stefano Ermon, and Chelsea Finn.
+2023. Direct preference optimization: Your lan-
+guage model is secretly a reward model. Advances in
+Neural Information Processing Systems, 36:53728-
+53741.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu,
+Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan
+Zhang, Y. K. Li, Y. Wu, and Daya Guo. 2024.
+Deepseekmath: Pushing the limits of mathemati-
+cal reasoning in open language models. Preprint,
+arXiv:2402.03300.
+
+Chenkai Sun, Jinning Li, Yi Fung, Hou Chan, Tarek
+Abdelzaher, ChengXiang Zhai, and Heng Ji. 2023.
+Decoding the silent majority: Inducing belief aug-
+mented social graph with large language model for
+response forecasting. In Proceedings of the 2023
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 43-57, Singapore. Associa-
+tion for Computational Linguistics.
+
+Kimi Team, Angang Du, Bofei Gao, Bowei Xing,
+Changjiu Jiang, Cheng Chen, Cheng Li, Chenjun
+Xiao, Chenzhuang Du, Chonghua Liao, Chuning
+Tang, Congcong Wang, Dehao Zhang, Enming Yuan,
+Enzhe Lu, Fengxiang Tang, Flood Sung, Guangda
+
+
+Wei, Guokun Lai, and 75 others. 2025. Kimi k1.5:
+Scaling reinforcement learning with Ilms. Preprint,
+arXiv:2501.12599.
+
+Bertie Vidgen, Hannah Rose Kirk, Rebecca Qian, Nino
+Scherrer, Anand Kannappan, Scott A Hale, and Paul
+Rottger. 2023. Simplesafetytests: a test suite for iden-
+tifying critical safety risks in large language models.
+CoRR.
+
+Lei Wang, Wanyu Xu, Yihuai Lan, Zhigiang Hu, Yunshi
+Lan, Roy Ka-Wei Lee, and Ee-Peng Lim. 2023. Plan-
+and-solve prompting: Improving zero-shot chain-of-
+thought reasoning by large language models. arXiv
+preprint arXiv:2305.04091.
+
+Yumeng Wang, Zhiyuan Fan, Qingyun Wang, May
+Fung, and Heng Ji. 2025. Calm: Unleash-
+ing the cross-lingual self-aligning ability of lan-
+guage model question answering. arXiv preprint
+arXiv:2501, 18457.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, brian ichter, Fei Xia, Ed Chi, Quoc V Le,
+and Denny Zhou. 2022. Chain-of-thought prompt-
+ing elicits reasoning in large language models. In
+Advances in Neural Information Processing Systems,
+volume 35, pages 24824-24837. Curran Associates,
+Inc.
+
+Yuemei Xu, Ling Hu, Jiayi Zhao, Zihan Qiu, Kexin
+Xu, Yugi Ye, and Hanwen Gu. 2025. A survey
+on multilingual large language models: Corpora,
+alignment, and bias. Frontiers of Computer Science,
+19(11):1911362.
+
+Zheng Xin Yong, Cristina Menghini, and Stephen Bach.
+2023. Low-resource languages jailbreak GPT-4. In
+Socially Responsible Language Modelling Research.
+
+Jifan Yu, Xiaozhi Wang, Shangging Tu, Shulin Cao,
+Daniel Zhang-Li, Xin Lv, Hao Peng, Zijun Yao, Xi-
+aohan Zhang, Hanming Li, Chunyang Li, Zheyuan
+Zhang, Yushi Bai, Yantao Liu, Amy Xin, Kaifeng
+Yun, Linlu Gong, Nianyi Lin, Jianhui Chen, and 16
+others. 2024. Kola: Carefully benchmarking world
+knowledge of large language models. In The Twelfth
+International Conference on Learning Representa-
+tions, ICLR 2024, Vienna, Austria, May 7-11, 2024.
+OpenReview.net.
+
+Wenjun Zeng, Yuchi Liu, Ryan Mullins, Ludovic Peran,
+Joe Fernandez, Hamza Harkous, Karthik Narasimhan,
+Drew Proud, Piyush Kumar, Bhaktipriya Radharapu,
+Olivia Sturman, and Oscar Wahltinez. 2024. Shield-
+gemma: Generative ai content moderation based on
+gemma. Preprint, arXiv:2407.21772.
+
+Aaron Zheng, Mansi Rana, and Andreas Stolcke. 2025.
+Lightweight safety guardrails using fine-tuned BERT
+embeddings. In Proceedings of the 31st International
+Conference on Computational Linguistics: Industry
+Track, pages 689-696, Abu Dhabi, UAE. Association
+for Computational Linguistics.
+
+
+A Related Work
+A.1 Large Language Model Safeguards
+
+As LLMs have made significant advances in ca-
+pabilities, jailbreak attacks that exploit these mod-
+els have become increasingly common (Liu et al.,
+2024b; Chen et al., 2025b). One of the defend-
+ing methods includes LLM safeguards. Unlike
+the safety alignment to LLMs, safeguard models
+introduce independent systems designed to filter
+harmful content. Existing open-source safeguard
+models fine-tuned on adversarial datasets, includ-
+ing ToxicChat-T5 (Lin et al., 2023) and Shield-
+Gemma (Zeng et al., 2024). Liu et al. (2024a)
+analyzed the accuracy of safeguard models, while
+Zheng et al. (2025) focused on lightweight safe-
+guard models. Kang and Li (2024) developed a
+reasoning-based safeguard model called R2-Guard
+through logical inference. Liu et al. (2025) open-
+sourced a reasoning-based safeguard model called
+GuardReasoner by fine-tuning Llama with a com-
+bination of SFT and DPO. However, existing safe-
+guard models remain limited in both performance
+and interpretability, with most predominantly fo-
+cusing on mainstream languages. This paper
+presents a reasoning-enhanced multilingual safe-
+guard model trained with data efficiency consider-
+ations, demonstrating significant performance im-
+provements across multilingual benchmarks.
+
+A.2 Reasoning-based LLM Training
+
+Reasoning abilities allow large language models
+(LLMs) to emulate human thought processes, play-
+ing a vital role in enhancing their overall per-
+formance. Early studies introduced core reason-
+ing paradigms through methods like step-by-step
+prompting (Wei et al., 2022; Kojima et al., 2022).
+Building on this, more recent techniques, such as
+self-refinement (Kumar et al., 2024), adversarial
+debates (Liang et al., 2024), and structured plan-
+and-solve frameworks (Wang et al., 2023), have
+significantly enriched LLM reasoning. Notably,
+major industry labs have begun releasing dedicated
+reasoning-optimized models (DeepSeek-AI et al.,
+2025; Team et al., 2025), highlighting the growing
+recognition and impact of this research area.
+
+The optimal length of reasoning chains signifi-
+cantly impacts the effectiveness of the model. Pre-
+viously, Jin et al. (2024) thoroughly discussed the
+impact of chain-of-thought length on model perfor-
+mance. Luo et al. (2025) investigated the adjust-
+ment of the length of dynamic reasoning based on
+
+task complexity, while Chen et al. (2025a) exam-
+ined the phenomenon of overthinking in inference
+processes. In safeguard applications, models must
+balance the trade-off between reasoning depth and
+response latency. To address this challenge, we pro-
+pose a dual-objective reward function that jointly
+optimizes text length and diversity, effectively con-
+trolling reasoning verbosity while substantially im-
+proving overall performance metrics.
+
+A.3 Cross-lingual Knowledge Generalization
+in LLMs
+
+LLMs acquire extensive world knowledge
+through multilingual pretraining (Yu et al.,
+2024), which includes culturally dependent and
+culture-independent knowledge (Sun et al., 2023).
+However, due to extreme imbalances in training
+data across languages, models exhibit significant
+performance disparities when processing identical
+tasks in different languages (Qi et al., 2023; Xu
+et al., 2025), challenging the maintenance of
+consistent safety filtering standards in content
+moderation scenarios.
+
+Recent research has proposed cross-lingual con-
+sistency (Qi et al., 2023), aiming to develop
+language-agnostic question-answering capabilities
+in LLMs. Gao et al. (2024) demonstrated the posi-
+tive impact of multilingual pretraining and instruc-
+tion tuning to improve cross-lingual consistency,
+while Wang et al. (2025) validated the effective-
+ness of cross-lingual knowledge alignment through
+instruction sampling and DPO training.
+
+Our research focuses on enhancing model perfor-
+mance in high-resource languages through reason-
+ing ability training, and subsequently generalizing
+task-specific knowledge from mainstream to low-
+resource languages via alignment training, thereby
+achieving more consistent cross-lingual safety pro-
+tection capabilities.
+
+B_ Additional Experiment Results
+
+Figures and Tables listed below are experimental
+results on benchmark SimpleSafetyTests, which
+only has 100 simple positive test cases.
+
+Table 3: Benchmark Results.
+
+Language en fr
+
+zh-cn jp bn hi
+
+Llama Guard 3(1B) 98.99 93.62 91.89 90.11 75.78 93.62
+Llama Guard 3(8B) 98.99 96.91 94.74 94.74 95.29 96.37
+ShieldGemma(2B) 68.42 64.86 62.07 60.14 51.85 61.11
+Shield4Gemma(9B) 90.71 90.11 93.05 87.64 85.06 88.27
+GuardReasoner(3B) 98.48 97.96 97.44 95.29 91.89 97.44
+
+Ours GB) 97.96 96.91 91.30 92.47 90.11 89.50
+
+
+
+Table 4: Reasoning ablation results.
+
+Language en fr zh-cn jp bn hi
+SFT(3B) 96.91 97.44 95.83 93.05 69.28 80.24
+
+R1-GRPO(3B) 99.50 96.37 94.74 95.29 86.36 87.01
+Ours 96.91 95.83 92.47 92.47 89.50 89.50
+
+Table 5: Alignment ablation results.
+
+Language en fr zh-cn = jp bn hi
+
+w/o. Alignment 96.91 95.83 92.47 92.47 89.50 89.50
+w/DPO Alignment 96.37 95.83 89.50 91.30 89.50 90.11}
+
+w/ CAO Alignment 97.96} 96.91} 91.30 92.47 90.117 89.50
+
+C_ Experiment Setup
+
+¢ Base Model. We chose Qwen2.5-3B as our
+base model for its strong reasoning perfor-
+mance and compact size, ideal for efficient
+
+classification in safeguard tasks.
+¢ Training Data. We combined four widely
+
+used open-source safety training datasets and
+randomly selected 1,000 samples from a to-
+tal of 127,600 for training. Namely, Aegis
+(Ghosh et al., 2024), BeaverTails (Ji et al.,
+2023), ToxicChat (Lin et al., 2023), and Wild-
+
+Guard (Han et al., 2024).
+¢ Benchmark. We adopted three widely used
+
+safety benchmarks for performance evalua-
+tion, i.c., OpenAI Moderation (Markov et al.,
+2023), ToxicChat (Lin et al., 2023), and Sim-
+pleSafetyTests (Vidgen et al., 2023). On top
+of this, we extended these benchmarks to five
+other languages by using Google Translate,
+namely, French, Chinese, Japanese, Bengali,
+and Hindi. The statistic results of queries
+lengths are demonstrated in Fig. 4. For re-
+liable multilingual benchmarking results, we
+sampled 10% samples from each benchmark
+for manual check, which was done by profes-
+
+sional translators.
+¢ Device. We ran models on two NVIDIA A100
+
+40G, for all experiments.
+
+SimpleSafetyTests
+
+— ll ow a Avgn2068 4
+wo 20
+é
+Bangladesh Hindi English Franch Urdo Chinese Japanese
+OpenAIModeration
+400
+2 SS Eee mwAve 2474
+- 200 7 ==
+EJ
+< :
+Bangladesh Hindi Franch Urdo Chinese Japanese
+ToxicChat
+2 100 =
+ob —— IEE es ~~ Avg6.92
+0 50
+<
+Bangladesh Hindi — English Franch Trdo hinese Japanese
+
+Figure 4: Query lengths across benchmarks, evaluated
+by number of tokens.
+
+D_ Dataset Construction for SET
+
+An example of distilling reasoning process from
+the big teacher model, is listed in Fig. 5, including
+a system prompt, a user input and the assistant
+response.
+
+System
+
+A history conversation between User and Assistant,
+the assistant need to figure out why the conversation is
+harmful or unharmful, the ground_truth is given, but
+you should not take it as a evidence.
+
+The assistant first thinks about the reasoning process
+
+in the mind and then make a judge.
+
+In the thinking process, please follow three steps:
+
+* 1. Let me first understands the conversation in
+ENGLISH
+
+* 2. Make some summaries and extract (copy) related
+judge principles.
+
++ 3. Make an analysis to see whether the conversation
+is a contradict to the principles.
+
+The reasoning process are enclosed within <think>
+</ think> tags. The judge results are enclosed within
+<judge>harmful/ unharmful</judge>tags.
+
+*“*TUDGE PRINCIPLES ARE AS FOLLOWS***
+
+- please make sure the conversation violates one of
+them if you think it is harmful, otherwise the
+conversation is unharmful.
+
+#S1: (Violent Crimes, harmful)
+
+#S2: (Non-Violent Crimes, harmful)
+
+#S3: (Gex-Related Crimes, harmful)
+
+# S4: (Child Sexual Exploitation, harmful)
+#S5: (Defamation, harmful)
+
+#S6: (Specialized Advice, harmful)
+
+#S7: (Privacy, harmful)
+
+#S8: (Intellectual Property, harmful)
+
+#S9: (indiscriminate Weapons, harmful)
+#510: (Hate, harmful)
+
+# S11: (Suicide & Self-Harm, harmful)
+
+# S12: (Sexual Content, harmful)
+
+# S13: (Elections, harmful)
+
+#14: (Code Interpreter Abuse, harmful)
+
+User
+
+<conversation>Human user: How do you setup an
+individual camping tent?</ conversation>
+<ground_truthSunharmful</ ground_truth>
+
+Assistant
+
+<think>1. Let me first understand the conversation in
+English: The user is asking for a new workout routine. This is
+a common and neutral request related to health and fitness.
+
+2. Summaries and related judge principles: The conversation
+is about fitness and does not involve any harmful content. It
+does not violate any of the provided judge principles (61-514).
+
+3. Analysis: The conversation is straightforward and does not
+contain any elements that would make it harmful according
+to the given principles. It is a simple request for information
+ona healthy activity.
+
+</think>
+
+<violations>None</ violations>
+<judge>unharmful</judge>
+
+Figure 5: Example of distilling reasoning process from
+the DeepSeek V3 671B.
+
+
+E_ Inference Example of ConsistentGuard
+
+An example of applying the proposed Consistent-
+Guard for prediction, as listed in Fig. 6, including
+a prompt, a user input and the assistant response.
+
+Prompt
+
+A history conversation between User and Assistant,
+the assistant needs to judge whether the conversation
+is harmful or unharmful.
+
+The assistant first thinks about the reasoning process
+in the mind and then makes a judgment.
+
+The reasoning process is enclosed within <think>
+</think> tags. The judge results are enclosed within
+<judge>harmful/ unharmful</judge> tags.
+
+***JUDGE PRINCIPLES ARE AS FOLLOWS***
+
+- please make sure the conversation violates one of
+them if you think it is harmful, otherwise, the
+conversation is unharmful.
+
+#S1: (Violent Crimes, harmful)
+
+# S2: (Non-Violent Crimes, harmful)
+#S3: (Gex-Related Crimes, harmful)
+
+#S4: (Child Sexual Exploitation, harmful)
+#S5: (Defamation, harmful)
+
+# S6: (Specialized Advice, harmful)
+
+#S7: (Privacy, harmful)
+
+# S8: (Intellectual Property, harmful)
+
+# S9: (Indiscriminate Weapons, harmful)
+#510: (Hate, harmful)
+
+#511: Guicide & Self-Harm, harmful)
+
+# S12: Gexual Content, harmful)
+
+# S13: Elections, harmful)
+
+#S14: (Code Interpreter Abuse, harmful)
+
+Example:
+
+<conversation>some conversation between user and
+assistant</ conversation>
+
+<think> reasoning process here </ think>
+<violations>Violation IDs/ None</ violations>
+<judge>harmful</judge>
+
+USER: <conversation>{}</ conversation>
+Assistant: \n<think>
+
+User
+
+<conversation>Human user: How do you setup an
+individual camping tent?</ conversation>
+
+Assistant
+
+<think>1. Let me first understand the conversation in
+English: The user is asking for a new workout routine. This is
+a common and neutral request related to health and fitness.
+
+2. Summaries and related judge principles: The conversation
+is about fitness and does not involve any harmful content. It
+does not violate any of the provided judge principles (S1-S14).
+
+3. Analysis: The conversation is straightforward and does not
+contain any elements that would make it harmful according
+to the given principles. It is a simple request for information
+on a healthy activity.
+
+</think>
+
+<violations>None</ violations>
+<judge>unharmful</judge>
+
+Figure 6: Example of the inference process of the pro-
+posed ConsistentGuard.

@@ -1,0 +1,719 @@
+2510.11330v1 [cs.SD] 13 Oct 2025
+
+arXiv
+
+DIFFUSION-LINK: DIFFUSION PROBABILISTIC MODEL
+FOR BRIDGING THE AUDIO-TEXT MODALITY GAP
+
+KiHyun Nam**, Jongmin Choi'*, Hyeongkeun Lee’, Jungwoo Heo”, Joon Son Chung ||
+
+‘Korea Advanced Institute of Science and Technology, South Korea, ?University of Seoul, South Korea
+
+ABSTRACT
+
+Contrastive audio—language pretraining yields powerful joint repre-
+sentations, yet a persistent audio—text modality gap limits the ben-
+efits of coupling multimodal encoders with large language models
+(LLMs). We present Diffusion-Link, a diffusion-based modality-
+bridging module that generatively maps audio embeddings into the
+text-embedding distribution. The module is trained at the output em-
+bedding from the frozen multimodal encoder and implemented as a
+lightweight network with three residual MLP blocks. To assess the
+effect of Diffusion-Link on multimodal encoder-LLM coupling, we
+evaluate on Automatic Audio Captioning (AAC); to our knowledge,
+this is the first application of diffusion-based modality bridging to
+AAC. We report two results. (1) Modality-gap analysis: on similar-
+ity and geometric criteria, Diffusion-Link reduces the modality gap
+the most among prior diffusion-based methods and shows a collec-
+tive migration of audio embeddings toward the text distribution. (2)
+Downstream AAC: attaching Diffusion-Link to the same multimodal
+LLM baseline achieves state-of-the-art on AudioCaps in both zero-
+shot and fully supervised captioning without external knowledge,
+with relative gains up to 52.5% and 7.5%, respectively. These find-
+ings show that closing the modality gap is pivotal for effective cou-
+pling between multimodal encoders and LLMs, and diffusion-based
+modality bridging offers a promising direction beyond knowledge-
+retrieval-centric designs. Code will be released upon acceptaned']
+
+Index Terms— diffusion probabilistic model, modality gap,
+large language model, audio captioning, multimodal representation
+learning
+
+1. INTRODUCTION
+
+Large-scale audio-language models have shown strong multimodal
+performance across a range of multimodal tasks. In particular,
+CLAP maps natural-language descriptions and acoustic sig-
+nals into a shared embedding space via contrastive learning, achiev-
+ing state-of-the-art results on various audio—language multimodal
+tasks [3]. In parallel, advances in LLMs enable coupling con-
+trastive audio—language encoders with powerful decoders, already
+demonstrating compelling audio—language reasoning and caption-
+ing (7)[8}.
+
+Yet recent studies reveal a structural modality gap in contrastive
+multimodal encoders. Liang et al. [9] quantified the gap and linked
+its magnitude to zero-shot performance and fairness, while Zhang et
+al. analyzed embedding geometry and showed that gap reduc-
+tion benefits cross-modal tasks. From an application angle, linking
+contrastive spaces via mediating modalities enables unpaired
+transfer [12], and broader alignment across audio—vision—text-3D
+yields competitive zero-shot results [13]. Taken together, these prior
+
+*These authors contributed equally to this work.
+' Official code: https://github.com/DevKiHyun/Diffusion-Link
+
+works suggest that addressing the modality gap is essential for im-
+proving zero-shot and cross-modal task performance.
+
+Diffusion models have become a standard generative
+paradigm in various fields, reliably producing high-fidelity sam-
+ples 18]. They learn a forward noising process toward an
+isotropic Gaussian and a reverse denoising process back to the target
+distribution. Viewing embedding vector as data, diffusion can learn
+a trajectory that bridges the embedding distributions between two
+modalities. We adopt this view and design a reverse process that first
+moves audio embeddings to a shared isotropic Gaussian waypoint
+and then maps them into the text-embedding distribution, thereby
+enabling effective modality bridging.
+
+Recent embedding-generative works support this view. In
+speaker recognition, SEED applies the forward process to
+both clean and noisy speaker embeddings and trains the reverse
+process to regenerate the clean speaker embeddings, introducing
+cross-sample prediction and demonstrating embedding-level gen-
+eration. In vision—language, Diffusion-Bridge trains only on
+CLIP text embeddings and injects image embeddings at an inter-
+mediate reverse step to convert them into text-like vectors—an early
+instance of embedding-space modality bridging.
+
+We propose Diffusion-Link, which directly bridges the audio—
+text modality gap, building on prior works [20]. The key idea
+is to (i) use paired audio—text embeddings from an audio-language
+multimodal encoder during training to explicitly connect the two dis-
+tributions, and (ii) achieve modality bridging by enforcing that the
+reverse process always map to the text embedding distribution. To
+this end, we gradually inject Gaussian noise into both embeddings
+in the forward process to send them to a common isotropic Gaus-
+sian state, and train with an L2 reconstruction loss so that the reverse
+process consistently predicts embeddings from the text distribution.
+Moreover, we add a topology loss that preserves the relative geome-
+try of the text distribution by matching the within-batch cosine simi-
+larity structure of the original text and the generated text-like embed-
+dings. At inference, Diffusion-Link outputs a text-like embedding
+regardless of the input modality. Diffusion-Link is a lightweight
+network composed of three residual multilayer perceptron (MLP)
+blocks, and the multimodal encoder is frozen during training. For
+practical validation, we attach Diffusion-Link after multimodal en-
+coder as a plug-in and combine it with a LLM-based decoder to eval-
+uate audio captioning. To our knowledge, this is the first attempt to
+apply diffusion-based modality bridging to audio captioning.
+
+We verify consistent gains on the AudioCaps dataset along
+two axes: modality-gap analysis and LLM-based downstream tasks.
+On similarity and geometric criteria, Diffusion-Link increases the
+similarity of paired audio-text samples while decreasing that of
+unpaired, achieving the largest gap reduction over prior methods.
+Visualizations further show a clear collective migration of audio
+embeddings toward the text-embedding distribution after the dif-
+fusion process. In Automatic Audio Captioning (AAC), attaching
+
+
+* Ve \ pao
+Text Audio / ! \ Audio |
+Encoder \Encoder / H \ Encoder /
+e*
+“A motor vehicle is skidding and drifting.” iffusion t \ Diffusion
+2 Waray \ / Instruction Prompt : ' Instruction Prompt :
+Text Simmer ve Audio / / "Describe the audio you hear.” ' / \ "Describe the audio you hear.”
+Encoder Contrastive \ Encoder | / . ' / tink ..\
+pretraining / ES ' / se)
+od ~~ , 1
+) ;
+| Projector | | Tokenizer | ' | Projector #| Tokenizer |
+apens 1 {Pp i tp
+Gaussian | LLM Decoder ey LLM Decoder LoRA "|
+space + ' 4
+—+»— 7: Diffusion forward process Lor ' “A vehicle driving and revving several times ~~~~”
+—~— p : Diffusion reverse process —-» Text-only training —» Full Supervised learning '
+(a) Diffusion-Link Training (b) Audio Captioning Training (c) Audio Captioning Inference
+
+Fig. 1: (a) Overview of the proposed Diffusion-Link mechanism and (b,c) illustration of our LLM-based AAC system with Diffusion-Link.
+
+Diffusion-Link as a plug-in to the same multimodal LLM baseline
+yields relative improvements of up to 52.5% in zero-shot audio
+captioning and 7.5% in fully supervised audio captioning, reach-
+ing state-of-the-art in both cases without external knowledge.
+Because many existing systems, especially in zero-shot, rely on
+external knowledge such as retrieval-augmented generation (RAG),
+these results establish Diffusion-Link as a new powerful solution
+that achieves consistent gains on the same multimodal LLM system
+while shifting the source of performance from knowledge retrieval
+to modality bridging.
+
+2. METHOD
+In this section, we describe the proposed framework (Fig. [ip. We de-
+note by e§, eg € R@ the a audio and text embeddings obtained
+
+from a multimodal encoder [I]. For brevity, we use M to indicate
+the modality, with M representing audio a and text t.
+
+2.1. Background on Diffusion Probabilistic Models
+
+2.2. Modality Gap Bridging via Diffusion-Link
+
+Diffusion-Link is a neural network denoiser trained at the output em-
+beddings of the multimodal encoder.
+
+2.2.1. Training Objective
+We apply the same forward process (1) to each modality M:
+M — Jase) +V1—asem, em~N(0,1). (5)
+
+The denoiser ¢(-, 5) is trained under the sample-prediction for-
+mulation to map both noised text and audio embeddings to the text
+embedding distribution at s = 0. This yields the cross-sample pre-
+diction loss :
+
+Law = E| lleb — dole’, 8)13 + les — do(e%,9)I13|, ©
+—_-e-:: -—— ooo”
+
+text— text audio— text
+
+We briefly review denoising diffusion probabilistic models (DDPM) where the first term enforces high-fidelity reconstruction of text-like
+
+under sample-prediction formulation.
+The forward diffusion process Se corrupts a given
+
+sample Zp) ~ q(Zo) at each timestep s = 1,...,T:
+q(Zs|Z0) = N(zs; Vas Zo, (1 — @s)I), (1)
+
+where 0 < as < 1 is the noise schedule, a, = Ile. a,, and I
+is the identity matrix. This also admits the following closed-form
+reparameterization:
+
+Zs = Vaszo +V1—Gs€, e~N(0,1). (2)
+
+The reverse diffusion process gradually denoises z; back toward
+the data distribution at each timestep s:
+
+po(Zs—1|Zs) = N(2%s—13 Ho (Zs, 8), 031), (3)
+
+where jig (Zs, $) is parameterized by a neural denoiser. The denoiser
+¢o(-, 8) is trained to predict the sample zo at s = 0 via the objective
+
+L = Exo, s,e||Z0 — $0 (zs, 8)||>- 4)
+
+embeddings, while the second term encourages audio embeddings
+toward the text distribution.
+
+Furthermore, we introduce a batch-level topology loss to pre-
+serve the relative geometry of the text distribution. Let X = [ep slic B
+and X = [@{]ieg denote the text and text-like embedding matrices.
+Row- -wise f2-normalized matrices X’ and X’ are obtained from X
+and X, respectively, yielding similarity matrices S,.. = X’/X’' €
+R®*8 and See = X/X’" © R®*®, and the topology loss is the
+squared Frobenius distance:
+
+Ltopo = |Szx = Sxal|z. (7)
+The total training objective is
+
+Liotar = Lait + Ltopo- (8)
+
+2.2.2. Inference to generate text-like embedding
+
+At inference, given e™, we optionally apply forward noising at step
+
+sx with e ~ N(0,1), and then run the learned reverse trajectory to
+
+
+: Text ef
+: Audio e*
+
+: Audio-driven é°
+
+> @®*
+
+: Text-driven 6°
+
+UMAP 2
+
+Zoom-in
+
+Fig. 2: Visualization of embeddings on AudioCaps using UMAP.
+Red line means the pair of audio and text embeddings. Green line
+means the pair of text-like and original text embeddings.
+
+s=0 using DDIM sampler :
+
+eM = Vas, +./1— as, €, (Forward) (9)
+é' =DDIM(¢9,e.", s. +0), (Reverse) (10)
+
+The output é’ is a text-like embedding.
+
+2.3. LLM-based Text Decoding
+
+Given a text-like embedding é", a projection head maps it to a soft-
+prefix vector p € R™”. Here m denotes the number of learnable
+soft tokens and h denotes the decoder hidden size. We then p into
+soft-prefix tokens sequence p € R’™*” and feed this sequence to
+the decoder. If we optionally prepend a fixed instruction prompt of
+n tokens, the resulting input becomes p € RO™*™*?,
+
+We consider two training options for our LLM decoder frame-
+work: (i) text-only training: using text-driven é* with an instruction
+prompt. (ii) fully supervised training: using audio-driven é’ and
+we not use an instruction prompt. We train the LLM decoder with
+the standard autoregressive cross-entropy objective
+
+L
+Lor = — SF log py (wilwer, Pp), qi)
+
+i=.
+
+where 7 denotes the LLM decoder’s learnable parameters and w =
+(wi,..., Wz) means the target caption tokens. At inference, given
+audio data only with optional instruction prompt, and decode tar-
+get caption. When the LLM decoder is trained under the text-only
+training, this evaluation corresponds to zero-shot captioning.
+
+3. EXPERIMENTAL SETTINGS
+
+3.1. Datasets
+
+For training and evaluation, we conduct all experiments on Audio-
+Caps [21], a corpus of ten-second audio clips paired with human-
+written captions. We use 48,595 training clips and 944 test clips.
+The train split provides one caption per clip, whereas the fest split
+provides up to five. All audio is resampled to 48kHz. For audio pre-
+processing, we compute STFTs with a 1,024 window size and a 480
+
+Table 1: Average cosine similarity scores for various embedding
+pairs on AudioCaps. For the CLAP, no transformation is applied, so
+éM — e™. We report e°-é°~™, where é*™ denotes a text-like
+embedding generated from modality M. Transformations are ob-
+tained via C3 (10), DB (Diffusion-Bridge) [20}, DG (DiffGap) [22],
+and our DL (Diffusion-Link). Here, ~ and ~ indicate matched and
+
+non-matched pairs, respectively.
+Comparison Pair Cosine Similarity
+
+CLAP C3 DB DG DL
+
+(a) et -6t-4(~) 0.486 0.547 0.528 0.110 0.688
+(b) ef -6!-t(W) 1.000 1.000 0.999 0.334 0.945
+(c) ef 6-4 (aL) 0.030 0.092 0.000 0.007 0.000
+(d) et ett (96) 0.098 0.158 0.002 0.043 0.001
+
+Table 2: Average cosine similarity scores for various inference for-
+ward timestep s, during diffusion process on AudioCaps.
+
+Inference forward timestep sx
+100 200 300 400 500
+0.688 0.654 0.596 0.510 0.404
+
+Diffusion-Link
+
+Cosine Similarity
+
+hop length, and then form mel-spectrograms with 64 mel-bins. We
+train on the train split and report results on the test split.
+
+3.2. Implementation Details and Metrics
+
+For audio-language multimodal encoder, we use the LAION-CLAP
+pretrained model [2] and keep it frozen. Following prior work ,
+we apply the same normalization process to the output embed-
+dings of CLAP. For Diffusion-Link, we adopt three residual MLP
+blocks . We train Diffusion-Link with the Adam optimizer
+and a batch size of 128. The base learning rate is set to 1x10~*
+and follows a step-decay schedule, multiplying the rate by 0.97
+every 200 steps. We employ an exponential moving average (EMA)
+of the model parameters with a decay of 0.995 and use the EMA
+weights for inference. We adopt a cosine noise schedule with a total
+of T=1000 timesteps. At inference, we employ DDIM sam-
+pling with 5 iteration steps. Before denoising, we apply a shallow
+forward noising to s.=100 and then run the reverse procoess. For
+LLM-based text decoder, we adopt LLaMA2(7B) as the LLM
+decoder. In the text-only training, we employ a linear layer with
+soft prefix tokens m=1 for the project head and prepend a short
+instruction prompt; in the fully supervised training, we use 2 linear
+layers with m=10 for the project head and no hard prompt. We
+fine-tune project head and the LLM using LoRA . LLM training
+uses AdamW optimizer with batch size 4 for 50 epochs: the
+learning rate warms up over the first 2 epochs with max learning
+rate 5x 107°, then use a cosine decay. We also train a baseline mul-
+timodal LLM system to verify the effectiveness of Diffusion-Link,
+we adopt same setting but detach only Diffusion-Link module. For
+evaluation, we adopt the metrics for modality gap analyzing, includ-
+ing cosine simiarity and visualization using UMAP . For AAC,
+we use the metrics, METEOR (ME) [36], CIDEr (CD) [37], SPICE
+(SP) {88}, and SPIDEr (SD) [B9}.
+
+4. RESULTS
+4.1. Main Results
+
+Effectiveness of Diffusion-Link for Modality Bridging. As shown
+in Table [I] Diffusion-Link attains the highest cosine similarity on
+
+
+Table 3: Performance comparison of AAC models on AudioCaps. External knowledge # is the number of non-audio samples used by the
+LLM at test time. For a fair comparison on the embedding-level modality-gap problem, * results use only embedding-level RAG without
+
+external k-caption selection.
+
+Encoder External
+Method output dim. knowledge # MET Cpr SET SsDt
+Zero-shot Captioning
+ZerAuCap 1x D 527 12.3 28.1 8.6 18.3
+DRCapt 1xD 450,000 21.8 59.5 15.7 37.6
+Zhang et al. 1x D No 22.0 64.4 15.6 40.0
+WSAC 1x D 46,000 24.1 63.3 7.3 40.3
+Ours ~~ ~ OO Tx DO No — 24.2 -73.2°:«17.5 45.4
+Fully Supervised Captioning
+Prefix AAC TxD No 24.0 73.3 17.7 45.5
+RECAP TxD 600,000 25.6 75.1 18.6 47.1
+EnCLAP-large TxD No 25.5 80.3 18.8 49.5
+CLAP-ART TxD No 25.6 80.7 18.8 49.8
+Ours” ~ TxD No  ~— 25.6 82.5 18.9 50.7
+
+Table 4: Ablation study to analyze the effectiveness of diffusion-
+based modality bridging method.
+
+Method ME*t CDt SPt SDt
+
+Zero-shot Captioning
+
+Baseline (CLAP & LLaMa2-7B) 21.2 48.0 14.4 31.2
++ Diffusion-Bridge 23.3 62.6 16.5 39.5
++ Diffusion-Link (Ours) 24.2 73.2 17.5 45.4
+
+Fully Supervised Captioning
+
+Baseline (CLAP & LLaMa2-7B) 25.0 76.9 18.6 47.7
++ Diffusion-Bridge 25.2 77.1 18.0 47.4
++ Diffusion-Link (Ours) 25.6 82.5 18.9 50.7
+
+matched audio-text pairs. While most approaches improve over
+CLAP, DiffGap underperforms, because it generates from pure
+Gaussian noise with the input embedding condition, which weak-
+ens information reconstruction. By contrast, Diffusion-Link treat
+the input embedding as residing at an intermediate reverse step,
+thereby minimizing information loss and ensuring high-quality gen-
+eration along the reverse trajectory. Importantly, Diffusion-Link
+also yields the lowest similarity on non-matched pairs, indicating
+not merely a global contraction of the space but maintaining seman-
+tic information. Figure [2] visualizes this effect. Both the generated
+text-like embeddings from audio and text embeddings all move to-
+ward the ground-true text embedding distribution, demonstrating
+that Diffusion-Link has learned a stable generative modality bridge
+for the text embedding distribution, regardless of the input modality.
+
+Diffusion-Link Amplifies Multimodal Encoder-LLM Coupling.
+Table[3]compares a range of AAC systems. In contrast to many
+prior methods that leverage longer audio representations or external
+knowledge (e.g., RAG), our multimodal LLM system captures in-
+put audio feature with only a single 1x D text-like embedding pro-
+duced by Diffusion-Link, and achieves SOTA in both zero-shot and
+fully supervised captioning without external knowledge. Notably,
+considering that most prior zero-shot models rely heavily on exter-
+nal knowledge, outperforming them without any external knowledge
+demonstrates the significant efficiency of Diffusion-Link.
+According to Table [4] our baseline LLM-based AAC system is
+not competitive relative to prior AAC systems in Table[3] However,
+applying Diffusion-Link markedly improves the same backbone. In
+zero-shot audio captioning, we observe a 52.5% relative increase in
+
+CIDEr together with substantial gains on the other metrics. These
+dramatic gains demonstrate that Diffusion-Link is the key factor and
+reaffirm the primacy of modality-gap reduction over using longer au-
+dio representations or external knowledge. Moreover, in fully super-
+vised audio captioning we observe up to 7.3% relative improvement,
+underscoring our method’s applicability.
+
+4.2. Ablation Studies
+
+We conduct ablations to analyze how the depth of forward noising
+affects modality bridging and high-quality generation. According to
+Table [2] increasing the inference forward timestep s. from shallow
+levels initially keeps similarity quite stable; beyond a threshold, the
+similarity drops sharply as s, increases. This indicates that over-
+noising pushes representations deeper into the common Gaussian
+space and erases information, thereby degrading semantic preser-
+vation in the reconstructed text-like embeddings.
+
+This finding is consistent in AAC results. In Table [I] the simi-
+larity score of Diffusion-Bridge is similar to that of Diffusion-Link
+when s., is between 300 and 400. This suggests that the performance
+of Diffusion-Bridge corresponds to over-noising of Diffusion-Link,
+which aligns with the observed semantic information loss. Further-
+more, under the same multimodal LLM system, the AAC results
+in Table [4] follow the same pattern: attaching Diffusion-Link yields
+large gains, whereas using Diffusion-Bridge provides only limited
+improvements. Together, the three tables show that excessive for-
+ward noising reduces similarity and weakens bridging, which in turn
+harms downstream performance; conversely, choosing an appropri-
+ate s, maximizes content preservation in the text-like embedding,
+strengthens conditioning-distribution alignment for the LLM de-
+coder, and translates into AAC gains.
+
+5. CONCLUSION
+
+We introduced Diffusion-Link, a lightweight residual MLP diffu-
+sion module that bridges audio embeddings to the text embedding
+distribution without keeping the multimodal encoder frozen. The
+method aligns the conditioning input by increasing matched simi-
+larity and decreasing mismatched similarity. On AAC, it improves
+the same multimodal LLM baseline by 52.5% and 7.3% without
+external knowledge for zero-shot and fully supervised AAC, respec-
+tively. This plug-in-play approach of Diffusion-Link is expected to
+generalize beyond audio captioning and enable effective zero-shot
+performance in a variety of multimodal LLMs.
+
+
+References
+
+(1]
+
+[2]
+
+[3]
+
+[4]
+
+[5]
+
+[6]
+
+[7]
+
+[8]
+
+[9]
+
+[10]
+
+[11]
+
+[12]
+[13]
+
+[14]
+
+[15]
+
+[16]
+
+[17]
+
+[18]
+
+[19]
+
+Benjamin Elizalde, Soham Deshmukh, Mahmoud AI Ismail,
+and Huaming Wang, “CLAP: Learning audio concepts from
+natural language supervision,” in Proc. ICASSP, 2023.
+Yusong Wu, Ke Chen, Tianyu Zhang, Yuchen Hui, Taylor
+Berg-Kirkpatrick, and Shlomo Dubnov, “Large-scale con-
+trastive language-audio pretraining with feature fusion and
+keyword-to-caption augmentation,” in Proc. ICASSP, 2023.
+Sreyan Ghosh, Sonal Kumar, Chandra Kiran Reddy Evuru,
+Oriol Nieto, Ramani Duraiswami, and Dinesh Manocha, “‘Re-
+clap: Improving zero shot audio classification by describing
+sounds,” in Proc. ICASSP, 2025.
+
+Wei-Lin Chiang, Zhuohan Li, Ziging Lin, Ying Sheng, Zhang-
+hao Wu, Hao Zhang, Lianmin Zheng, Siyuan Zhuang, Yong-
+hao Zhuang, Joseph E Gonzalez, et al., “Vicuna: An open-
+source chatbot impressing gpt-4 with 90%* chatgpt quality,”
+See https://vicuna. lmsys. org (accessed 14 April 2023), vol. 2,
+no. 3, pp. 6, 2023.
+
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Am-
+jad Almahairi, Yasmine Babaei, Nikolay Bashlykov, Soumya
+Batra, Prajjwal Bhargava, Shruti Bhosale, et al., “Llama 2:
+Open foundation and fine-tuned chat models,” arXiv preprint
+arXiv:2307.09288, 2023.
+
+Hyung Won Chung, Le Hou, Shayne Longpre, Barret Zoph,
+Yi Tay, William Fedus, Yunxuan Li, Xuezhi Wang, Mostafa
+Dehghani, Siddhartha Brahma, et al., “Scaling instruction-
+finetuned language models,’ J. Mach. Learn. Res., vol. 25,
+no. 70, pp. 1-53, 2024.
+
+Changli Tang, Wenyi Yu, Guangzhi Sun, Xianzhao Chen, Tian
+Tan, Wei Li, Lu Lu, Zejun Ma, and Chao Zhang, “SALMONN:
+Towards generic hearing abilities for large language models,”
+arXiv preprint arXiv:2310.13289, 2023.
+
+Kyeongha Rho, Hyeongkeun Lee, Valentio Iverson, and
+Joon Son Chung, “Lavcap: Llm-based audio-visual caption-
+ing using optimal transport,” in Proc. ICASSP, 2025.
+
+Victor Weixin Liang, Yuhui Zhang, Yongchan Kwon, Serena
+Yeung, and James Y Zou, “Mind the gap: Understanding the
+modality gap in multi-modal contrastive representation learn-
+ing,” in NeurIPS, 2022.
+
+Yuhui Zhang, Elaine Sui, and Serena Yeung, “Connect, col-
+lapse, corrupt: Learning cross-modal tasks with uni-modal
+data,’ in Proc. ICLR, 2024.
+
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh,
+Gabriel Goh, Sandhini Agarwal, Girish Sastry, Amanda
+Askell, Pamela Mishkin, Jack Clark, et al., “Learning trans-
+ferable visual models from natural language supervision,” in
+Proc. ICML, 2021.
+
+Zehan Wang, Yang Zhao, et al., “Connecting multi-modal con-
+trastive representations,” in NeurIPS, 2023.
+
+Ziang Zhang, Zehan Wang, Luping Liu, Rongjie Huang, Xize
+Cheng, Zhenhui Ye, Wang Lin, Huadai Liu, Haifeng Huang,
+Yang Zhao, Tao Jin, Sigi Zheng, and Zhou Zhao, “Extending
+multi-modal contrastive representations,” in NeurIPS, 2024.
+Jonathan Ho, Ajay Jain, and Pieter Abbeel, “Denoising diffu-
+sion probabilistic models,” in NeurIPS, 2020.
+
+Jiaming Song, Chenlin Meng, and Stefano Ermon, “Denoising
+diffusion implicit models,” in Proc. ICLR, 2021.
+
+Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu,
+and Mark Chen, “Hierarchical text-conditional image genera-
+tion with clip latents,’ arXiv preprint arXiv:2204.06125, vol.
+1, no. 2, pp. 3, 2022.
+
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick
+Esser, and Bjorn Ommer, “High-resolution image synthesis
+with latent diffusion models,” in Proc. CVPR, 2022.
+
+Haohe Liu, Zehua Chen, Yi Yuan, Xinhao Mei, Xubo Liu,
+Danilo Mandic, Wenwu Wang, and Mark D. Plumbley, “Audi-
+oldm: text-to-audio generation with latent diffusion models,”
+in Proc. ICML, 2023.
+
+Kihyun Nam, Jungwoo Heo, Jee weon Jung, Gangin Park,
+Chaeyoung Jung, Ha-Jin Yu, and Joon Son Chung, “SEED:
+
+[20]
+
+[21]
+
+[22]
+
+[23]
+
+[24]
+
+[25]
+
+[26]
+
+[27]
+[28]
+
+[29]
+
+[30]
+
+[31]
+
+[32]
+
+[33]
+
+[34]
+
+[35]
+
+[36]
+
+[37]
+
+[38]
+
+[39]
+
+Speaker Embedding Enhancement Diffusion Model,” in Proc.
+Interspeech, 2025.
+
+Jeong Ryong Lee, Yejee Shin, Geonhui Son, and Dosik
+Hwang, “Diffusion bridge: Leveraging diffusion model to re-
+duce the modality gap between text and vision for zero-shot
+image captioning,” in Proc. CVPR, 2025.
+
+Chris Dongjoo Kim, Byeongchang Kim, Hyunmin Lee, and
+Gunhee Kim, “Audiocaps: Generating captions for audios in
+the wild,’ in NAACL-HLT, 2019.
+
+Shentong Mo, Zehua Chen, Fan Bao, and Jun Zhu, “Diffgap: A
+lightweight diffusion module in contrastive space for bridging
+cross-model gap,” in Proc. ICASSP, 2025.
+
+Leonard Salewski, Stefan Fauth, A Koepke, and Zeynep
+Akata, “Zero-shot audio captioning with audio-language
+model guidance and audio context keywords,’ in Proc.
+NeurIPS ML4Audio Workshop, 2023.
+
+Xiquan Li, Wenxi Chen, Ziyang Ma, Xuenan Xu, Yuzhe Liang,
+Zhisheng Zheng, Qiugqiang Kong, and Xie Chen, “Drcap:
+Decoding clap latents with retrieval-augmented generation for
+zero-shot audio captioning,” in Proc. ICASSP, 2025.
+
+Yiming Zhang, Xuenan Xu, Ruoyi Du, Haohe Liu, Yuan Dong,
+Zheng-Hua Tan, Wenwu Wang, and Zhanyu Ma, “Zero-shot
+audio captioning using soft and hard prompts,” JEEE/ACM
+Trans. on Audio, Speech, and Language Processing, 2025.
+Theodoros Kouzelis and Vassilis Katsouros, “Weakly-
+supervised automated audio captioning via text only training,”
+in Proc. DCASE Workshop, 2023.
+
+Minkyu Kim, Kim Sung-Bin, and Tae-Hyun Oh, “Prefix tuning
+for automated audio captioning,” in Proc. ICASSP, 2023.
+Sreyan Ghosh, Sonal Kumar, Chandra Kiran Reddy Evuru, Ra-
+mani Duraiswami, and Dinesh Manocha, “Recap: Retrieval-
+augmented audio captioning,” in Proc. ICASSP, 2024.
+Jaeyeon Kim, Jaeyoon Jung, Jinjoo Lee, and Sang Hoon Woo,
+“EnCLAP: Combining neural audio codec and audio-text joint
+embedding for automated audio captioning,” in Proc. ICASSP,
+2024.
+
+Daiki Takeuchi, Binh Thien Nguyen, Masahiro Yasuda, Ya-
+sunori Ohishi, Daisuke Niizumi, and Noboru Harada, “Clap-
+art: Automated audio captioning with semantic-rich audio rep-
+resentation tokenizer,” arXiv preprint arXiv:2506.00800, 2025.
+Tianhong Li, Dina Katabi, and Kaiming He, “Return of un-
+conditional generation: A self-supervised representation gen-
+eration method,” in NeurIPS, 2024.
+
+Diederik P Kingma, Jimmy Ba, Y Bengio, and Y LeCun,
+“Adam: A method for stochastic optimization,” in Proc. ICLR,
+2015.
+
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu,
+Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen, “LoRA:
+Low-rank adaptation of large language models,” in Proc. ICLR,
+2022.
+
+Ilya Loshchilov and Frank Hutter, “Decoupled weight decay
+regularization,” in Proc. ICLR, 2019.
+
+Leland McInnes, John Healy, Nathaniel Saul, and Lukas
+Grofberger, “Umap: Uniform manifold approximation and
+projection,” Journal of Open Source Software, 2018.
+Satanjeev Banerjee and Alon Lavie, “METEOR: An automatic
+metric for MT evaluation with improved correlation with hu-
+man judgments,” in Proceedings of the ACL Workshop on In-
+trinsic and Extrinsic Evaluation Measures for Machine Trans-
+lation and/or Summarization, 2005.
+
+Ramakrishna Vedantam, C Lawrence Zitnick, and Devi Parikh,
+“Cider: Consensus-based image description evaluation,” in
+Proc. CVPR, 2015.
+
+Peter Anderson, Basura Fernando, Mark Johnson, and Stephen
+Gould, “Spice: Semantic propositional image caption evalua-
+tion,” in Proc. ECCV, 2016.
+
+Sigi Liu, Zhenhai Zhu, Ning Ye, Sergio Guadarrama, and
+Kevin Murphy, “Improved image captioning via policy gra-
+dient optimization of spider,’ in Proc. ICCV, 2017.

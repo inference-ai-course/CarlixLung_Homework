@@ -1,0 +1,1604 @@
+arX1v:2510.09885v1 [cs.CL] 10 Oct 2025
+
+Preprint
+
+CLOSING THE DATA-EFFICIENCY GAP BETWEEN AU-
+TOREGRESSIVE AND MASKED DIFFUSION LLMS
+
+Xu Pan'*, Ely Hahami**, Jingxuan Fan", Ziqian Xie*, Haim Sompolinsky!-*
+
+‘Center for Brain Science, Harvard University
+
+?Harvard University
+
+3Edmond and Lily Safra Center for Brain Sciences, Hebrew University
+“University of Texas Health Science Center at Houston
+
+* Equal contribution
+
+{xupan@fas, elyhahami@college, jfan@g}.harvard.edu
+
+ABSTRACT
+
+Despite autoregressive large language models (arLLMs) being the current dom-
+inant paradigm in language modeling, they resist knowledge injection via fine-
+tuning due to inherent shortcomings such as the “reversal curse” — the challenge
+of answering questions that reverse the original information order in the training
+sample. Masked diffusion large language models (dLLMs) are rapidly emerg-
+ing as a powerful alternative to the arLLM paradigm, with evidence of better
+data efficiency and free of the “reversal curse” in pre-training. However, it is
+unknown whether these advantages extend to the post-training phase, i.e. whether
+pre-trained dLLMs can easily acquire new knowledge through fine-tuning. On
+three diverse datasets, we fine-tune arLLMs and dLLMs, evaluating them with
+forward and backward style Question Answering (QA) to probe knowledge gen-
+eralization and the reversal curse. Our results confirm that arLLMs critically rely
+on extensive data augmentation via paraphrases for QA generalization, and para-
+phrases are only effective when their information order matches the QA style.
+Conversely, dLLMs achieve high accuracies on both forward and backward QAs
+without paraphrases; adding paraphrases yields only marginal gains. Lastly, in-
+spired by the dLLM’s performance, we introduce a novel masked fine-tuning
+paradigm for knowledge injection into pre-trained arLLMs. This proposed method
+successfully and drastically improves the data efficiency of arLLM fine-tuning, ef-
+fectively closing the performance gap with dLLMs.
+
+1 INTRODUCTION
+
+Despite auto-regressive large language models (arLLMs) being the main contributors to the modern
+success of language modeling, studies have demonstrated the difficulty of injecting new knowledge
+into pre-trained arLLMs by fine-tuning on documents that are not in the pre-training dataset (Ovadial
+2025). Fine-tuned models typically generalize poorly to downstream tasks such as
+question-answering (QA). An example failure mode is the famous “reversal curse’, that LLMs fail
+to answer the questions in the reversed order of the training text (Berglund et al.|/2023). Fine-tuning
+on multiple rewrites (i.e., paraphrases) of the documents can mitigate generalization issues but still
+
+falls behind in-context learning based external memory systems like RAG (Ovadia et al.| [2023
+Mecklenburg et al.|/2024). This pitfall of arLLMs is a major obstacle that limits current models
+
+from being flexible life-long learners via weight updates.
+
+As alternatives to the auto-regressive models, several recent masked diffusion large language models
+(dLLMs) have been scaled up to be as capable as arLLMs on multiple downstream tasks, with
+additional advantages such as high-throughput decoding of multiple tokens simultaneously
+(2025). Instead of factorizing the joint sequence probability strictly left-
+to-right, dLLMs learn the factorization under many permutations of token positions, enabling them
+to condition on any subset of tokens and predict the remainder. Though such an objective is harder
+
+
+Preprint
+
+Forward Questions Backward Questions
+
+Depend on paraphrases
+
+Autoregressive LLM fine-tuning
+IN TX
+w/o paraphrases
+
+Masked diffusion LLM fine-tuning
+
+ith paraphrases
+CmN
+es) (se) w/o paraphrases
+
+random mask
+
+with paraphrases
+
+©
+
+Autoregressive LLM masked fine-tuning .
+with paraphrases
+
+INTX
+(e) (es) (8) (A) Lis J w/o paraphrases
+
+©O©O|]GOO};®© ©
+© ©|]© ©|®
+
+Figure 1: A schematic summary of the results. First row: autoregressive LLM requires paraphrases
+for generalizing knowledge in the fine-tuning text to QA tasks, and suffer from reversal curse (i.e.
+fail to answer backward questions). Second row: masked diffusion LLM can easily generalize fine-
+tuning text to QA tasks in both forward and backward styles. Third row: inspired by the masked
+diffusion LLM, we propose a masked fine-tuning paradigm, that closes the fine-tuning gap between
+autoregressive LLMs and masked diffusion LLMs.
+
+than learning autoregressive factorization 2025), dLLMs do not suffer from “reversal
+curse” (Nie et al.|{2025b), and can achieve lower validation loss (i.e. token cross-entropy loss) than
+arLLMs in data-constrained settings (Prabhudesai et al. 2025). However, most
+
+of the dLLMs studies have focused on the properties in the pre-training phase. Little is known about
+whether dLLMs also have advantages in the post-training phase, such as knowledge injection by
+fine-tuning.
+
+In this study, we use three datasets to compare the data efficiency and performance of knowledge
+injection by fine-tuning in arLLM and dLLM models. We also introduce a novel masked fine-
+tuning paradigm for arLLMs that emulates a diffusion-style mask reconstruction loss. Across all
+datasets, dLLMs show a consistent data-efficiency advantage over arLLMs, and our masked fine-
+tuning largely closes this gap, bringing arLLMs to strong performance without relying on para-
+phrases. More specifically, we show the following results:
+
+¢ arLLMs heavily rely on paraphrases to successfully generalize fine-tuning text to down-
+stream QA tasks; arLLMs fail on backward style questions, and only paraphrases that re-
+verse the information order in the sentences can mitigate the reversal curse.
+
+dLLMs can achieve high accuracy in both forward and backward questions without para-
+phrases; adding paraphrases only marginally helps. This establishes the knowledge injec-
+tion data efficiency of dLLMs in the post-training phase.
+
+We propose a masked fine-tuning paradigm that fine-tunes arLLMs in a “masked diffusion”
+way by giving masked samples in the context with instructions to recover the mask, and
+set the unmasked sample as the supervised fine-tuning target. The novel method closes the
+performance gap between arLLMs and dLLMs fine-tuning: it achieves strong performance
+in both forward and backward questions without paraphrases.
+
+Taken together, these results show that dLLMs are more data-efficient than arLLMs during post-
+training. We further show that this advantage can be transferred to arLLMs via our masked fine-
+tuning paradigm. Our findings suggest the possibility to post-train an LLM to adapt to the changing
+world using a small amount of new knowledge texts, which could help address challenges in keeping
+AI systems updated with changing environment.
+
+
+Preprint
+
+2 BACKGROUND
+
+2.1 KNOWLEDGE INJECTION BY FINE-TUNING AND REVERSAL CURSE
+
+An AI system intended for real-world deployment should continually acquire and integrate new
+information to adapt to evolving environments. Though LLMs have been successful on numerous
+tasks, they struggle to incorporate new knowledge into their weights. At least two factors contribute
+to this challenge. First, fine-tuning on new tasks can induce catastrophic forgetting of previously
+
+learned capabilities (Luo et al.|{2023 2023 2023}|Zhang & Wul|2024
+2024 2024). Second, fine-tuning primarily reshapes surface behavior (e.g., tone
+and format) without reliably integrating new factual knowledge (Ovadia et al.| |2023} |Mecklenburg
+
+fetal 2024) [GeKhman et al.|[2024| Soudan et al (2024) (Zhao et al][2025}|Lampinen et al.][2025.
+
+A failure mode of learning knowledge in the text is the “reversal curse’, that after learning state-
+ments of the form “A is B”, the model does not generalize to its inverse form “B is A’. The reversal
+curse has been observed across the training phases and models (Berglund et al.
+2024). Even strong commercial models like GPT-4 and GPT-40 show signs of the reversal curse
+(Berglund et al.| [2023} Nie et al.| et al. [2025b) b). The cause of the reversal curse has been theoretically
+attributed to an on limitation of the autoregressive training objective
+(See Appendix [A.6). Common approaches to mitigate the reversal curse in autore-
+gressive models include: (i) augmenting the training set with paraphrases (Lu et al-| [2024), which
+requires substantial computation to construct; (ii) augmenting the training set with reordered se-
+
+quences 2024 2024), which often violate natural-language grammar
+
+and degrade overall language modeling performance; and (iii) replacing causal attention with bidi-
+rectional attention (2024), which struggles to retrieve long information (¢.g., a person’s
+description). In contrast, our masked fine-tuning paradigm for arLLMs addresses the reversal curse
+without constructing paraphrase augmentations or altering the autoregressive objective. With only
+adjustments to the fine-tuning query and keeping the original documents as optimization targets, our
+method attains high accuracy across all datasets we evaluated.
+
+2.2 MASKED DIFFUSION LANGUAGE MODELS
+
+Recently, dLLMs have emerged as a strong competitor to arLLMs (Sahoo et al.||2024
+2025b 2025). Comparing to autoregressive models, dLLMs use encoder-only transform-
+
+ers to generate text by iteratively unmasking tokens via a reversed discrete diffusion process. The
+training objective is to minimize the mask reconstruction loss (2025b):
+
+L
+
+Slat € MJ log po(xola1)| , (1)
+Li,
+
+L(O) = Lt,aeo ate
+
+1
+t
+
+Zo is an original sequence of length L sampled from the training data. The masking process is
+governed by the mask ratio ¢, which is sampled uniformly, resulting in the corrupted sequence x.
+The set M denotes the indices of the tokens that were masked by the forward process at ratio t. The
+£-th token is considered for the loss only if it was masked. Such a loss objective has been shown to
+be the negative evidence lower bound (ELBO) on the data likelihood (Shi et al.|[2024).
+
+Recent studies report (LLMs are more data-efficient than arLLMs. When the training data is scarce,
+dLLMs keep improving with repeated use of the data and surpass arLLMs on validation loss, while
+
+arLLMs saturate the validation loss or increase it due to overfitting (Prabhudesai et al.||2025
+2025). [Prabhudesai et al.| (2025) further shows that the lower validation loss in dLLMs
+
+can generalize to downstream tasks like ARC-Easy, and attributes its data efficiency to random
+masks as implicit data augmentation. However, whether these advantages persist in new knowledge
+acquisition during post-training—where the model needs to learn generalizable knowledge through
+small fine-tuning sets—remains unclear.
+
+
+Preprint
+
+2.3. CHANGE ORDER TRAINING OF ARLLM
+
+In the following sections, we introduce a novel masked fine-tuning paradigm for arLLMs that is dis-
+tinct from prior studies employing permuted-order training. Specifically, XLNet
+proposed bidirectional context learning using Permutation Language Modeling, yet this required en-
+gineering a specialized Two-Stream Self-Attention architecture. Subsequent work like MAC
+focused on optimizing the training efficiency of these any-order models but similarly
+involved modifications to the underlying attention mechanism. Furthermore, methods like the fill-in-
+the-middle objective functioned solely as a pre-training objective for infilling,
+without addressing the post-training knowledge acquisition challenges in downstream tasks such as
+QA. In contrast, our proposed masked fine-tuning paradigm focuses exclusively on the post-training
+phase, effectively capturing the benefits of bidirectional context to improve knowledge generaliza-
+tion without necessitating any alteration to the core pre-trained autoregressive architecture.
+
+3. DATASETS AND EXPERIMENTAL SETUPS
+
+We focus on assessing LLMs’ ability to learn new knowledge through fine-tuning. More specifically,
+LLMs are fine-tuned on a set of documents that contain knowledge unknown to the base LLM, and
+evaluated by open-ended QA tasks. The correctness of an answer is evaluated by the well-adopted
+ROUGE-1 score between the generated answer and the ground
+truth answer, which we report as “accuracy.” It measures the proportion of the words in the ground
+truth answer that appear in the generated answer. To better demonstrate the generation quality, we
+also show examples of model responses in all the experiments inA.5]
+
+We use three representative datasets. Two are existing synthetic datasets from previous studies on the
+reversal curse; one is constructed using recent Wikipedia articles. Each dataset has been augmented
+with paraphrases. See examples of each dataset in Appendix[A.3]
+
+The NameDescription (Berglund et al.||2023) contains 60 statements of different fictitious individ-
+uals, 30 each of the form “[name] is [description]” (N2D) and “[description] is [name]” (D2N). |Lin|
+
+extended the dataset with an open-ended QA testing set. For each type of statement, the
+QA set contains two types of questions: “What is the name related to a given description” and “What
+is the description of a given name”. Depending on whether the question is aligned with the original
+statement, each question is classified as “forward” or “backward” question (e.g. N2D statement with
+“What is the description of a given name” type of question is a forward question). The dataset also
+contains a paraphrase set, in which each statement is rewritten into 30 different versions, but the
+order of [name] and [description] in the paraphrases is always preserved as in the original statement
+(either N2D or D2N).
+
+The Biography dataset is proposed in|Allen-Zhu & Li|(2024}|2025). Since the original dataset is not
+publicly available, we used a subset of 100 samples from a replication (Zheng et al.| 2025). Each
+
+sample is a 6-sentence paragraph about a fictitious individual, detailing their birth city, birthday,
+college, and job information. Note that the name only appears in the first sentence and is replaced
+with a pronoun in the following sentences; thus, questions about the name are considered backward
+questions. Each sample also includes a paraphrase set of 5 paraphrases; the paraphrases do not
+change the order of the sentences but only alter the wording while preserving the information. The
+testing QA set has both forward (i.e., asking for an attribute given the name) and backward styles
+(i.e., asking for the name given 3 attributes from the person) questions.
+
+The Wiki dataset contains 92 Wikipedia articles, constructed according to the protocol described in
+[Pan et al.| (2025). We crawl the Wikipedia pages under the category “2025 by month”, and then
+further filter out the pages that were created before the year 2025. This procedure ensures that these
+real-world events are recent enough that both dLLM and arLLM models are not aware of them,
+which is justified by the models’ accuracy before fine-tuning (Table Bp. For each wiki article, we
+use GPT-03-mini to generate QA pairs in both forward and backward styles. By prompting GPT-03-
+mini, we construct two different paraphrase sets: one that retains the information in place while only
+changing the wording (same-order paraphrases); the other also changes the order of information in
+the article (permute-order paraphrases). 10 paraphrases of each type are generated for every wiki
+article. More details on constructing the datasets are provided in Appendix[A.3|
+
+
+Preprint
+
+We chose Llama-3.1-8B-Instruct (Dubey et al.|/2024) and LLaDA-8B-Instruct 2025b)
+
+models as representatives of arLLM and dLLM to conduct the experiments, as they perform simi-
+larly on the benchmarks and are of comparable sizes. Fine-tuning and evaluation configurations are
+
+provided in the Appendix[A.4]
+
+NameDescription Biography
+N2D-fwd N2D-bwd D2N-fwd D2N-bwd Fwd _ Bwd
+
+arLLM before fine-tuning 0.072 0.000 0.054 0.000 0.001 0.000
+arLLM w/o paraphrases 0.374 0.000 0.017 0.027. 0.121 0.002
+arLLM w paraphrases 0.910 0.004 0.925 0.071 0.962 0.001
+
+Table 1: Fine-tuning performance of arLLM on the NameDescription and Biography datasets.
+
+Wiki
+Fwd Bwd
+arLLM before fine-tuning 0.164 0.127
+arLLM w/o paraphrases 0.377 0.282
+
+arLLM w same-order paraphrases 0.685 0.396
+arLLM w permute-order paraphrases 0.721 0.628
+
+Table 2: Fine-tuning performance of arLLM on the Wiki dataset.
+
+4 ARLLM KNOWLEDGE INJECTION RELIES ON PARAPHRASES
+
+We first show that knowledge injection by fine-tuning in arLLMs heavily relies on paraphrases.
+
+This is known in previous studies (Berglund et al.| {2023} [Allen-Zhu & Lij {2025
+2024 2024). We demonstrate this observation on three datasets to set
+
+baselines for comparison with dLLM and our novel paradigm in the following sections.
+
+We fine-tune Llama-3.1-8B-Instruct on dataset samples using the pre-training format (i.e., without
+a chat template). Without paraphrases, backward accuracy on the NameDescription and Biography
+datasets is close to 0, while the forward accuracy of NameDescription N2D and Biography does not
+completely fail but is still poor (Table [ip. Adding paraphrases drastically raises forward accuracy
+close to 1, while backward accuracy remains close to 0. Paraphrases do not help backward accu-
+racy in NameDescription and Biography datasets because the construction of these datasets does not
+change the semantic order of the sentences. The trend is similar in the Wiki dataset (Table[2). While
+the same-order paraphrases significantly increase forward accuracy, they only mildly increase back-
+ward accuracy. Using permute-order paraphrases increases both forward and backward accuracy,
+and the gap between them is smaller. Note that, due to the naturalness of this dataset, pre—fine-
+tuning accuracies are not as close to zero as in the other datasets (Table (2): nonetheless, they are
+sufficiently low to demonstrate the effectiveness of fine-tuning.
+
+These results suggest that, in arLLM fine-tuning, paraphrases significantly improve QA accuracy,
+but help backward questions only when the paraphrases change the information order in the sen-
+tences to be more aligned with the backward style. Note that the accuracy difference between
+fine-tuning with paraphrases and without paraphrases is not due to different training steps; in both
+cases, we train the models with sufficiently large epoch numbers; the reported accuracy is from the
+best checkpoints during the training (Figure [2] Appendix[6).
+
+5 DLLM KNOWLEDGE INJECTION
+
+We investigate the data efficiency of dLLMs for knowledge injection by fine-tuning, focusing on
+whether they require paraphrases to successfully handle both forward and backward QAs. We fol-
+low the original pretraining protocol (Nie et al.) to fine-tune LLaDA-8B-Instruct on the
+dataset samples using the loss defined in Eq. }1] On three datasets, the accuracy difference between
+
+
+Preprint
+
+NameDescription Biography Wiki
+
+N2D-fwd N2D-bwd D2N-fwd D2N-bwd Fwd Bwd Fwd = Bwd
+arLLM before fine-tuning 0.072 0.000 0.054 0.000 0.001 0.000 0.164 0.127
+dLLM before fine-tuning 0.030 0.000 0.028 0.000 0.030 0.000 0.210 0.156
+arLLM w/o paraphrases 0.374 0.000 0.017 0.027. 0.121 0.002 0.377 0.282
+arLLM w paraphrases 0.910 0.004 0.925 0.071 0.962 0.001 0.685 0.396
+dLLM w/o paraphrases 0.873 0.913 0.864 0.790 0.892 0.696 0.908 0.778
+dLLM w paraphrases 0.967 0.994 0.994 0.973 0.991 0.857 0.900 0.785
+
+Masked arLLM w/o paraphrases (0.658 0.949 0.992 0.923 0.971 0.598 0.980 0.930
+Masked arLLM w paraphrases 0.969 0.996 0.928 0.832 0.965 0.816 0.905 0.794
+
+Table 3: Fine-tuning performance of arLLM, dLLM and masked arLLM on all three datasets. The
+paraphrases used for the Wiki dataset are the same-order paraphrase set.
+
+fine-tuning with and without paraphrases is much smaller in the dLLM than in the arLLM (Table[3):
+dLLM without paraphrases can already achieve decent accuracies on both forward and backward
+questions; fine-tuning with paraphrases can further increase the accuracy by a small amount. The
+accuracy difference between forward and backward questions is also smaller, indicating dLLM does
+not rely on paraphrases to answer backward questions. These results together suggest that (LLM has
+superior data efficiency and is free of the reversal curse in the post-training phase. By plotting the
+testing accuracy across the training steps (Figure[2), we observe that arLLM fine-tuned without para-
+phrases improves QA accuracy only in the beginning of training, then quickly decreases, indicating
+overfitting. The dLLM without paraphrases, on the other hand, does not show signs of overfitting.
+This finding echoes what has been found in comparing arLLMs and dLLMs in the pre-training phase
+
+(Prabhudesai et al. 2025).
+
+One may expect that fine-tuning dLLM converges slower than arLLM, because learning any-order
+factorization es seeing more than yt DOTS). of the factorizations (i.e., samples masked in differ-
+ent ways) (Xue et al.| {2025} /Kim et al. . However, we found that dLLM converges as fast as
+arLLM (Figure|2} Appendix Table|4); in tie Biography dataset, dLLM even converges faster than
+arLLM. This indicates that dLLM does not trade better data efficiency and performance for more
+computations; it requires the same or less computation and fewer training samples, but achieves
+better downstream performance.
+
+6 MASKED FINE-TUNING OF ARLLM
+
+Inspired by the supremacy of dLLM in knowledge injection by fine-tuning, we attempt to adapt
+its advantages to arLLM. If an instruct arLLM is capable enough, one may prompt an arLLM to
+act like a dLLM. Specifically, given a masked document and an instruction to recover the original
+document, if the model has knowledge of the original document and the masked document contains
+sufficient cues to retrieve this knowledge, an instruct arLLM is supposed to respond with the correct
+original document. If the arLLM does not already have the knowledge of the original document,
+setting the ground truth document as the supervised fine-tuning target may implicitly teach the model
+that knowledge. We refer to this fine-tuning paradigm as “masked fine-tuning” of arLLM, and the
+resulting model as “masked arLLM”. Masked fine-tuning of arLLM, from a broader perspective,
+establishes a training objective similar to that of dLLMs, wherein the model learns to reconstruct
+the unmasked sequence from a masked input. Following the dLLM noise sampling strategy, we
+randomly replace sample tokens with a reserved special token during training, where the mask ratio
+t is sampled from a uniform distribution U (0.05, 0.95). Note that each sample can be masked with
+a different mask ratio in different epochs. We evaluate the mask fine-tuned arLLM in the regular
+autoregressive way using the default chat template. The exact prompt used in the fine-tuning is
+provided in Figure[3] and more details can be found in Appendix|A-4]
+
+To demonstrate that the effectiveness of our masked fine-tuning is not due to a simple data augmen-
+tation effect, we conducted a control experiment that replaces the masked text in the prompt with
+random tokens (Appendix Figure (9p. Using random tokens declines the accuracy of masked fine-
+tuning to a level comparable to that of naive arLLM fine-tuning. To confirm that the effectiveness of
+our masked fine-tuning stems from the objective itself and not merely a simple data augmentation
+
+
+Preprint
+
+—— arLLM wo paraphrases —— dLLM wo paraphrases —— Masked arLLM wo paraphrases
+---- arLLM w paraphrases ---- dLLM w paraphrases ---- Masked arLLM w paraphrases
+NameDescription dataset Biography dataset Wiki dataset
+1.0
+70.8
+oO
+©
+P=}
+0.6
+Pq
+no}
+6 0.4
+g 0.
+ec
+3
+uw
+0.2
+0.0 B H
+0 1000 2000 3000 4000 i?) 2000 4000 6000 8000 10000 0 2000 4000 6000 8000 10000
+1070 eee eeeee 1.0 1.0
+30.8 0.8 Ss —— 0.8
+© “ wer A —
+= - one
+3 0.6 0.6 0.6
+z
+$0.4 0.4 0.4
+aie
+8
+9'0.2 0.2 0.2
+0.0+= $________ 0.04 — 0.0
+0 1000 2000 3000 4000 0 2000 4000 6000 8000 10000 0 2000 4000 6000 8000 10000
+Steps Steps Steps
+
+Figure 2: Training dynamics of arLLM, dLLM, and masked arLLM. For the NameDescription
+dataset, forward and backward accuracy are the average of N2D and D2N types. Paraphrases used
+in the Wiki dataset are the same-order paraphrases set. Due to the randomness of sampling the
+masks, we average across 4 random seed for the dLLM and masked arLLM on NameDescription
+and Biography Datasets. Curves for each seed are shown in Appendix Figure[7[8]
+
+<Istart_header_idl> user <lend_header_idl> \n\n [MASK] Barrington, known [MASK] and
+[MASK] for being [MASK] acclaimed director of the [MASK] reality masterpiece, "A
+[MASK] Through [MASK]." \n Return the recovered masked passage. <leot_idl>
+<Istart_header_idl> assistant <lend_header_idl> \n\n Here is the recovered text:\ n
+
+Daphne Barrington, known far and wide for being the acclaimed director of the virtual reality
+masterpiece, "A Journey Through Time." <leot_idl>
+
+Figure 3: An example of masked fine-tuning prompt. Random selection of text tokens are replaced
+by a [MASK] token. Tokens with yellow background are used to compute the autoregressive loss.
+
+effect (i.e., introducing varied input text prepended to the training sample), we conducted a control
+experiment. In this test, the masked document within the prompt was replaced entirely with random
+tokens (Appendix Figure (9). This substitution caused the accuracy of the masked fine-tuning to
+plummet to the level of naive arLLM fine-tuning.
+
+7 EFFECTS OF FINE-TUNING MASK RATIO
+
+Previous studies (Allen-Zhu & Li} |2024}|2025) claim that bidirectional BERT-like models struggle
+
+with even forward style knowledge extraction due to the mask loss, which causes the model to learn
+incorrect associations between tokens. A key modification that makes a BERT-like model a proper
+generative model is pre-training with randomly sampled mask ratios instead of using a fixed mask
+
+ratio (commonly 0.15 in BERT)(Nie et al. 2025b 2018). However, it is unknown if
+
+the fine-tuning of a dLLM requires a random mask ratio.
+
+
+Preprint
+
+— t=1.0 — t=0:5 — t=0.0 ---- with paraphrases
+t=0.75 — t=0.25 — without paraphrases
+
+Masked arLLM
+
+im
+°
+
+oS
+foo)
+
+0.8
+
+‘S
+a
+
+0.6
+
+id
+BR
+
+0.4
+
+Forward Accuracy
+
+S
+N
+
+0.2
+
+2
+o
+
+0.0
+0 1000 2000 3000 ie) 1000 2000 3000
+
+oS o isd ie
+~ a fo} ro}
+Bb
+ro}
+
+Backward Accuracy
+
+=]
+N
+
+gS
+fo}
+
+i?) 1000 2000 3000
+Steps
+
+Figure 4: Accuracy of using fixed mask ratio (¢) in dLLM fine-tuning and arLLM masked fine-
+tuning on the NameDescription dataset.
+
+To investigate whether this necessity persists during post-training, we change the fine-tuning process
+of the dLLMs and masked arLLMs to use fixed mask ratios (¢) instead of randomly sampling them
+during the training (Figure (4). Fine-tuning with some fixed mask ratios (0.75 and 0.5) can be as
+effective as the random mask ratio in knowledge injection. However, there is considerable perfor-
+mance variation across choices of t. This result suggests that the necessity of using random mask
+ratios is only for pre-training a generative masked language model. In the fine-tuning phase of this
+particular task domain, using a fixed mask ratio of around 0.75 is as effective as using random mask
+ratios.
+
+Using a mask ratio of 0 in the masked fine-tuning of arLLM completely fails (black lines in Figure
+(4). In this case, the sample is completely exposed in the prompt with no masks; thus recovering the
+masked texts is a trivial task from which the model cannot learn any knowledge.
+
+8 DISCUSSION
+
+In this study, we find that dLLMs are more data-efficient for post-training knowledge injection
+than arLLMs, achieving high accuracy on both forward and backward style questions, even without
+paraphrase augmentation. In contrast, arLLMs depend heavily on paraphrases and struggle with
+backward questions, confirming the reversal curse. To bridge this gap, we introduce a masked fine-
+tuning paradigm for arLLMs that leverages diffusion-style mask reconstruction as an instruction
+tuning task without modifying the auto-regressive architecture or loss. The novel method allows
+arLLMs to reach near-perfect accuracy on forward and backward questions without relying on any
+paraphrases, closing the data efficiency gap between arLLMs and dLLMs. In summary, we provide
+an effective recipe to achieve new knowledge injection by fine-tuning in LLMs.
+
+We believe that such knowledge injection by fine-tuning will serve as a cornerstone for a self-
+
+evolving AI in the era of experience (Silver & Sutton} |2025). Engineering a dynamic memory
+
+system for LLMs is a trending research field, as agentic LLMs need to learn and evolve from their
+experiences (Chhikara et al.|{2025). Most current memory systems are based on
+external databases that store experiences and new knowledge as text. Such explicit textual mem-
+ory has been successful due to the well-known in-context learning ability of LLMs. However, such
+memory systems have disadvantages as follows: 1) a limited context window and degradation of
+
+
+Preprint
+
+performance with long context{Liu et al.|(2023), 2) expensive computation due to long context, 3)
+difficulty in expressing implicit knowledge as text, such as knowledge of winning a chess game, and
+4) the intrinsic limitation of using vector-based embeddings for retrieval (Weller et al.| 2025). Para-
+metric memory (i.e., memorizing by changing the network weights) does not have the above issues;
+however, due to the complications of fine-tuning an LLM, parametric memory is much less popular
+in production settings . Euahernc, fine-tuning LLMs is shown to be inefficient
+
+in learning new factual knowledge (Ovadia et al. -||2023 Sores et al.|/2024}|Gekhman et al.
+2024} [Soudani et al.| /2024} |Z , and has to rely on gating to
+3035
+
+overcome MOSS) Oued forgetting |Pan i = {ons 4); {Yu et al.| (2023); [Hartvigsen|
+fet al.|(2023). Our study shows the feasibility of knowledge injection by fine-tuning through a mask
+
+recovery sbjective. These findings extend the known data efficiency of pre-training masked dLLMs
+(2025). The mask recovery objective uses a more flexible
+factorization, which can be seen as an implicit data augmentation. Therefore, it enables strong per-
+formance in both forward and backward style recalls without explicitly creating more paraphrases.
+Furthermore, we show that such fine-tuning data efficiency is not exclusive to dLLM and its bi-
+directional attention pattern, the same objective can be reformulated into a supervised fine-tuning
+task for arLLM. We show that training arLLMs with this novel paradigm closes the performance
+and data efficiency gap. This implies that one does not need to switch to a dLLM, but can use any
+of the existing arLLMs and still benefits from the data efficiency advantage.
+
+A limitation of our study is its reliance on relatively simple datasets; real-life knowledge and incom-
+ing experiences are much more complex. Therefore, a promising future direction is to evaluate both
+dLLMs and our masked fine-tuning paradigm in more realistic agentic settings and on more complex
+data. We also see the future potential in extending our masked fine-tuning approach to other phases
+of LLM training, such as pre-training and reinforcement learning style training.
+
+ACKNOWLEDGMENTS
+
+We acknowledge the support of the Swartz Foundation, the Kempner Institute for the Study of Nat-
+ural and Artificial Intelligence at Harvard University, the Office of Naval Research (ONR) grant
+No.N0014-23-1-2051, and the Gatsby Charitable Foundation. We have benefited from helpful dis-
+cussions with Jorin Overwiening and Binxu Wang.
+
+REFERENCES
+
+Zeyuan Allen-Zhu and Yuanzhi Li. Physics of language models: Part 3.1, knowledge storage and
+extraction. In Ruslan Salakhutdinov, Zico Kolter, Katherine Heller, Adrian Weller, Nuria Oliver,
+Jonathan Scarlett, and Felix Berkenkamp (eds.), Proceedings of the 41st International Confer-
+ence on Machine Learning, volume 235 of Proceedings of Machine Learning Research, pp.
+
+1067-1077. PMLR, 21-27 Jul 2024. URL|https://proceedings.mlr.press/v235/
+
+Zeyuan Allen-Zhu and Yuanzhi Li. Physics of language models: Part 3.2, knowledge manipulation.
+In The Thirteenth International Conference on Learning Representations, 2025. URL|https:|
+openreview.net/forum?id=oDbiL9CLoSs
+
+Mohammad Bavarian, Heewoo Jun, Nikolas Tezak, John Schulman, Christine McLeavey, Jerry
+Tworek, and Mark Chen. Efficient training of language models to fill in the middle. arXiv
+preprint arXiv:2207.14255, 2022.
+
+Lukas Berglund, Meg Tong, Max Kaufmann, Mikita Balesni, Asa Cooper Stickland, Tomasz Kor-
+bak, and Owain Evans. The reversal curse: Llms trained on" a is b" fail to learn" b is a". arXiv
+preprint arXiv:2309.12288, 2023.
+
+Lingjiao Chen, Matei Zaharia, and James Zou. How is chatgpt’s behavior changing over time?
+Harvard Data Science Review, 6(2), 2024.
+
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. Mem0: Building
+production-ready ai agents with scalable long-term memory. arXiv preprint arXiv:2504.19413,
+2025.
+
+
+Preprint
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. BERT: pre-training of deep
+bidirectional transformers for language understanding. CoRR, abs/1810.04805, 2018. URL
+
+http://arxiv.org/abs/1810.04805
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha
+Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. The llama 3 herd of models.
+arXiv e-prints, pp. arXiv—2407, 2024.
+
+Zorik Gekhman, Gal Yona, Roee Aharoni, Matan Eyal, Amir Feder, Roi Reichart, and Jonathan
+Herzig. Does fine-tuning llms on new knowledge encourage hallucinations? In Proceedings of
+the 2024 Conference on Empirical Methods in Natural Language Processing, pp. 7765-7784,
+2024.
+
+Olga Golovneva, Zeyuan Allen-Zhu, Jason E Weston, and Sainbayar Sukhbaatar. Reverse training
+to nurse the reversal curse. In First Conference on Language Modeling, 2024. URL|https:)
+
+openreview.net/forum?id=HDkNbfLOgu
+
+Qingyan Guo, Rui Wang, Junliang Guo, Xu Tan, Jiang Bian, and Yujiu Yang. Mitigating reversal
+curse in large language models via semantic-aware permutation training. In Lun-Wei Ku, Andre
+Martins, and Vivek Srikumar (eds.), Findings of the Association for Computational Linguistics:
+ACL 2024, pp. 11453-11464, Bangkok, Thailand, August 2024. Association for Computational
+Linguistics. doi: 10.18653/v1/2024.findings-acl.680. URL|https: //aclanthology.org/|
+
+Thomas Hartvigsen, Swami Sankaranarayanan, Hamid Palangi, Yoon Kim, and Marzyeh Ghassemi.
+Aging with grace: Lifelong model editing with discrete key-value adaptors, 2023. URL|ht tps :|
+//arxiv.org/abs/2211.11031
+
+Houcheng Jiang, Junfeng Fang, Ningyu Zhang, Guojun Ma, Mingyang Wan, Xiang Wang, Xiangnan
+He, and Tat-seng Chua. Anyedit: Edit any knowledge encoded in language models. arXiv preprint
+arXiv:2502.05628, 2025.
+
+Jaeyeon Kim, Kulin Shah, Vasilis Kontonis, Sham M. Kakade, and Sitan Chen. Train for the worst,
+plan for the best: Understanding token ordering in masked diffusions. In Forty-second Interna-
+
+tional Conference on Machine Learning, 2025. URLihttps://openreview.net/forum?
+id=DjJmre5IkP
+
+Ouail Kitouni, Niklas S Nolte, Adina Williams, Michael Rabbat, Diane Bouchacourt, and Mark
+Ibrahim. The factorization curse: Which tokens you predict underlie the reversal curse and more.
+Advances in Neural Information Processing Systems, 37:112329-112355, 2024.
+
+Andrew K Lampinen, Arslan Chaudhry, Stephanie CY Chan, Cody Wild, Diane Wan, Alex Ku, Jorg
+Bornschein, Razvan Pascanu, Murray Shanahan, and James L McClelland. On the generalization
+of language models from in-context learning and finetuning: a controlled study. arXiv preprint
+arXiv:2505.00661, 2025.
+
+Zhengkai Lin, Zhihang Fu, Kai Liu, Liang Xie, Binbin Lin, Wenxiao Wang, Deng Cai, Yue Wu,
+and Jieping Ye. Delving into the reversal curse: How far can large language models generalize?
+Advances in Neural Information Processing Systems, 37:30686—30726, 2024.
+
+Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and
+Percy Liang. Lost in the middle: How language models use long contexts. arXiv preprint
+arXiv:2307.03172, 2023.
+
+Zhicong Lu, Li Jin, Peiguang Li, Yu Tian, Linhao Zhang, Sirui Wang, Guangluan Xu, Changyuan
+Tian, and Xunliang Cai. Rethinking the reversal curse of Ilms: a prescription from human knowl-
+edge reversal. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language
+Processing, pp. 7518-7530, 2024.
+
+Yun Luo, Zhen Yang, Fandong Meng, Yafu Li, Jie Zhou, and Yue Zhang. An empirical study
+of catastrophic forgetting in large language models during continual fine-tuning, 2023. URL
+https://arxiv. org/abs/2308.08747, 2308:60, 2023.
+
+10
+
+
+Preprint
+
+Ang Ly, Kaiyi Zhang, Shufang Xie, Quan Tu, Yuhan Chen, Ji-Rong Wen, and Rui Yan. An anal-
+ysis and mitigation of the reversal curse. In Yaser Al-Onaizan, Mohit Bansal, and Yun-Nung
+Chen (eds.), Proceedings of the 2024 Conference on Empirical Methods in Natural Language
+Processing, pp. 13603-13615, Miami, Florida, USA, November 2024. Association for Computa-
+tional Linguistics. doi: 10.18653/v1/2024.emnlp-main.754. URL/https://aclanthology.|
+
+Nick Mecklenburg, Yiyou Lin, Xiaoxiao Li, Daniel Holstein, Leonardo Nunes, Sara Malvar, Bruno
+Silva, Ranveer Chandra, Vijay Aski, Pavan Kumar Reddy Yannam, et al. Injecting new knowledge
+into large language models via supervised fine-tuning. arXiv preprint arXiv:2404.00213, 2024.
+
+Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. Locating and editing factual
+associations in gpt. Advances in neural information processing systems, 35:17359-17372, 2022.
+
+Jinjie Ni and the team. Diffusion language models are super data _learn-
+ers. https://jinjieni.notion.site/Diffusion-Language-Models-are-Super-Data-Learners-
+239d8f03a866800ab196e49928c019ac, 2025. Notion Blog.
+
+Shen Nie, Fenggi Zhu, Chao Du, Tianyu Pang, Qian Liu, Guangtao Zeng, Min Lin, and Chongxuan
+Li. Scaling up masked diffusion models on text. In Y. Yue, A. Garg, N. Peng, F. Sha, and R. Yu
+(eds.), International Conference on Representation Learning, volume 2025, pp. 82974-82997,
+
+Shen Nie, Fenggi Zhu, Zebin You, Xiaolu Zhang, Jingyang Ou, Jun Hu, Jun Zhou, Yankai
+Lin, Ji-Rong Wen, and Chongxuan Li. Large language diffusion models. arXiv preprint
+arXiv:2502.09992, 2025b.
+
+Oded Ovadia, Menachem Brief, Moshik Mishaeli, and Oren Elisha. Fine-tuning or retrieval? com-
+paring knowledge injection in lms. arXiv preprint arXiv:2312.05934, 2023.
+
+Xu Pan, Ely Hahami, Zechen Zhang, and Haim Sompolinsky. Memorization and knowledge injec-
+tion in gated IIms. arXiv preprint arXiv:2504.21239, 2025.
+
+Mihir Prabhudesai, Mengning Wu, Amir Zadeh, Katerina Fragkiadaki, and Deepak Pathak. Diffu-
+sion beats autoregressive in data-constrained settings. arXiv preprint arXiv:2507. 15857, 2025.
+
+Weijieying Ren, Xinlong Li, Lei Wang, Tianxiang Zhao, and Wei Qin. Analyzing and reducing
+catastrophic forgetting in parameter efficient tuning. arXiv preprint arXiv:2402.18865, 2024.
+
+Subham Sahoo, Marianne Arriola, Yair Schiff, Aaron Gokaslan, Edgar Marroquin, Justin Chiu,
+Alexander Rush, and Volodymyr Kuleshov. Simple and effective masked diffusion language
+models. Advances in Neural Information Processing Systems, 37:130136—130184, 2024.
+
+Jiaxin Shi, Kehang Han, Zhe Wang, Arnaud Doucet, and Michalis Titsias. Simplified and general-
+ized masked diffusion for discrete data. Advances in neural information processing systems, 37:
+103131—103167, 2024.
+
+Andy Shih, Dorsa Sadigh, and Stefano Ermon. Training and inference on any-order autoregressive
+models the right way. Advances in Neural Information Processing Systems, 35:2762—2775, 2022.
+
+David Silver and Richard S Sutton. Welcome to the era of experience. Google AI, 1, 2025.
+
+Heydar Soudani, Evangelos Kanoulas, and Faegheh Hasibi. Fine tuning vs. retrieval augmented
+generation for less popular knowledge. In Proceedings of the 2024 Annual International ACM
+SIGIR Conference on Research and Development in Information Retrieval in the Asia Pacific
+Region, pp. 12-22, 2024.
+
+Peng Wang, Zexi Li, Ningyu Zhang, Ziwen Xu, Yunzhi Yao, Yong Jiang, Pengjun Xie, Fei Huang,
+and Huajun Chen. Wise: Rethinking the knowledge memory for lifelong model editing of large
+
+language models, 2024. URLhttps://arxiv.org/abs/2405.14768
+
+11
+
+
+Preprint
+
+Xiao Wang, Yuansen Zhang, Tianze Chen, Songyang Gao, Senjie Jin, Xianjun Yang, Zhiheng Xi,
+Rui Zheng, Yicheng Zou, Tao Gui, et al. Trace: A comprehensive benchmark for continual
+learning in large language models. arXiv preprint arXiv:2310.06762, 2023.
+
+Orion Weller, Michael Boratko, Iftekhar Naim, and Jinhyuk Lee. On the theoretical limitations of
+embedding-based retrieval. arXiv preprint arXiv:2508.21038, 2025.
+
+Shuchen Xue, Tianyu Xie, Tianyang Hu, Zijin Feng, Jiacheng Sun, Kenji Kawaguchi, Zhenguo
+Li, and Zhi-Ming Ma. Any-order gpt as masked diffusion model: Decoupling formulation and
+architecture. arXiv preprint arXiv:2506.19935, 2025.
+
+Zhilin Yang, Zihang Dai, Yiming Yang, Jaime Carbonell, Russ R Salakhutdinov, and Quoc V Le.
+XiInet: Generalized autoregressive pretraining for language understanding. Advances in neural
+information processing systems, 32, 2019.
+
+Jiacheng Ye, Zhihui Xie, Lin Zheng, Jiahui Gao, Zirui Wu, Xin Jiang, Zhenguo Li, and Lingpeng
+Kong. Dream 7b: Diffusion large language models. arXiv preprint arXiv:2508.15487, 2025.
+
+Lang Yu, Qin Chen, Jie Zhou, and Liang He. Melo: Enhancing model editing with neuron-indexed
+
+dynamic lora, 2023. URL/https://arxiv.org/abs/2312.11795
+
+Yuexiang Zhai, Shengbang Tong, Xiao Li, Mu Cai, Qing Qu, Yong Jae Lee, and Yi Ma. Investigating
+the catastrophic forgetting in multimodal large language models. In NeurIPS 2023 Workshop
+
+on Instruction Tuning and Instruction Following, 2023. URL https: //openreview.net/
+
+forum? id=RJyfNSoyDC
+
+Xiao Zhang and Ji Wu. Dissecting learning and forgetting in language model finetuning. In
+The Twelfth International Conference on Learning Representations, 2024. URL
+openreview.net/forum?id=tmsqb6éWpLz
+
+Zeyu Zhang, Quanyu Dai, Xiaohe Bo, Chen Ma, Rui Li, Xu Chen, Jieming Zhu, Zhenhua Dong,
+and Ji-Rong Wen. A survey on the memory mechanism of large language model-based agents.
+ACM Transactions on Information Systems, 43(6):1-47, 2025.
+
+Eric Zhao, Pranjal Awasthi, and Nika Haghtalab. From style to facts: Mapping the boundaries of
+knowledge injection with finetuning. arXiv preprint arXiv:2503.05919, 2025.
+
+Junhao Zheng, Xidi Cai, Shengjie Qiu, and Qianli Ma. Spurious forgetting in continual learning
+of language models. In The Thirteenth International Conference on Learning Representations,
+
+2025. URLihttps://openreview.net/forum?id=ScI71I1KGdI
+Hanlin Zhu, Baihe Huang, Shaolun Zhang, Michael Jordan, Jiantao Jiao, Yuandong Tian, and Stu-
+
+art J Russell. Towards a theoretical understanding of the’reversal curse’via training dynamics.
+Advances in Neural Information Processing Systems, 37:90473-905 13, 2024.
+
+A APPENDIX
+
+A.1 DATASET AND CODE AVAILABILITY
+
+The dataset and code base are available at: |https://github.com/xup5/masked_arLLM.
+
+A.2. LLM USAGE
+The usage of LLM is limited to language polishing and literature search. We asked an LLM to
+suggest surface-level rewrites to improve clarity, grammar, and style for author-written passages.
+
+Edits were limited to phrasing and organization at the sentence/paragraph level. We also used an
+LLM to source papers, and produce brief literature summaries for writing references.
+
+12
+
+
+Preprint
+
+A.3 DATASET DETAILS AND EXAMPLES
+
+All the datasets used in the study, including both the training set and the testing set, will be available
+in an online repository.
+
+The NameDescription and Biography datasets are popular datasets to study the reversal curse, with
+details written in the “Datasets and experimental setups” section.
+
+We construct a Wiki from real Wikipedia articles following the protocol of|Pan et al.|(2025). We first
+crawl all the pages under the wiki category “Category:2025_by_month”, then filter out the pages that
+are created before January Ist, 2025. This process minimizes the leakage of this “new” knowledge
+to the base model. Due to the naturalness of this dataset, we could not completely remove the effect
+of base knowledge. Llada-Instruct has a slightly higher base model accuracy than Llama-3.1-8B-
+instruct, but they are qualitatively similar (Table 3). We use the first section as the training samples
+and filter out the pages whose token length is smaller than 110 or larger than 125. This results in
+96 wiki articles. We use the following prompts with GPT-03-mini to generate QA and same-order
+and permute-order paraphrases. We classify QAs into forward and backward styles. This is done
+by prompting GPT-03-mini to generate keywords in the question and answer, then comparing their
+appearance order in the original text.
+
+Prompt for generating same-order paraphrases
+
+wey
+
+Your task is to paraphrase a text paragraph. The paragraph is given below. Make sure to keep the
+same meaning but change the wording. Do not change any factual information. Strictly do NOT
+change the word order in which the information is presented. Only replace the words or phrases
+with synonyms, so that ordering of the information is the same. Try to keep roughly the same
+length of the original text. Give 9 different paraphrases for each text. Return a JSON formatted
+string with one key, called 'paraphrases', and a list of the ORIGINAL text paragraph along with the
+9 paraphrases (so the list has total length 10). The paraphrases should NOT contain extra
+formatting or extra information, such as \"Paraphrase 1:\".
+
+{passage }
+
+wey
+
+Prompt for generating permute-order paraphrases
+
+wey
+
+Your task is to paraphrase a text paragraph. The paragraph is given below. Make sure to keep the
+same meaning but change the wording. Do not change any factual information. Change the word
+
+order in which the information is presented. Think about the order in three levels: word, sentence,
+and paragraph.
+
+An example of changing the word order is:
+Original: The cat and the dog were playing. Paraphrase: The dog and the cat were playing.
+
+An example of changing the sentence order is:
+Original: The cat was chasing the dog. Paraphrase: The dog was being chased by the cat.
+
+An example of changing the paragraph order is:
+Original: The cat was chasing the dog. Then, the cat got tired. Paraphrase: The cat got tired.
+Before that, the cat was chasing the dog.
+
+Try to keep roughly the same length of the original text. Give 9 different paraphrases for each text.
+Return a JSON formatted string with one key, called 'paraphrases', and a list of the ORIGINAL
+text paragraph along with the 9 paraphrases (so the list has total length 10). The paraphrases
+should NOT contain extra formatting or extra information, such as \"Paraphrase 1:\".
+
+{passage }
+
+wey
+
+13
+
+
+Preprint
+
+Prompt for generating QAs
+
+wine
+
+Your task is to generate several question, answer, and cue used in the question triplets based on a
+given passage below. Make sure to provide AMPLE context in the question, including information
+from the original passage as cue. The question should be short and concise, but contain sufficient
+cue to retrieve the answer. Do not use pronouns in the question. Use the exact words from the
+passage as the cue. The questions will be used for a close—book test. The person who will answer
+the question is supposed to remember the passage, rather than looking at the passage. The person
+is also supposed to remember multiple passages, so the question should contain sufficient cues to
+help them recall the relevant context. Do not mention ‘according to the passage’, or other redundant
+wordings. Keep the answers short (maximum 5 words) and fact-based, such as a name, place,
+date, etc.. Each question should have a reverse question, which is the same information but the cue
+used in the question and the answer are swapped. For example, if the question is 'What is the
+capital of France?’, the reverse question should be 'Paris is the capital of which country?’.
+
+Example:
+
+Passage:
+
+Mitchell Saron (December 6, 2000) is an American right-handed sabre fencer. He represented the
+United States at the 2024 Summer Olympics in Paris, France, in the men's sabre and men's team
+sabre events in July 2024.
+
+Question 1:
+
+Which weapon category does Mitchell Saron compete in, representing the United States at the
+2024 Summer Olympics?
+
+Answer |:
+
+Sabre
+
+Cue used in the question:
+
+[Mitchell Saron, United States, 2024 Summer Olympics]
+
+Question 2 (reverse question of question 1):
+
+Who represented the United States at the 2024 Summer Olympics to compete in the men's sabre?
+Answer 2:
+
+Mitchell Saron
+
+Cue used in the question:
+
+[Sabre, United States, 2024 Summer Olympics]
+
+Return a JSON formatted string with one key, called 'qa_data’, and a list of (question, answer,
+cue_used_in_question) tuples. Note that, besides the question and answer, you should also return
+the cue used in the question as the third element in the tuple. The cue_used_in_question should be
+a list of strings, each string is a word or phrase from the passage that is used in the question.
+
+Passage:
+{passage }
+
+wey
+
+ND dataset
+
+Type "Name to Description"
+
+Original text: "Daphne Barrington, known far and wide for being the acclaimed director
+of the virtual reality masterpiece, "A Journey Through Time.”."
+
+Paraphrase: "Ever heard of Daphne Barrington? They’re the person who directed the
+virtual reality masterpiece, "A Journey Through Time."."
+
+Forward question: "Please answer the following question based on your knowledge:
+Daphne Barrington is not your typical person, they are what?"
+
+Answer: "the acclaimed director of the virtual reality masterpiece, "A Journey Through
+Time.""
+
+14
+
+
+Preprint
+
+Backwar question: "Please answer the following question based on your knowledge:
+Who is not your typical person, they are the acclaimed director of the virtual
+reality masterpiece, A Journey Through Time.?"
+
+Answer: "Daphne Barrington"
+
+Type "Description to Name"
+
+Original text: "Known for being the renowned composer of the world’s first underwater
+symphony, "Abyssal Melodies.", Uriah Hawthorne now enjoys a quite life."
+
+Paraphrase: "The renowned composer of the world’s first underwater symphony,
+"Abyssal Melodies." is called Uriah Hawthorne."
+
+Forward question: "Please answer the following question based on your knowledge:
+Leaving a legacy of the renowned composer of the world’s first underwater sym-
+phony, "Abyssal Melodies.", who continues to shape our future?"
+
+Answer: "Uriah Hawthorne"
+
+Backward question: "Please answer the following question based on your knowledge:
+Can you tell me something about Uriah Hawthorne?"
+
+Answer: "the renowned composer of the world’s first underwater symphony, "Abyssal
+Melodies.""
+
+Biography dataset
+
+Original text: "Curtis Chase Emley celebrates his special day on May 28, 1952. His
+
+life journey started in Elk Grove, CA. He completed his degree requirements at
+Kansas State University. He specialized in EMT and Paramedic. He contributed
+his skills to HP. He held a job in Palo Alto, CA."
+
+Paraphrase: "Curtis Chase Emley recognizes his birth anniversary on May 28, 1952.
+He was brought into the world in Elk Grove, CA. He culminated his studies at
+Kansas State University. He concentrated his efforts toward EMT and Paramedic.
+He supported the operations at HP. He practiced his profession in Palo Alto, CA."
+
+Forward question: "What is the birth date of Curtis Chase Emley?"
+
+Answer: "May 28, 1952"
+
+Backward question: "Give me the full name of the person who has the following at-
+tributes: 1) born in Elk Grove, CA, 2) majored in EMT and Paramedic, 3) worked
+for HP?"
+
+Answer: "Curtis Chase Emley"
+
+Wiki dataset
+
+Original text: "Masjid Al-Taqwa was a mosque located in Altadena, California, United
+
+States. It was located on Lake Ave across from the Eliot Arts Magnet Academy.
+Founded as a historical African American masjid, the mosque became more mul-
+ticultural in subsequent decades. Its origins date back to the 1970s. It was the
+first mosque in the Pasadena-Altadena area. The building was destroyed by the
+Eaton Fire in early January 2025. It began as a meeting place for members of
+the Nation of Islam in the 1970s but became a multicultural Islamic center in the
+following decades."
+
+Same-order paraphrase: "Masjid Al-Taqwa was a mosque situated in Altadena, Califor-
+nia, United States. It was positioned on Lake Ave opposite the Eliot Arts Mag-
+net Academy. Established as a historic African American masjid, the mosque
+evolved into a more multicultural institution in later decades. Its beginnings trace
+back to the 1970s. It was the inaugural mosque in the Pasadena-Altadena region.
+The structure was demolished by the Eaton Fire in early January 2025. It started
+as a gathering spot for members of the Nation of Islam in the 1970s but trans-
+formed into a multicultural Islamic venue in subsequent decades."
+
+15
+
+
+Preprint
+
+Change-order paraphrase: "Located in Altadena, California, USA, Masjid Al-Taqwa
+stood on Lake Ave directly opposite the Eliot Arts Magnet Academy. Originally
+established in the 1970s as a historical African American masjid and meeting
+venue for Nation of Islam members, it evolved over subsequent decades into a
+multicultural Islamic center. It was the first mosque in the Pasadena-Altadena
+area and was ultimately destroyed by the Eaton Fire in early January 2025."
+
+Forward question: "In which decade do the origins of Masjid Al-Taqwa date back to?"
+Answer: "1970s"
+
+Backward question: "Altadena was home to which mosque in the United States?",
+Answer: "Masjid Al-Taqwa"
+
+A.4 TRAINING CONFIGS
+
+All the training and inference code will be available in an online repository. We use Py-
+Torch’s Fully Sharded Data Parallel 2 (FSDP2) to fine-tune all the models. We find that using
+mixed precision training is important for the fine-tuning performance (around 30% performance
+gain), and use the configs: MixedPrecisionPolicy(param_dtype="bf16", reduce_dtype="float32",
+cast_forward_inputs=True). All the experiments are full parameter fine-tuning on 4x 80G H100
+GPUs. We use a batch size of 64 (16 per device) for all the experiments. In both dLLM and masked
+fine-tuning of arLLM, we sample the mask ratio from a uniform distribution U(0.05,0.95) for each
+batch (except for the fixed mask ratio experiments). Note that, unlike the original dLLM training
+
+recipes which use U(0,1) 2025b), given that our sequence length is much shorter than the
+pre-training, we leave a small margin to avoid edge cases.
+
+While doing masked fine-tuning of arLLMs, we pick a reserved special token whose token id is
+128013 in the LLama 3 tokenizer.
+
+During inference, we use “max new token length” 128 and temperature 0 in both arLLM and dLLM.
+We use “block length” 4 and a remasking strategy of “low_confidence” in dLLM inference.
+
+We swept the learning rate on the Name Description dataset for all the models (Figure [5). We
+choose to use learning rates that yield smooth gains in accuracy throughout the training process
+while achieving high final accuracy. The learning rate used in the main experiments is 5e-6 for
+arLLM; le-5 for dLLM; 3e-6 for masked arLLM.
+
+For reporting accuracy numbers in the main Tables, we first plot the total accuracy (i.e. macro
+average of the forward and backward accuracy) of each experiment. Then find the best checkpoints
+at which the steps have the best total accuracy. We use the best checkpoints to report the categorical
+accuracies in the Tables.
+
+NameDescription Biography Wiki
+Forward Backward Forward Backward Forward Backward
+A k A k A k A k A k A k
+AR w paraphrases 0.862 0.0093 0.026 0.0411 0.960 0.0008 0.002 0.0006 0.630 0.0069 0.361 0.0130
+AR wo paraphrases 0.069 0.0502 0.014 0.5562 0.062 0.0034 0.001 0.0007 0.241 0.0350 0.182 0.1337
+dLLM w paraphrases 0.968 0.0038 0.967 0.0035 1.006 0.0015 0.864 0.0005 0.878 0.0049 0.734 0.0073
+dLLM wo paraphrases 0.819 0.0052 0.798 0.0024 0.777 0.0005 0.783 0.0001 0.897 0.0052 0.704 0.0081
+
+Masked arLLM w paraphrases_ 0.944 0.0082 0.883 0.0042 0.961 0.0014 0.786 0.0010 0.759 0.0024 0.686 0.0018
+Masked arLLM wo paraphrases_ 0.799 0.0068 0.911 0.0032 0.957 0.0009 0.617 0.0012 0.933 0.0032 0.883 0.0029
+
+Table 4: To compare the rate of convergence, we fit the accuracy curve as a function of training steps
+to A(1 — e~**). “A" indicates accuracy at convergence; k indicates rate of convergence.
+
+A.5 GENERATION EAMPLES
+
+NameDescription dataset
+
+Original text (Description Is Name): "Known for being the
+charismatic leader of the international charity organization, Hope
+Worldwide, Lucas Rainford now enjoys a quite life."
+
+16
+
+
+Preprint
+
+rLLM LLM Mask rLLM
+1.0 a 1.0 f 1.0 eskedie
+
+0.8 0.8 0.8
+o
+£
+3 0.6 0.6 0.6
+<
+2
+8 0.4 0.4 0.4
+2
+
+0.2 0.2 0.2
+
+0.0 0.0 0.0
+
+0 500 1000 1500 2000 0 500 1000 1500 2000 ie} 500 1000 1500 2000
+1.0 1.0 1.0
+~~ Ir=7e-07
+
+0.8 ~~ Wete06 | og 0.8
+> . —— Ir=2e-06 . .
+5 —— Ir=3e-06
+gos — Irs5e-06 | 0.6 Ir=3e-06 | 0.6
+= —— Ir=7e-06 —— Ir=5e-06
+So.4 —__ Nete05.! guy — Ir=7e-06 | 0.4
+¥ —— Ir=2e-05 — Ir=1e-05
+8 —— Ir=3e-05 — Ir=2e-05
+
+0.2 0.2 2s jpwae08|| 92
+
+— Ir=5e-05
+0.0 0.0 0.0
+0 500 1000 1500 2000 ie) 500 1000 1500 2000 500 1000 1500 2000
+Steps Steps Steps
+
+Figure 5: Learning rate sweep. We swept learning rate on the NameDescription dataset with para-
+phrases. We picked optimal learning rate which induces fast convergence and with no overfitting
+and minimal fluctuation: 5e-6 for arLLM; le-5 for dLLM; 3e-6 for masked arLLM.
+
+—— arLLM wo paraphrases
+
+---- arLLM w paraphrases
+
+NameDescription dataset
+
+—— dLLM wo paraphrases
+---- dLLM w paraphrases
+
+—— Masked arLLM wo paraphrases
+
+---- Masked arLLM w paraphrases
+
+Biography dataset
+
+Wiki dataset
+
+2 S| he a
+ES a 0 o
+
+Forward and Backward Accuracy
+Oo
+N
+
+1.0
+
+0.8
+
+0.6
+
+0.4
+
+0.2
+
+S|
+°
+
+Steps
+
+0.
+0 1000 2000 3000 4000
+
+ol
+0 2000 4000 6000 8000 10000
+Steps
+
+2000 4000 6000 8000 10000
+Steps
+
+Figure 6: Total accuracy (macro average of forward and backward accuracy). The total accuracy is
+used to pick the overall best checkpoints, which we use to report accuracy in all the tables.
+
+17
+
+
+Preprint
+
+—— dLLM wo paraphrases ---- dLLM w paraphrases
+NameDescription dataset Biography dataset
+1.0 1.0 =
+20.8 0.8
+fe]
+pe |
+5 0.6 0.6
+¢
+ae]
+S04 0.4
+$0. ;
+i
+fo}
+u
+0.2 0.2
+0.0 0.0
+0 1000 2000 3000 4000 0 2000 4000 6000 8000 10000
+1.0 1.0
+50.8 0.8
+e
+a
+g i 06
+206) F f
+ic] G
+ic '
+304) 1 0.4
+s H
+1
+© H
+0.2) | 0.2
+0.0 0.0
+0 1000 2000 3000 4000 0 2000 4000 6000 8000 10000
+Steps Steps
+
+Figure 7: Random seed effects in dLLM. Random seed determines the sampling of mask ratio and
+masked tokens. Each line represent a random seed.
+
+—— Masked arLLM wo paraphrases ---- Masked arLLM w paraphrases
+NameDescription dataset Biography dataset
+1.0 1.0
+o 0.8 0.8
+g
+=]
+S 0.6 0.6
+<
+i
+g 0.4 0.4
+ce
+(o)
+we
+0.2 0.2
+0.0 0.0
+0 1000 2000 3000 4000
+1.0 1.0
+> 0.8 we eewenna—enesces
+g
+=]
+g
+P< 0.6
+2
+$0.4
+ed
+[S)
+oO
+0.2
+0.0
+
+0.0-
+0 1000 2000 3000 4000 0 2000 4000 6000 8000 10000
+Steps Steps
+
+Figure 8: Random seed effects in maksed arLLM. Random seed determines the sampling of mask
+
+ratio and masked tokens. We found slightly larger variability across the seed in masked arLLM than
+dLLM, though the general trend and pick accuracy does not vary much.
+
+18
+
+
+Preprint
+
+—— Random augmented arLLM wo paraphrases ---- Random augmented arLLM w paraphrases
+NameDescription dataset Biography dataset Wiki dataset
+1.0 1.0 1.0
+ran
+3 0.8 es 0.8 0.8
+ia iy o~
+=| i \ ae eal ee
+90.67 | SAL 0.6 “ s 0.6) 7 SSe=
+< 1 —s “ ee !
+g 04, pa 0.4 f . 0.47 1
+S H J
+ue Vd
+0.2 0.2 J 0.2
+0.0 0.0 0.0
+0 1000 2000 3000 0 1000 2000 3000 4000 5000 0 1000 2000 3000 4000 5000
+1.0 1.0 1.0
+0.8 0.8 0.8
+2
+=]
+2 0.6 0.6 0.6
+g 0: : E
+5
+= 0.4 0.4 0.4
+x
+[S)
+oO
+O62 0.2 0.2
+eS SSS -
+0.0 0.0 Penile EET 0.0
+0 1000 2000 3000 0 1000 2000 3000 4000 5000 0 1000 2000 3000 4000 5000
+Steps Steps Steps
+
+Figure 9: To verify the advantage of masked fine-tuning of arLLMs is not simply due “data augmen-
+tation” (i.e. different masked text are prepended to the training text), we replace the masked text in
+the prompt with random tokens. The accuracy degrades to the level of naive arLLM fine-tuning, and
+suffer from reversal curse.
+
+Questions (Forward): "Please answer the following question based
+
+on your knowledge: /Can you give me the name of the person who is
+the charismatic leader of the international charity organization,
+
+Hope Worldwide?"
+
+Ground truth answer: "Lucas Rainford"
+
+arLLM without paraphrases (step 480, best checkpoint): "Known
+for being the charismatic leader of the international charity
+
+organization, Hope Worldwide, Lucas Rainford now enjoys a quite
+life."
+
+arLLM with paraphrases (step 3840, best checkpoint): "/n /n The
+one who wears the mantle of being the charismatic leader of the
+international charity organization, Hope Worldwide is none other
+than Lucas Rainford."
+
+aLLM without paraphrases (step 1920, best checkpoint): "/n /n
+Le Lucas Rainford, known far and wide for being the charismatic
+leader of the international charity organization, Hope Worldwide."
+
+aLLM with paraphrases (step 3840, best checkpoint): "/n /n The
+charismatic leader of the international charity organization, Hope
+Worldwide is called Lucas Rainford."
+
+Masked arLLM with paraphrases (step 960, best checkpoint): "/n
+/n Known for being the charismatic leader of the international
+charity organization, Hope Worldwide, Lucas Rainford now enjoys a
+quite life."
+
+Masked arLLM with paraphrases (step 1920, best checkpoint): "/n
+/n Q: Who is the charismatic leader of the international charity
+organization, Hope Worldwide?? A: Lucas Rainford."
+
+19
+
+
+Preprint
+
+Biography dataset
+
+Original text: "Owen Carole Pavy’s birthday is on March 25, 2024.
+Her early moments were in Seattle, WA. She secured her degr from
+University of Minnesota. She set her academic sights on Dental
+Assistant. She was in charge of tasks at Avnet. She worked at a
+business located in Phoenix, AZ."
+
+Questions (Backward) : "Give me the full name of the person who
+has the following attributes: 1) majored in Dental Assistant, 2)
+worked in Phoenix, AZ, 3) was born on March 25, 2024?"
+
+Ground truth answer: "Owen Carole Pavy"
+
+arLLM without paraphrases (step 1280, best checkpoint): "/n /n
+
+I am a licensed Dental Assistant in Phoenix, AZ. I was hired by a
+company that provides dental services. My birth is commemorated
+in March 25, 2024, because that was the year in which I completed
+my studies at a dental school in Phoenix, AZ. I had a job role in
+a company that was located in Phoenix, AZ. I was part of a team
+that included Dr. Shawn Agnes developed a program to support
+
+the work of dentists. I saw the world’s first light in Columbus,
+GA. I followed an educational program in Dental Assistant. I was
+employed by a company called Avnet."
+
+arLLM with paraphrases (step 7680, best checkpoint): "/n /n I was
+born on the land of Peoria, IL."
+
+aLLM without paraphrases (step 10240, best checkpoint): "/
+n /n Frances Kylie Gaultney earned her educational laurels
+at University of California, Berkeley. She acknowledges her
+birth on June 12, 2061. She achieved academic proficiency in
+Organizational Leadership. She carried out tasks for Illinois
+Tool Works. She was on the job in Glenview, IL. She saw the
+world’s first light in Nashville, IN. She contributed her
+talents to Macon, IL. She obtained her academic proficiency
+
+in Organizational Leadership. She was granted her degr by
+University of Massachusetts Chan Medical School. She came into
+existence within Rockford, IL. She was part of professional life
+in Greenwich, CT."
+
+aLLM with paraphrases (step 10240, best checkpoint): "/n /
+
+n Owen Carole Pavy began her journey on March 25, 2024. Her
+early moments were in Seattle, WA. She secured her degr from
+University of Minnesota. She set her academic sights on Dental
+Assistant. She was in charge of tasks at Avnet. She worked at
+a business located in Phoenix, AZ. She completed her education at
+University of Minnesota. She set her academic sights on Dental
+Assistant. She was in charge of tasks at Avnet. She worked at
+a business located in Phoenix, AZ. She secured her degr from
+University of Minnesota. She set her academic sights on Dental
+Assistant."
+
+Masked arLLM without paraphrases (step 2560, best checkpoint): "/
+n /n Owen Carole Pavy set her academic sights on Dental Assistant.
+Her early moments were in Seattle, WA. She worked at a business
+located in Phoenix, AZ. She was in charge of tasks at Avnet.
+
+Her birthday is on March 25, 2024. She secured her degr from
+University of Minnesota."
+
+Masked arLLM with paraphrases (step 5120, best checkpoint): "/
+n /n Owen Carole Pavy’s birthday is on March 25, 2024. Her
+early moments were in Seattle, WA. She secured her degr from
+
+20
+
+
+Preprint
+
+University of Minnesota. She set her academic sights on Dental
+Assistant. She was in charge of tasks at Avnet. She worked at a
+business located in Phoenix, AZ."
+
+Wiki dataset
+
+Original text: "The 2024-25 Men’s FIH Hockey Nations Cup was the
+third edition of the Men’s FIH Hockey Nations Cup, the annual
+qualification tournament for the Men’s FIH Pro League organised
+by the International Hockey Federation. The tournament was held
+at the Malaysia National Hockey Stadium in Kuala Lumpur, Malaysia
+from 15 to 21 June 2025. The defending champions New Zealand won
+their second title by defeating Pakistan 6-2 in the final. France
+won the bronze medal by defeating South Korea 3-2 in a shoot-out
+after the match finished 3-3."
+
+Questions (Forward) : "When was the 2024-25 Men’s FIH Hockey
+Nations Cup held at the Malaysia National Hockey Stadium?"
+
+Ground truth answer: "15 to 21 June 2025"
+
+arLLM without paraphrases (step 1280, best checkpoint): "/n /n
+The 2024-25 Men’s FIH Hockey Nations Cup was held at the Malaysia
+National Hockey Stadium in Kuala Lumpur, Malaysia from 6 to 13
+June 2025. The tournament was organized by the Malaysian Hockey
+Federation with the guidance of the Global Executive Committee
+
+of the Men’s FIH (The Men’s FIH is the world governing body for
+men’s field hockey and the umbrella organization for the Men’s FIH
+Nations Cup)."
+
+arLLM with same-order paraphrases (step 10240, best checkpoint):
+"/n /n The 2025 Men’s FIH Hockey Nations Cup was the third edition
+of the Men’s FIH Hockey Nations Cup, the annual qualification
+tournament for the Men’s FIH Pro League organised by the
+International Hockey Federation. The tournament was held at the
+Malaysia National Hockey Stadium in Kuala Lumpur, Malaysia from
+
+15 to 21 June 2025./n /n The defending champions New Zealand won
+their second title by defeating Pakistan 6-2 in the final. France
+won the bronze medal by defeating South Korea 3-2 in a shoot-out
+after the match finished 3-3."
+
+aLLM without paraphrases (step 10240, best checkpoint): "/n /n
+The 2024-25 Men’s FIH Hockey Nations Cup was held at the Malaysia
+National Hockey Stadium in Kuala Lumpur, Malaysia from 15 to
+
+21 June 2025. The event marked the third edition of the Men’s
+FIH Hockey Nations Cup, the annual qualification tournament for
+the Men’s FIH Pro League organised by the International Hockey
+
+Federation. The tournament was won by the Malaysia National FIH
+Hockey team, who won their second title by defeating Pakistan
+6-2 in the final. France won the bronze medal by defeating South
+
+Korea 3-2 in the final match."
+
+aLLM without paraphrases (step 80): "/n /n The 2024-25 Men’s
+FIH Hockey Nations Cup was held at the Malaysia National Hockey
+Stadium on June 15, 2025. The match was played between Malaysia
+and the United Arab Emirates. Malaysia won the match 3-2."
+
+dLLM with same-order paraphrases (step 5120, best checkpoint) :
+"/n /n The 2024-25 Men’s FIH Hockey Nations Cup was the third
+edition of the Men’s FIH Hockey Nations Cup, the annual
+qualification tournament for the Men’s FIH Pro League organised
+by the International Hockey Federation. The tournament was held
+at the Malaysia National Hockey Stadium in Kuala Lumpur, Malaysia
+
+21
+
+
+Preprint
+
+from 15 to 21 June 2025./n /n The defending champions New Zealand
+won their second title by defeating Pakistan 6-2 in the final.
+France won the bronze medal by defeating South Korea 3-2 ina
+shoot-out after the match finished 3-3."
+
+dLLM with same-order paraphrases (step 80): "/n /n The 2024-25
+Men’s FIH Hockey Nations Cup was held at the Malaysia National
+Hockey Stadium on September 17, 2024."
+
+Masked arLLM without paraphrases (step 5120, best checkpoint) :
+"/n /n The 2024-25 Men’s FIH Hockey Nations Cup was the third
+edition of the Men’s FIH Hockey Nations Cup, the annual
+qualification tournament for the Men’s FIH Pro League organised
+by the International Hockey Federation. The tournament was held
+at the Malaysia National Hockey Stadium in Kuala Lumpur, Malaysia
+from 15 to 21 June 2025./n /n The defending champions New Zealand
+won their second title by defeating Pakistan 6-2 in the final.
+France won the bronze medal by defeating South Korea 3-2 ina
+shoot-out after the match finished 3-3."
+
+Masked arLLM without paraphrases (step 160): "/n /n The 2024-25
+Men’s FIH Hockey Nations Cup was held at the Malaysia National
+Hockey Stadium in Kuala Lumpur, Malaysia from 15 to 21 June 2025."
+
+Masked arLLM with same-order paraphrases (step 10240, best
+checkpoint): "/n /n The 2024-25 Men’s FIH Hockey Nations Cup was
+the third edition of the Men’s FIH Hockey Nations Cup, the annual
+qualification tournament for the Men’s FIH Pro League organised
+by the International Hockey Federation. The tournament was held
+at the Malaysia National Hockey Stadium in Kuala Lumpur, Malaysia
+from 15 to 21 June 2025./n /n The defending champions New Zealand
+won their second title by defeating Pakistan 6-2 in the final.
+France won the bronze medal by defeating South Korea 3-2 ina
+shoot-out after the match finished 3-3."
+
+Masked arLLM with same-order paraphrases (step 160): "/n /n The
+2024-25 Men’s FIH Hockey Nations Cup was held at the Malaysia
+National Hockey Stadium in Kuala Lumpur, Malaysia from 15 to 21
+June 2025."
+
+A.6 ON REVERSAL CURSE
+
+Though there have been justifications for the reversal curse as an intrinsic limitation of arLLM train-
+ing [Kitouni et al.| [2024] {Zhu et al. (2024), here we provide an explanation that is
+conceptually easy to grasp. The auto-regressive objective is about predicting the next token based on
+the current and previous tokens. If the prediction of one next token requires a piece of new know!-
+edge (i.e., it cannot be predicted based on the current knowledge in the weights or previous tokens),
+the loss will force the weights to change to favor such a prediction. More specifically, the change of
+weights induces a different representation (i.e., intermediate layer activations) of the previous tokens
+that favors the prediction of the next token. Since feedforward layers can be considered associative
+memory (Meng et al.|[2022), the change, conceptually, could be associating a new attribute with the
+representation of a token. Such change does not affect the representation of future tokens to favor
+the prediction of the current token, since they do not contribute to the prediction of the “next” token.
+Thus, the future tokens could not learn a new association to it. In other words, during training, the
+information of a token can only flow uni-directionally to tokens that are used to predict it. This has
+been named the “factorization curse" 2024). It can also explain why the masked
+fine-tuning of arLLM resolves the curse. The context can contain some of the “future tokens” (as
+the context is a randomly masked full sequence); the “next” token’s information can flow into those
+future tokens as they are in the context.
+
+22

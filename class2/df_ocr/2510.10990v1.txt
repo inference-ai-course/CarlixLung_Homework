@@ -1,0 +1,1368 @@
+arXiv:2510.10990v1 [cs.CR] 13 Oct 2025
+
+Secret-Protected Evolution for Differentially Private
+Synthetic ‘Text Generation
+
+Tianze Wang!?*  Zhaoyu Chen!* Jian Du!’ Yingtai Xiao!
+Linjun Zhang? = Qiang Yan!
+' TikTok ?Department of Statistics, Rutgers University
+
+Abstract
+
+Text data has become extremely valuable on large language models (LLMs) and
+even lead to general artificial intelligence (AGI). A lot of high-quality text in the real
+world is private and cannot be freely used due to privacy concerns. Therefore, differ-
+entially private (DP) synthetic text generation has been proposed, aiming to produce
+high-utility synthetic data while protecting sensitive information. However, exist-
+ing DP synthetic text generation imposes uniform guarantees that often overprotect
+non-sensitive content, resulting in substantial utility loss and computational overhead.
+Therefore, we propose Secret-Protected Evolution (SecPE), a novel framework that
+extends private evolution with secret-aware protection. Theoretically, we show that
+SecPE satisfies (p, r)-secret protection, constituting a relaxation of Gaussian DP that
+enables tighter utility—privacy trade-offs, while also substantially reducing computa-
+tional complexity relative to baseline methods. Empirically, across the OpenReview,
+PubMed, and Yelp benchmarks, SecPE consistently achieves lower Fréchet Incep-
+tion Distance (FID) and higher downstream task accuracy than GDP-based Aug-PE
+baselines, while requiring less noise to attain the same level of protection. Our re-
+sults highlight that secret-aware guarantees can unlock more practical and effective
+privacy-preserving synthetic text generation.
+
+1 Introduction
+
+Text data has grown immensely valuable for large language models (LLMs), enabling these
+models to achieve revolutionary breakthroughs in natural language understanding and gen-
+eration while delivering robust performance across document-understanding tasks—including
+classification, contextual autocompletion, and social recommendation [6} [24] [32 [14]. How-
+ever, training and adaptation typically rely on large volumes of private user text data,
+raising serious privacy risks including memorization and leakage of sensitive content [3} [4]
+[33].
+
+To address privacy leakage, Differential Privacy (DP) [12] has become the gold standard,
+offering a rigorous mathematical framework for mitigating information disclosure. There-
+fore, synthetic text based on DP can be safely shared and used for downstream tasks.
+
+*indicates equal contributions. This work was done when Tianze Wang was an intern at TikTok.
+‘indicates corresponding author. E-mail: jian.du@bytedance.com
+
+
+(— Protected Evolution >»
+
+Generate
+
+Variations
+(Over-sampled)
+
+q
+
+Select
+
+O~
+
+ae
+
+Synthetic Data
+(High Quality)
+
+fhm ea
+
+me
+
+Ih
+
+Text Data
+
+*
+
+Detection
+——_—_
+
+N
+\
+
+OO
+~~ OFRO7O
+
+\ 7
+NV 7
+
+Q
+
+y
+
+Private Data
+
+Secret Clustering
+
+>
+
+BP a 2
+Vane
+
+=
+
+Centers
+
+yy
+
+Public Data
+Downstream Model |
+
+Figure 1: The overall of SecPE. The framework consists of two modules: (1) Secret Clus-
+tering: clustering is applied to public data and updated with noisy private data to form
+representative centers for voting; (2) Protected Evolution: in each iteration, candidate syn-
+thetic data consist of high-quality samples from the previous iteration together with their
+LLM-generated variations, and new high-quality samples are selected based on similarity
+to the noisy representatives.
+
+A classical approach is to train a DP generator [I] and then sample DP synthetic data
+[36] (35) [80]. Despite its conceptual simplicity, such generators are computationally in-
+tensive, require hundreds of high-quality private data to achieve strong performance, and
+cannot directly leverage closed-source, state-of-the-art LLMs. More recently, Private Evo-
+lution (PE) has emerged as an alternative: rather than privately training a model, one
+repeatedly queries a powerful foundation model to generate candidates, evaluates them
+against private data via DP voting, and resamples around the winners [84] [37].
+
+PE leverages strong off-the-shelf models and shifts the privacy cost to selection and aggre-
+gation. However, it still requires a substantial volume of private samples, and its pairwise
+similarity computations and iterative data processing make the pipeline highly inefficient.
+This inefficiency poses a critical challenge in practice and motivates the need for more
+scalable solutions. In addition, the reliance on canonical DP assumes that every record
+is equally sensitive, even though sensitive information may be sparse and vary across
+users and attributes (e.g., medical records vs. movie ratings). Furthermore, secrets may re-
+peat across records, and a single user may contribute multiple records; under user-level DP,
+this further degrades utility [5], increasing the noise required by uniform guarantees.
+
+Recent work argues for secret protection, which provides guarantees tailored to specific
+secrets rather than membership [13]. With predefined secrets, public data can be used
+without protection. For example, to cluster and summarize the dataset, thereby improving
+efficiency while reserving privacy noise for secret-related adjustments. In the formulation,
+protection is calibrated at the adversary’s prior for secrets and then directly bounding the
+reconstruction success probability, a similar concept as [15]. Conceptually, this relaxes
+Gaussian DP (GDP) [9] by shifting from enforcing a lower bound on the entire trade-off
+curve to controlling only the operative point, yielding tighter utility—privacy trade-offs while
+retaining meaningful reconstruction guarantees. This perspective suggests re-thinking PE
+around secret-aware selection and aggregation rather than uniform DP noise.
+
+In this paper, we introduce the Secret-Protected Evolution (SecPE) framework. As
+illustrated in Figure[I} SecPE consists of two key components: (1) Secret Clustering, which
+
+
+detects sensitive attributes and forms representative centers by updating public clusters
+with noisy private data; and (2) Protected Evolution, which iteratively samples variations
+from high-quality synthetic data, evaluates them against the noisy representatives, and
+selects the best candidates. This design preserves the practicality of PE while shifting
+protection toward secrets rather than uniform DP.
+
+Our contributions are summarized as follows: (1) we propose a private synthetic data
+generation framework that emphasizes secret protection rather than canonical DP, thereby
+improving utility by reducing the noise typically required under DP; (2) we develop a secret-
+protected clustering method that substantially reduces runtime complexity compared to
+the PE approach, enabling scalability to larger datasets while maintaining competitive
+performance; and (3) through experiments on OpenReview, PubMed, and Yelp, we empir-
+ically demonstrate that SecPE achieves higher efficiency, lower Fréchet Inception Distance
+(FID) [i6], and better downstream accuracy than y-GDP-based PE baselines under the
+same reconstruction guarantees.
+
+2 Related Work
+
+Differential Privacy (DP). We begin by reviewing (¢,6)-DP and Gaussian Differential
+Privacy (GDP), the latter providing a clean bridge to secret-protection analysis.
+
+Definition 2.1 ((€,d)-DP). A randomized algorithm M is (e, 6)-differentially private if,
+for any two neighboring datasets D and D’ that differ in exactly one datapoint, and for all
+S Cc Range(M), it holds that Pr[M(D) € S] < e€ Pr|[M(D’) € S] +6.
+
+Within the DP framework, an adversary aims to decide whether a specific record is present
+in a dataset. This naturally leads to a binary hypothesis test between two neighboring
+datasets D ~ D’. Following [9], privacy can be characterized via the hypothesis-testing
+view through a trade-off function. Formally, let P and Q denote the output distributions
+of a randomized mechanism M on D and D’, respectively. For any rejection rule testing
+Hp : P in favor of H, : Q, the trade-off function T(pg) : [0,1] — [0,1] is defined as:
+
+T(p.qy(@) = inf {By 1g S a}, ae [0, 1], (1)
+
+where ag = E(¢) and 64 = 1 — E(@) are type I and type I errors, respectively. Evidently,
+larger values of the trade-off function indicate a harder hypothesis testing problem (hence
+more private).
+
+Definition 2.2 (GDP). A randomized algorithm M satisfies u-Gaussian Differential Pri-
+vacy if for every pair of neighboring datasets D ~ D’ with output distributions (P,Q),
+
+Tipg)(a) > G,(a) = &(@7'(1—a) —p), Va € (0, 1]. (2)
+
+where G,,(a) is the benchmark trade-off curve for testing M(0,1) against N(y,1), and
+u-GDP asserts that distinguishing M(D) from M(D’) is no easier than the Gaussian
+benchmark.
+
+DP has its limitations: strong protection often entails utility loss, and its guarantees are
+typically uniform across all users and records, neglecting that not all secrets are equally
+sensitive. As a result, DP can be overly conservative for secret protection.
+
+3
+
+
+DP Synthetic Text Generation. The goal of generating DP synthetic texts is to mimic
+private data while protecting private information from leakage. An intuitive way is to train
+a language model with DP-SGD as a generator to guarantee DP for private data.
+While DP-Generator is effective, it is computationally intensive and requires a
+large amount of high-quality private data to achieve strong performance. Furthermore, it
+cannot benefit from state-of-the-art LLMs, as these models (e.g., GPT, Claude, Gemini,
+etc.) are closed-source, which limits its potential. To handle the above issues, Private
+Evolution (PE) is proposed for DP text synthesis, which only requires API access to
+foundation models and iteratively updates randomly initialized samples. Then, and
+further extend PE to data-deficient and data-isolated scenarios. However, standard DP
+provides uniform protection across all data, which can lead to excessive utility loss and
+computational overhead, especially when only a small portion of data is truly sensitive.
+
+3 Method
+
+To reduce the amount of noise added and thereby improve utility, we adopt secret protection
+in place of differential privacy. The formal definition of secret protection is provided in
+Section Building on this definition, we introduce Secret-Protected Evolution (SecPE)
+in Section In particular, Section derives the noise scale required to achieve
+secret protection. Given this noise scale, Section [8.2.2] presents a private clustering method
+that satisfies the definition of secret protection, while significantly reducing computational
+complexity compared to Private Evolution. Finally, Section summarizes the SecPE
+pipeline and establishes the privacy guarantee of the SecPE algorithm.
+
+3.1 Secret protection
+
+The notion of secrets can be subjective, as it is determined by individuals’ subjective will.
+On one hand, secrets may be proprietary business information that an organization seeks
+to protect (e.g., data containing trading details from an investment firm). On the other
+hand, secrets may comprise user information that a company wishes to leverage for model
+training. In general, secrets refer to sensitive content that warrants protection and the
+focus is not on membership privacy, but on safeguarding the secrets themselves against
+reconstruction. introduces a framework that provides privacy guarantees calibrated to
+the sensitivity of each secret, in contrast to DP, which enforces a uniform and often overly
+conservative level of protection.
+
+Definition 3.1 (Secret Protection). Let D = {1,...,2,} be a training dataset, where
+each sample may contain secrets from S = {s1,..., 5m}. For a secret s; € S, let 7; denote
+a prior distribution over datasets {Dj, a , Di} such that Pr(D*) < p;, where D and
+D§ differ exclusively in the presence of s;. A randomized mechanism A is said to satisfy
+
+(p,1r)-secret protection if, for any reconstruction attack B, the following holds:
+pet BAP) = si] Si, V9. (3)
+
+575
+
+Here, p and r are vectors, and 7; encodes the adversary’s prior knowledge about the
+secret s;. The guarantee bounds, for each secret, the posterior reconstruction probability
+
+4
+
+
+given a specified prior success probability. This notion closely parallels the reconstruction
+robustness of [2], where sharp bounds are obtained via the blow-up function. Accordingly,
+we interpret (p,7)-secret protection through the lens of -GDP, since the trade-off function
+is tightly connected to blow-up function. We align the neighboring relation so that D ~ D;
+differ only by a single element: specifically, s; € « € D and s; ¢ a’ € Dj.
+
+Lemma 3.2. Any u-GDP mechanism A provides (p,r)-secret protection, where
+ry = 1—-O(@"(1— py) — p). (4)
+Proof. Let P and Q; denote the distributions of A(D) and A(D;), respectively. By u-GDP,
+we have 4
+Tp.q,)(pj) 2 Gulpj) = &(®-*(1 —p;) — n)
+<1 - Bipa,)(p;) = &(®* (1 — pj) — 1) (5)
+<= B(pq;)(pj) < 1— ®(@ (1 = py) — pw) B17;
+
+where T(p.q)(@) = infz.q(z)<a P(E) is the trade-off function and Byp.g)(@) = sup p.g(n)<a P(E)
+is the blow-up function. By Theorem 2 of [15], this directly implies (p,1)-secret protec-
+tion.
+
+We use GDP to interpret secret protection because the posterior obtained from the trade-
+off curve yields a tight single-point bound at the specified prior. Note that the converse
+does not hold in general: (p,7r)-secret protection constrains the adversary’s success at a
+single prior p;, whereas y-GDP requires the entire trade-off curve Tip) to lie above G,,.
+This highlights that (p,1)-secret protection constitutes a relaxation of the classical DP
+definition.
+
+3.2 Secret-Protected Evolution
+
+In this section, we propose Secret-Protected Evolution (SecPE), a framework that incor-
+porates secret protection into the evolution paradigm introduced in prior work. Whereas
+traditional PE [21] [34] (35) operate under canonical DP guarantees, SecPE shifts the focus
+to secret protection, aligning with the discussion in the previous subsection.
+
+Traditional PE draws random samples from a foundation model and iteratively refines
+candidates through DP voting on similarity to the private data. A key drawback of this
+approach is the high computational cost from redundant similarity evaluations. Moreover,
+the voting distribution is typically unbalanced, with a small subset of synthetic samples
+accumulating the majority of votes while the rest are selected almost uniformly (see Fig-
+ure [4). This imbalance reveals inefficiencies in the selection procedure and motivates a
+more structured clustering-based design.
+
+To address these issues, Algorithm |replaces direct voting with cluster representatives. At
+a high level, the SecPE pipeline consists of two stages: (1) Secret Clustering, where public
+data are clustered and updated with noisy private contributions to form representative
+anchors; and (2) Protected Evolution, where noisy representatives replace individual private
+samples in the voting process. This design preserves the practicality of PE while explicitly
+tailoring protection to secrets.
+
+Specifically, for M private examples and a target of N.y, synthetic samples, the naive PE
+voting scheme requires O(M Nzyn) similarity computations. In contrast, SecPE leverages
+
+3)
+
+
+Secret Clustering with AK anchors, reducing the complexity to O(K Ny,), where typically
+K <« M. This yields substantial runtime savings in practice, as further validated in Table|2|
+
+3.2.1 Noise for Secret Protection
+
+Following [13], we assign a weight w; to each private example via linear program:
+
+max Ww; subject to y w;, < ®'(1-p;)—®"(1-r,;) = nj, wi € [0,1] Vi. (6)
+LE pri
+£4 €Dpri,j
+
+where Dyrij = {21 € Dpri | 8; € 2%} is a subset of D,,; such that each data in Dori;
+contains secret s;. The objective encourages including as many examples as possible; We
+then construct sampling probabilities p; = max Sop — to form a training subset. Here,
+Nj) = in Equation [4] acts as a natural capacity constraint, permitting more samples to be
+selected when s; is less sensitive (i.e., larger 7;). However, secret protection only requires
+an upper bound on the blow-up function. In practice, 7; may be chosen heuristically. A
+detailed procedure is outlined in Algorithm [I]
+
+Algorithm 1 Procedure SECRETNOISE
+
+: Input: Dataset D,,;, secrets S,.., secret budget (p, 7).
+
+: Output: noise parameter o, sampling probabilities p
+
+{w;} < solution to linear program (6) using the chosen 7; values.
+V¢1/max;wi, pi + V- ip
+
+: For each $3 € Sse, Pj = N (Se Deoe,, Betn(pi); o7)®? Q; = N(0,07)®"
+
+: 0; + min{o: Bvp,,a;)(P3) <rj}, o+ maxjo;
+
+aoa Fwnwe
+
+3.2.2 Secret Clustering
+
+In the PE procedure, a small number of synthetic samples receive the majority of votes, as
+illustrated in Figure [4] This phenomenon indicates that selection occurs in group-like clus-
+ters rather than being uniformly spread, which motivates replacing pointwise voting with
+representative voting via clustering. Predefined secrets allow us to first detect and cluster
+using only public data, and then apply a controlled shift informed by secret-containing
+data. In this way, the representative centers summarize the global structure of the dataset
+without directly exposing sensitive information. Synthetic data can then be selected based
+on proximity to these representative centers, eliminating the need to repeatedly process
+the entire dataset, a procedure that is especially costly for large-scale datasets.
+
+A noteworthy hyperparameter is the number of clusters kK. In practice, we recommend
+scaling K with both the size of the original data and the target number of synthetic
+samples: (1) large enough to support diverse voting, and (2) small enough to limit noise
+amplification. Empirically, performance is largely insensitive to the exact choice of K (see
+
+Section [4.2).
+
+
+Algorithm 2 Procedure SECRETCLUSTERING
+
+1: Input: Dataset Dp; U Dpup, secrets Ssec, text embedding model WV, clipping radius R.
+2: Input: Public clusters {(e,,,)}#_, = KMEANS(Dyup, K).
+
+3: Input: (a, p) = SECRETNOISE(Dpri, Ssec, P, 7):
+
+4: Output: Noisy cluster centers and cluster sizes {(é,, 7.) Ly.
+
+5: Epri <— Clipp(W(Dpni)); Initialize eg = ng - ex, me = 0
+
+6: for epi; € Epri do
+
+7: Sample z ~ Bernoulli(;).
+
+8: if z=1then
+
+9: Assign €pri, to its nearest public center: k <— arg minjejK) d(pri,i, 7).
+10: Update cluster statistics: e, <— en + pris, Me <— met+ 1.
+
+11: end if
+
+12: end for
+
+13: Np H— Np +m, + N(0, 07), En <— ae + oh -N(0, 0? a)
+
+Theorem 1 (Secret Clustering). Let {C,}4_, = {(ex, ng) }4, denote the set of public
+cluster centers with corresponding cluster sizes. Every private vector is clipped as Epi; =
+Clipr(€priis) = pri - min{1, R/|lepria||}, and then assigned to its nearest anchor; Let mx
+denote the number of private points assigned to anchor e,. For every cluster k, we release
+the perturbed statistics:
+
+y= TEER Dicey Cort pg gn 28. N'(0,07 Ia);
+
+Nk + M« k
+Ne = Np+ ME + Ne, ne ~ N(0, 07).
+
+(7)
+
+where o is chosen by Algorithm [1] with T = 1. Then Algorithm [J satisfies (p,r)-secret
+protection.
+
+3.2.3. SecPE Pipeline
+
+Following [34], Algorithm |3] instantiates SecPE with two interacting components each
+round: (i) Secret Clustering via Algorithm |2| to build noisy representatives and voting
+weights; and (ii) Protected Evolution that alternates selection with LLM-driven varia-
+tion. Specifically, the procedure begins with an initialization step (line 4 in Algorithm [3)
+that prompts a foundation model to generate random samples. At each iteration, the
+top Nsyn candidates from the previous round are selected based on their similarity to the
+secret-protected clustering centers. These survivors, together with their LLM-generated
+variations, form the candidate pool for the next round. A detailed convergence analysis is
+deferred to Appendix |C.2|
+
+
+Algorithm 3 SecPE Pipeline
+
+: Input: Dataset Dp; U Dpup, secrets Sgec, text embedding model V
+Input: Number of synthetic samples N,y,, variation number L.
+: Output: Synthetic text dataset Son
+: Initialize Sp + RANDOM(Ng,n * L)
+: for t € {0,1,---,T7—1} do
+E, — V(S;), E, + E,- min(1, R/||E;||), Histogram, < [0,..., 0]
+{ (Ex, Ap) }K_, <- SECRETCLUSTERING(Dyup, Dri)
+for ke {1,...,K} do
+i arg minj.c,cu, d(Ex, €;)
+10: Histogram|i] <— Histogram|i] + 7x
+11: end for
+12: se < Top Nzyn samples according to Histogram,.
+13: Sti, + [VARIATION(S#*! L), Sit]
+
+syn? syn
+14: end for
+
+Theorem 2 (Privacy Guarantee for Algorithm |3). Let Algorithm (3 run for T iterations
+with noise multiplier o as specified in Algorithm|1| Then it satisfies (p,1r)-secret protection.
+
+Theorem |2| provides a theoretical guarantee for Algorithm |3} The proof follows directly
+from Theorem 2.4 of [10], since the pair of distributions N(>°,.. Doxis Bern(p;),07) and
+N (0,07) form a dominating pair in each round.
+
+Remark 3.3. When cosine similarity is used as the distance metric, it suffices to apply
+K-means to ¢)-normalized embeddings, which effectively transforms the clustering into
+cosine-based grouping. In this case, we set the sensitivity bound R = 1 when calibrating
+the noise scale.
+
+4 Experiments
+
+4.1 Setup
+
+In this section, we empirically evaluate SecPE on text synthesis and privacy protection.
+We first consider a random word task to illustrate SecPE’s ability to generate high-fidelity
+synthetic text under secret constraints. Then Personally Identifiable Information (PII) task
+that assesses protection of truly sensitive content, where PII is detected with
+In both tasks, SecPE delivers better utility at lower runtime: secret protection injects
+less noise than p-GDP at the same reconstruction budget, and representative voting with
+clustering cuts computation while preserving fidelity.
+
+Datasets. We evaluate on three widely applied open-source datasets: (1) OpenReview
+[34]: ICLR 2023 paper reviews labeled by research area and recommendation rating; (2)
+PubMed [86]: medical paper abstracts; and (3) Yelp [18]: user reviews of businesses labeled
+by business category and rating.
+
+
+Table 1: Hyperparameter settings for SecPE and Aug-PE across datasets.
+
+Dataset Neyn Cluster L Iterations Temperature Max tokens
+OpenReview 2000 15, 20, 15 6 10 1.2 448
+PubMed 2000 2000, 3000, 4000 6 5 1.2 448
+Yelp 5000 400, 600, 800 6 5 1.2 64
+
+Table 2: LLM generation time and histogram computation time (seconds) for one epoch.
+
+. OpenReview PubMed Yelp
+Time (sec)
+LLM Histogram LLM Histogram LLM Histogram
+Aug-PE 1698.7 126.9 828.5 32.2 347.1 30126.4
+SecPE 1693.1 1.5 830.8 0.5 347.6 2.3
+
+Table 3: Performance comparison of downstream tasks within random words on PubMed.
+
+LLM Method rip=2 rip =10 r/p = 50 1/p = 0
+BERT.m BERTs BERT.m BERT.s BERT. BERTs BERT.m BERTs
+AugPE 22.15 24.93 23.13 26.14 24.39 26.96 27.28 29.70
+
+GPT2 SecP E2900 26.74 29.18 27.09 29.42 26.82 29.38 26.82 29.19
+SecPE3999 = 27.15 29.54 27.32 29.75 26.69 29.12 27.09 29.52
+SecPE4o00 27.02 29.57 26.86 29.34 27.23 29.43 27.01 29.41
+
+AugPE 20.37 22.65 21.01 23.09 21.18 23.52 23.68 25.87
+
+Qwen-2.5-1.5B SecPEx999 23.17 25.37 22.26 24.40 22.93 24.96 22.50 24.63
+SecPE3000 22.31 24.48 22.24 24.55 22.65 24.92 22.84 24.91
+SecPExo00 22.17 24.41 22.63 24.99 22.84 24.91 22.29 24.40
+
+Baselines. Given that secret protection is a new concept, we construct a baseline by
+instantiating the most popular Aug-PE under y-GDP, with ju set via Equation [4] and add
+Gaussian noise calibrated to the voting sensitivity following [84]. We use SecPEx to denote
+SecPE with Kk clusters. Our comparison covers three aspects: (i) Computational efficiency:
+GPU hours for response generation and computation time for counting histogram are re-
+ported. (ii) Downstream performance: we fine-tune RoBERTa-base on synthetic data
+to classify Yelp ratings/categories and OpenReview recommendations/areas. For PubMed,
+bert-base-uncased (BERT) [31] is fine-tuned to report next-word prediction accuracy; (iii)
+Real-synthetic similarity: we compute FID on text embeddings and provide a comparison
+of text-length distributions;
+
+Implementation details. As text generators, we use GPT-2 [27], Qwen-2.5-1.5B
+for main experiments. Llama-3.1-8B [11], Qwen-2.5-7B [26], Mistral-7B-Instruct-v0.3
+and GPT-40-Mini are applied for ablation study.
+
+We use Sentence-Transformers as the embedding model WV. For the privacy budget,
+we fix the prior vector p = 1-10~* and set the budget via the ratio r/p = c with c €
+{2, 10,50, co}, where c = oo denotes the non-private setting. Although one could carefully
+tailor heterogeneous, secret-specific budgets to achieve better effectiveness, we adopt a
+uniform budget to enable a fair comparison with the u-GDP Aug-PE baseline, where pp =
+
+
+®-'(1—p) — ®1(1—r). For numerical stability, we approximate Mixture of Gaussian
+with a single Gaussian in both settings. Additional training and hyperparameter details
+are provided in Table}1}| For each dataset, the hyper-parameters are kept fixed across all
+methods. For generating LLMs’ responses, the prompts are the same as [34].
+
+4.2 Performance Comparison on Random Words
+
+In this task, we sort all vocabulary items in each dataset by frequency and designate words
+near the 20% quantile as secrets; a sample is treated as secret-containing if it includes any
+designated word.
+
+Runtime comparison. Table[2|reports runtime on a NVIDIA A100 (80 GB) GPU. A key
+advantage of SecPE lies in its efficiency: Secret Clustering drastically reduces per-iteration
+histogram construction and selection time, accelerating the overall pipeline. Among Ex-
+periments, our method reduces this component by at least a factor of 60x; on Yelp (1.9M
+records), the reduction reaches roughly 10,000. In terms of LLM sampling, SecPE achieves
+runtime comparable to Aug-PE, as both methods query the same model for the same num-
+ber of variations.
+
+Downstream Task. Experimental results comparing SecPE with Aug-PE on down-
+stream tasks are reported in Tables and For each privacy budget and model,
+we highlight the highest classification accuracy in bold. On PubMed, as r/p decreases
+from co to 2, the BERT-small next-word prediction accuracy on Aug-PE (GPT-2) syn-
+thetic text drops from 29.70 — 24.93, whereas only a marginal change from 29.19 — 29.18
+for SecPEgo99._ The results show that, with the same number of training epochs, SecPE
+consistently achieves higher accuracy under private settings, and this advantage becomes
+more pronounced as the privacy requirement tightens (i.e., smaller r/p). In the non-private
+case (r/p = co), performance is slightly lower but broadly comparable, likely because clus-
+tering abstracts away fine-grained details and can occasionally induce mis-selections. We
+further observe non-systematic fluctuations in downstream accuracy when varying K, at-
+tributable to randomness in both the SecPE procedure and the downstream fine-tuning;
+overall, however, the method remains robust and not sensitive to the choice of K.
+Real-synthetic similarity. The left two panels of Figure |2} align with the tabular
+results: as r/p decreases, SecPE achieves lower FID (i.e., greater similarity to the original
+data) than Aug-PE, whereas in the non-private setting it yields higher FID. Moreover, FID
+varies little across all tested K, further indicating that the choice of K does not materially
+affect performance. In the right two panels of Figure [2] we compare the empirical sequence-
+length distributions of synthetic data with those of the original corpus. As SecPE and
+Aug-PE rely on the same generative LLM, their length distributions are very similar.
+
+Ablation of LLM. We evaluate SecPEgo9 on Yelp under r/p € {10,co} using more
+advanced API-accessible LLMs. As shown in Table {6} these models achieve accuracy com-
+parable to, or exceeding GPT-2 and Qwen-2.5-1.5B, indicating that our approach benefits
+from high-quality synthetic text produced by stronger LLMs. Within the same family,
+stronger variants tend to perform better. For example, at r/p = 10 (category, rating)-
+classification accuracy, GPT-40-mini (74.84, 62.96) outperforms GPT2 (73.82, 58.36), and
+
+10
+
+
+Table 4: Performance comparison of downstream tasks within random words on OpenRe-
+view.
+
+r/p=2 r/p = 10 r/p =50 r/p =x
+Area Rating Area Rating Area Rating Area, Rating
+Aug-PE — 29.06 25.70 27.94 27.12 32.48 27.88 41.06 28.70
+
+SecPE}; 30.77 30.26 31.88 30.70 30.34 28.27 39.02 28.38
+SecP E29 28.98 31.38 32.67 28.23 30.30 29.56 38.74 30.49
+SecP Eo5 30.34 29.24 34.81 30.66 32.48 30.31 38.60 30.49
+
+Aug-PE 32.70 25.59 32.23 25.80 36.49 28.52 40.20 28.09
+
+SecPE,5 38.34 27.73 38.67 26.02 36.09 30.95 36.03 32.03
+SecP E29 37.17 26.94 36.95 26.44 30.85 29.52 39.63 28.30
+SecPE2, 38.92 27.66 37.03 27.82 40.24 28.81 40.24 28.86
+
+LLM Method
+
+GPT2
+
+Qwen-2.5-1.5B
+
+Table 5: Performance comparison of downstream tasks within random words on Yelp.
+
+r/p=2 r/p=10 r/p =50 r/p =o
+Category Rating Category Rating Category Rating Category Rating
+Aug-PE 71.53 47.02 71.62 54.72 72.60 64.02 73.54 65.28
+SecP Expo 72.06 61.44 72.90 58.92 72.18 64.30 72.50 61.28
+
+LLM Method
+
+Gre SecPEgoo 71.96 60.38 73.82 58.36 73.61 65.08 72.96 62.22
+SecPEgo99 72.74 62.46 74.28 63.70 73.12 63.82 73.58 62.48
+
+Aug-PE 72.70 55.84 72.14 53.52 71.93 55.04 72.14 59.02
+
+Owen DEA 5B SecP E400 73.97 59.80 72.00 57.80 73.28 57.70 73.84 58.78
+
+SecPEgoo 72.22 56.04 73.24 57.80 73.66 58.53 73.00 58.61
+SecPEgo9 74.12 58.64 72.60 58.66 72.54 60.93 73.14 57.06
+
+Qwen-2.5-7B (74.56, 63.06) outperforms Qwen-2.5-1.5B (73.12, 62.08). However, the 7B
+Mistral (72.52, 58.10) does not outperform a smaller LLM in our setting, suggesting that
+appropriate model selection, rather than parameter count alone, is crucial.
+
+4.3. Performance Comparison on PII
+
+On the Yelp dataset, we detect 36 PII categories (e.g., age, email, gender) using Al4Privacy
+and treat each category as a secret, yielding a dense secret-containing corpus. In this
+setting, improvements (see Table |7)) over Aug-PE are modest and less pronounced than in
+the random-word task. It is worth noting, however, that our comparison fixes the number
+of epochs across methods and therefore does not leverage SecPE’s faster iteration speed.
+
+5 Conclusion
+
+We introduced SecPE, a secret-aware evolution framework for privacy-preserving text syn-
+thesis. By calibrating protection at the level of secrets rather than enforcing uniform DP
+across all records, SecPE provides formal (p, r)-secret guarantees and relaxes Gaussian DP
+to the operative prior point, thereby achieving tighter utility—privacy trade-offs. Empiri-
+cally, across diverse datasets, SecPE improves fidelity and downstream accuracy over GDP
+
+11
+
+
+GPT-2
+
+80
+70
+60
+50
+
+FID
+
+— 40
+30
+
+AugPE
+
+Mmm = SecPE2000
+
+H SecPE3000
+SecPE4o00
+
+Qwen-2.5-1.5B
+
+AugPE
+Mmm =SecPE2000
+
+SecPE3000
+
+SecPEqooo
+
+GPT-2
+
+(Original
+yy Aug-PE
+Mm SecPE3900
+
+20
+
+10
+
+0
+2
+
+10 50 co
+r/p
+
+1000
+Sequence Length
+
+2000
+
+3000
+
+2.00
+Las
+
+Qwen-2.5-1.5B
+
+(mm Original
+ty Aug-PE
+
+1.50} Mill SecPE3000
+
+1.25
+1.00
+0.75
+0.50
+
+0.25
+
+1000 2000
+Sequence Length
+
+3000
+
+Figure 2: Results on PubMed. (Left) FID relative to the original data for SecPE and
+Aug-PE under r/p € {2,10,50,00} using GPT-2 and Qwen-2.5-1.5B. (Right) Synthetic
+sequence-length distributions for the non-private SecPE3o999 and Aug-PE generated by
+GPT-2 and Qwen-2.5-1.5B, compared with the original data.
+
+Table 6: Stronger LLM generators yield improved downstream accuracy on Yelp.
+
+LLM r/p = 10 r/p = oo
+
+Category Rating Category Rating
+
+GPT2 73.82 58.36 72.96 62.22
+Qwen-2.5-1.5B 73.24 57.80 73.00 58.61
+Mistral-7B-Instruct-v0.3 72.52 58.10 73.38 61.28
+Llama-3.1-8B 74.14 61.92 73.82 62.99
+Qwen-2.5-7B 74.56 63.06 74.24 63.34
+GPT-40-Mini 74.84 62.96 75.10 63.28
+
+Table 7: Performance comparison of downstream tasks within PII on Yelp.
+
+LLM Method r/p =? Tp = 1p n/p = 0 n/p = 84
+Category Rating Category Rating Category Rating Category Rating
+GPT? Aug-PE 73.50 62.36 73.60 65.89 74.10 63.44 73.54 65.28
+SecP Egoo 73.65 63.45 75.05 61.22 74.34 62.45 72.96 62.22
+Qwen-2.5-1.5B Aug-PE 72.97 58.30 72.70 60.04 72.83 58.93 72.14 59.02
+~~ SecPEgo9 73.00 61.86 72.87 60.60 73.04 59.20 73.00 58.61
+
+Aug-PE baselines under private settings, while also substantially accelerating the pipeline.
+Ablation studies further show that stronger LLMs consistently yield higher-quality syn-
+thetic text, highlighting the critical role of model selection. Overall, our results suggest that
+secret-aware mechanisms offer a more practical and effective approach to privacy-preserving
+text generation than DP, particularly in settings where sensitive content is sparse in type
+yet repeated across records and thus highly consequential.
+
+12
+
+
+Reproducibility Statement
+
+For the theoretical analysis of this work, we provide detailed explanations in Section
+The assumptions and complete proofs of the theorems are presented in Appendix |[C] The
+datasets, models and hyperparameters used in the experiments are described in Section
+and additional experimental settings are reported in Appendix |B} All datasets used are
+publicly available, and their usage are explicitly referenced in the paper.
+
+Ethics Statement
+
+This work adheres to the ICLR Code of Ethics, with no involvement of human subjects or
+animal experimentation. All datasets employed were sourced in compliance with relevant
+usage guidelines to ensure privacy protection. We ensured the avoidance of biases or dis-
+criminatory outcomes throughout the research process, utilized no personally identifiable
+information, and conducted no experiments posing privacy or security risks. Furthermore,
+we are committed to upholding transparency and integrity in the research. The proposed
+method facilitates privacy protection, and we aim to further standardize the use of private
+data.
+
+References
+
+[1] Martin Abadi, Andy Chu, Ian Goodfellow, H Brendan McMahan, Ilya Mironov, Kunal
+Talwar, and Li Zhang. Deep learning with differential privacy. In Proceedings of the
+2016 ACM SIGSAC conference on computer and communications security, pages 308-
+318, 2016.
+
+2| Borja Balle, Giovanni Cherubin, and Jamie Hayes. Reconstructing training data with
+informed adversaries, 2022.
+
+3] Nicholas Carlini, Chang Liu, Ulfar Erlingsson, Jernej Kos, and Dawn Song. The secret
+sharer: Evaluating and testing unintended memorization in neural networks, 2019.
+
+4] Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-
+Voss, Katherine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, Alina
+Oprea, and Colin Raffel. Extracting training data from large language models, 2021.
+
+[5] Zachary Charles, Arun Ganesh, Ryan McKenna, H. Brendan McMahan, Nicole
+Mitchell, Krishna Pillutla, and Keith Rush. Fine-tuning large language models with
+user-level differential privacy, 2024.
+
+[6] Mia Xu Chen, Benjamin N. Lee, Gagan Bansal, Yuan Cao, Shuyuan Zhang, Justin Lu,
+Jackie Tsay, Yinan Wang, Andrew M. Dai, Zhifeng Chen, Timothy Sohn, and Yonghui
+Wu. Gmail smart compose: Real-time assisted writing. In Proceedings of the 25th ACM
+SIGKDD International Conference on Knowledge Discovery & Data Mining, KDD ’19,
+page 2287-2295, New York, NY, USA, 2019. Association for Computing Machinery.
+
+[7] Christopher A. Choquette-Choo, Arun Ganesh, Thomas Steinke, and Abhradeep
+
+Thakurta. Privacy amplification for matrix mechanisms, 2024.
+
+13
+
+
+8)
+
+[10]
+
+[11]
+
+[12]
+
+[18]
+[19]
+
+[20]
+
+[21]
+
+Lynn Chua, Badih Ghazi, Yangsibo Huang, Pritish Kamath, Ravi Kumar, Daogao
+Liu, Pasin Manurangsi, Amer Sinha, and Chiyuan Zhang. Mind the privacy unit!
+user-level differential privacy for language model fine-tuning, 2024.
+
+Jinshuo Dong, Aaron Roth, and Weijie J. Su. Gaussian differential privacy, 2019.
+
+Vadym Doroshenko, Badih Ghazi, Pritish Kamath, Ravi Kumar, and Pasin Manu-
+rangsi. Connect the dots: Tighter discrete approximations of privacy loss distributions,
+2022.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al.
+The llama 3 herd of models. arXiv preprint arXiv:2407.21783, 2024.
+
+Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. Calibrating noise to
+sensitivity in private data analysis. In Proceedings of the Third Conference on Theory
+of Cryptography, TCC’06, page 265-284, Berlin, Heidelberg, 2006. Springer-Verlag.
+
+Arun Ganesh, Brendan McMahan, Milad Nasr, Thomas Steinke, and Abhradeep
+Thakurta. Hush! protecting secrets during model training: An indistinguishability
+approach, 2025.
+
+Jesse Harte, Wouter Zorgdrager, Panos Louridas, Asterios Katsifodimos, Dietmar Jan-
+nach, and Marios Fragkoulis. Leveraging large language models for sequential recom-
+mendation. In Proceedings of the 17th ACM Conference on Recommender Systems,
+RecSys ’23, page 1096-1102. ACM, September 2023.
+
+Jamie Hayes, Saeed Mahloujifar, and Borja Balle. Bounding training data reconstruc-
+tion in dp-sgd, 2023.
+
+Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bernhard Nessler, and Sepp
+Hochreiter. Gans trained by a two time-scale update rule converge to a local nash
+equilibrium, 2018.
+
+Charlie Hou, Mei-Yu Wang, Yige Zhu, Daniel Lazar, and Giulia Fanti. Private feder-
+ated learning using preference-optimized synthetic data. In Forty-second International
+Conference on Machine Learning, 2025.
+
+Inc. Yelp. Yelp Open Dataset, 2015.
+
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Deven-
+dra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume
+Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock,
+Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El
+Sayed. Mistral 7b, 2023.
+
+Daniel Levy, Ziteng Sun, Kareem Amin, Satyen Kale, Alex Kulesza, Mehryar Mohri,
+and Ananda Theertha Suresh. Learning with user-level privacy, 2021.
+
+Zinan Lin, Sivakanth Gopi, Janardhan Kulkarni, Harsha Nori, and Sergey Yekhanin.
+Differentially private synthetic data via foundation model apis 1: Images, 2025.
+
+14
+
+
+[22|
+
+[23]
+
+[24]
+
+[25]
+[26]
+
+[28
+
+20
+
+30
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Mandar Joshi, Dangi Chen, Omer
+Levy, Mike Lewis, Luke Zettlemoyer, and Veselin Stoyanov. Roberta: A robustly
+optimized bert pretraining approach, 2019.
+
+Nils Lukas, Ahmed Salem, Robert Sim, Shruti Tople, Lukas Wutschitz, and Santiago
+Zanella-Béguelin. Analyzing leakage of personally identifiable information in language
+models, 2023.
+
+Sankha Subhra Mukherjee, Jiawei Yu, Yida Won, Mary J. McClay, Lu Wang, A John
+Rush, and Joydeep Sarkar. Natural language processing-based quantification of the
+mental state of psychiatric patients. Computational Psychiatry, 4:76-106, 2020.
+
+OpenAI. Hello gpt-40, 2024.
+
+Qwen, :, An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu,
+Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong
+Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang,
+Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li, Mingfeng Xue, Pei Zhang, Qin
+Zhu, Rui Men, Runji Lin, Tianhao Li, Tianyi Tang, Tingyu Xia, Xingzhang Ren,
+Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yu Wan, Yuqiong Liu, Zeyu
+Cui, Zhenru Zhang, and Zihan Qiu. Qwen2.5 technical report, 2025.
+
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever,
+et al. Language Models are Unsupervised Multitask Learners. OpenAI blog, 1(8):9,
+2019.
+
+Nils Reimers and Iryna Gurevych. Sentence-bert: Sentence embeddings using siamese
+bert-networks, 2019.
+
+Weiyan Shi, Aigi Cui, Evan Li, Ruoxi Jia, and Zhou Yu. Selective differential privacy
+for language modeling, 2022.
+
+Bowen Tan, Zheng Xu, Eric P. Xing, Zhiting Hu, and Shanshan Wu. Synthesizing
+privacy-preserving text data via finetuning *without* finetuning billion-scale LLMs.
+In Forty-second International Conference on Machine Learning, 2025.
+
+Iulia Turc, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Well-read students
+learn better: On the importance of pre-training compact models, 2019.
+
+Leah Voytovich and Clayton Greenberg. Natural language processing: Practical ap-
+plications in medicine and investigation of contextual autocomplete. In Victor E.
+Staartjes, Luca Regli, and Carlo Serra, editors, Machine Learning in Clinical Neuro-
+science, pages 207-214, Cham, 2022. Springer International Publishing.
+
+Boxin Wang, Weixin Chen, Hengzhi Pei, Chulin Xie, Mintong Kang, Chenhui Zhang,
+Chejian Xu, Zidi Xiong, Ritik Dutta, Rylan Schaeffer, Sang T. Truong, Simran Arora,
+Mantas Mazeika, Dan Hendrycks, Zinan Lin, Yu Cheng, Sanmi Koyejo, Dawn Song,
+and Bo Li. Decodingtrust: A comprehensive assessment of trustworthiness in gpt
+models, 2024.
+
+15
+
+
+[34]
+
+[35]
+
+[36]
+
+Chulin Xie, Zinan Lin, Arturs Backurs, Sivakanth Gopi, Da Yu, Huseyin A Inan, Har-
+sha Nori, Haotian Jiang, Huishuai Zhang, Yin Tat Lee, Bo Li, and Sergey Yekhanin.
+Differentially private synthetic data via foundation model apis 2: Text, 2024.
+
+Da Yu, Peter Kairouz, Sewoong Oh, and Zheng Xu. Privacy-preserving instructions
+for aligning large language models. In Forty-first International Conference on Machine
+Learning, 2024.
+
+Xiang Yue, Huseyin Inan, Xuechen Li, Girish Kumar, Julia McAnallen, Hoda Shajari,
+Huan Sun, David Levitan, and Robert Sim. Synthetic text generation with differential
+privacy: A simple and practical recipe. In Proceedings of the 61st Annual Meeting
+of the Association for Computational Linguistics (Volume 1: Long Papers), pages
+1321-1342, 2023.
+
+Tianyuan Zou, Yang Liu, Peng Li, Yufei Xiong, Jianqing Zhang, Jingjing Liu, Xi-
+aozhou Ye, Ye Ouyang, and Ya-Qin Zhang. Contrastive private data synthesis via
+weighted multi-PLM fusion. In Forty-second International Conference on Machine
+Learning, 2025.
+
+16
+
+
+The Use of Large Language Models (LLMs)
+
+In this work, Large Language Models (LLMs) are used solely as general-purpose assistive
+tools to help polish and improve the clarity of the writing. Authors take full responsibility
+for all content in the paper, including text that was refined using LLMs, and confirm that no
+part of the manuscript generated by LLMs constitutes plagiarism or scientific misconduct.
+
+A Limitation
+
+While clustering accelerates the pipeline, it abstracts away fine-grained details, which can
+cause a modest loss of utility in the non-private regime. Another open challenge is the
+formal definition of what constitutes a secret and how to quantify its sensitivity. Future
+work will explore heterogeneous, secret-specific budgets and adaptive priors to further
+improve utility while maintaining protection. We also plan to extend SecPE to image
+domains (with an appropriate formalization of “secrets” in that setting) and investigate
+secret-protected generators.
+
+B Supplementary Experiments
+
+B.1 Simulation Result
+
+To explicitly demonstrate how secret protection reduces the required noise relative to GDP,
+we consider a toy setup with N = 8000 records and m = 400 secrets. Each record contains
+each secret independently with probability Bernoulli(0.01). For a fair comparison, ju in
+GDP is coupled to the (p,r) pair viayp = ®-1(1—p) — ®1(1-7r).
+
+We report the noise ratio defined as ogpp/Csecret (larger is better). In the left panel, we
+fix (N,m) = (8000, 400) and vary the privacy budget r/p € [2,400]. In the right panel, we
+fix r/p = 10 and N = 8000, and vary the number of secrets m € [{100, 1000]. Across both
+settings, the noise required by (p,1r)-secret protection is consistently smaller than that of
+pu-GDP.
+
+5
+4.054
+fe) fe)
+5 54
+e 2
+w 4.004 @
+Ke) 6 3
+Cc Cc
+3.954
+2
+0 100 200 300 400 0.02 0.04 0.06 0.08 0.10 0.12
+r/p m/N
+(a) Privacy budget (b) Secret fraction
+
+Figure 3: Noise ratio oapp/Osecree Comparing (p,7)-secret protection with Gaussian DP.
+(a): N = 8000, m = 400, varying r/p. (b): N = 8000, r/p = 10, varying the number of
+secrets ™.
+
+17
+
+
+B.2. Implementation Details
+
+We provide the implementation details of our experiments in section |4| For each dataset,
+the hyperparameters are kept fixed across all methods. For the prompts used to generate
+responses, we refer readers to [34].
+
+B.3 Voting Details
+
+Here we compare raw voting in Aug-PE with post-clustering votes in SecPE. Figure
+shows the first three labels on Yelp. The synthetic samples receiving the highest vote mass
+are largely the same across both methods, indicating that the clustering preserves the key
+selections and is thus reasonable.
+
+9 EE Voting (raw) HE Voting (raw) 3.0 GE Voting (raw)
+
+s 2.0 %
+° o 2. © 2.5
+x6 x x
+Pm = US = 2.0
+5 5 5
+
+2 15
+o4 ° fo}
+Oo oO 1.0 Oo
+£ yg @ 10
+O92 ° te)
+> = > 05
+
+°
+2
+°
+
+0.0°
+
+fo}
+
+_ 3 Voting (clustring) _ 3 Voting (clustring) _ 30 3 Voting (clustring)
+fe) rey 8 O25
+
+ca 6 ca ca
+
+x x x
+
+<= [15 ~ 2.0
+
+vv vy v
+
+c yt Cc
+
+2 4 2 3 1.5
+
+& G10 8
+
+2, 2 g 10
+
+Oo Le}
+
+> = os > 0.5
+
+OF Label 1 a0" Label 2 Oe Label 3
+
+Figure 4: Voting distribution per label on Yelp. Top: raw votes from Aug-PE. Bottom:
+votes after clustering in SecPE.
+
+B.4 FID and Length
+
+Figure [5] presents the FID with respect to the OpenReview dataset for SecPE and Aug-PE
+under r/p € {2,10,50,0o}, together with the synthetic sequence-length distributions of
+the non-private SecPE2) compared against Aug-PE, using GPT-2 and Qwen-2.5-1.5B as
+generators.
+
+Similarly, Figure|6]shows the FID with respect to the Yelp dataset for SecPE and Aug-PE
+under the same r/p settings, along with the sequence-length distributions of the non-private
+SecPE¢o00 compared against Aug-PE, also using GPT-2 and Qwen-2.5-1.5B as generators.
+
+B.5 APIs
+
+Figure |7| shows the synthetic sequence-length distributions on Yelp for the non-private
+SecPEg¢o0 across different generator models. Among them, Mistral-7B-Instruct-v0.3 ex-
+hibits the largest deviation from the original distribution, which aligns with its inferior
+performance reported in table [6
+
+18
+
+
+GPT-2 Qwen-2.5-1.5B a8 GPT-2 sie Qwen-2.5-1.5B
+120 AugPE 60 I AugPE H (@m_ Original @m_ Original
+Mmm SecPE\5 Mmm SecPEi5 wy Aug-PE = Aug-PE
+100 ow 200 2.0
+lm SecPE2s5 50 lm SecPE2s a lm SecPE29 lm SecPE29
+80 SecPEso zo! | | SecPEso o T
+fal
+iz 607 || | 7 30 2
+a 1.0
+40 20 5
+a
+20 | 10 0.5
+(0 0
+2 10 50 Ey 2 10 50 Es 1000 2000 3000 4000 1000 2000 3000 4000
+r/p r/p Sequence Length Sequence Length
+Figure 5: FID and sequence-length distributions on OpenReview.
+<6 GPT-2 35 Qwen-2.5-1.5B 5 GPT-2 <3 Qwen-2.5-1.5B
+| AugPE mmm AugPE @m_ Original (@m Original
+40 Mmm SecPEyo9 40 Mmmm =SecPE,00 1.0 =) Aug-PE 1.0 = Aug-PE
+(Gm SecPE¢00 (Gi SecPE¢o0 a (@m SecPE¢00 (lm SecPE¢oo
+_ SecPEgoo SecPEgoo S i 0.8
+
+30 30
+
+0.6
+
+FID
+
+20
+
+. | | | | | | |
+0 0
+2 10 50 2 10 50
+r/p r/p
+
+N
+°
+
+°
+
+co 200 400 600 800 200 400 600 800
+Sequence Length Sequence Length
+
+co
+
+Figure 6: FID and sequence-length distributions on Yelp.
+
+C Additional Theoretical Analysis
+
+C.1 Further Properties and Relation to DP
+
+Theorem 3 (Naive Composition). Suppose A; : D> Ry satisfy (pi,11)-secret protection,
+Ap: DX Rib Ryo satisfy (p2,T2)-secret protection. Define A: D> Ri xX Ro by
+
+A(D) = (Ai(D), A2(D, Ai(P)))
+Then A satisfies (p,r) secret protection such that, coordinate-wise,
+
+p=max(pi, po), T=TM1t+7o.
+
+Proof. From definition, fix any secret s;, to ensure that both mechanisms A, and Ap: satisfy
+their respective (pi,71) and (po, 7r2)-secret protection guarantees, the prior distribution 7
+over {D,,..., Dx} must satisfy:
+
+mi) < prj, and mt) <poy, Wi € [K]
+
+Therefore, to apply both guarantees simultaneously, we define the composed mechanism’s
+prior bound as:
+
+pj = max(p1,;, P2,j),
+so that any prior distribution satisfying m(¢) < p; is valid for both mechanisms.
+
+Let B : Ri x Ry — [K] be any adversary attempting to identify the index i from the
+output of A(D;). Define an intermediate adversary B,(y,) = argmax;Pr(A;(D;) = y1)
+
+19
+
+
+@m_ Original lm Original (Original @m_ Original
+ GPT-40-Mini > Llama3.1-8B >) Mistral-7B-Instruct-v0.3 ™ Qwen2.5-7B
+
+i)
+
+200 400 600 800 200 400 600 800 200 400 600 800
+
+200 400 600 800
+Sequence Length Sequence Length Sequence Length Sequence Length
+
+Figure 7: Synthetic sequence-length distributions across different generator models.
+
+(a hypothetical adversary trying to recover i from y; only). By the assumption that A,
+satisfies (p),71)-secret protection,
+
+Pr, [Bi(Ai(Pi)) =] Sry
+
+inn, Al
+Since A» satisfies (po, r2)-secret protection, for each fixed y;, the success probability of
+identifying i from A2(Dj, y1) is at most rz. Hence:
+
+int, Ag
+
+Thus, the total success probability of any adversary B satisfies:
+Pr (BAD) = s Pr [Bi(Ai()) =i) +, Pr [BA2(Di, wu), 1) = 4 | Bim) 4a]
+inn, wt, Al wT, Ae
+
+Sig +12,
+
+Hence, the composed mechanism A satisfies (p,7r) secret protection such that, coordinate-
+wise,
+p=max(pi, pr), T=T1 +72.
+
+Remark C.1. For every 4 > 0 the following equivalence holds [9]
+the mechanism is w-GDP <=> (e,6(e))-DP for all < > 0,
+
+where cou cou
+() 7 + 5 € nD
+Setting p = ®-'(1 — p;) — ®-'(1 — r;) links the (€,6)-DP to (p,,1r;)-secret protection.
+Consider the same setting as Lemma the neighboring datasets D, ~ De differ in
+exactly one element, specifically, s; € x, € D; while s; ¢ x2 € Dz. The following lemma
+establishes a direct implication from (e€,6)-DP to (p,1r)-secret protection.
+
+Lemma C.2. Any (€,5)-DP mechanism A provides at least (p,r)-secret protection, where
+1
+
+1+ (e+e) =e
+
+r= +c:-d, Ve>1
+
+20
+
+
+Proof. For any secret s;, denote output distributions as:
+
+and define the prior Pr[Dyain = Di] = pj, Pr[Duain = D2] = 1— pj. Let y = A(Drrain)
+denote an output from A. By Bayes’ rule, the posterior odds are:
+
+Pr] Desain = D, | y| _ Pr(y | Preiss = Dj) . Pr(Detrain = Dj) _ P,(y) . Pj
+Pt Dies = Do | y| Pr(y | Dyin = Dz) PEL Drain = D2j) P2(y) 1— Pj
+
+Now partition the output space JY into two parts:
+
+c= {yey:
+
+toe <e+th, U:=)\G
+
+By the definition of (¢,6)-DP, we have:
+
+which implies P\(U) < o/ ke ett _@&) P,(U) < 6/(e&** —e*). For c > 1, let t = In(1 +
+e-=-°) so that P\(U), P2(U) < cd. On the good region G, we have:
+
+Pr|Derain = D l |
+r| L S | y| < (« + *); Pi > Pr| Dieta, = —_ D, | yl = —1 1-p;
+Pr[Dtrain = Do | yl c)/ 1—p; 1 +(e + 1/c)- 7
+
+Let yz denote the output distribution of A(/train),
+Pr|B(A(D,)) = i] < / Max {Pr[Dtrain = dD, | yl, Pr| Dieta = Dy | yl} du(y)
+y
+
+We upper bound this by splitting the integral over G and U:
+
+[mx du = ~ hom Jd ff mast) du
+
+*.u(G)+1-u(U) <r*+e-6
+
+Thus, A provides (p;, 7;)-secret protection in expectation, where
+
+1
+te-d, Ved.
+
+Tr; = T
+» i+ (+i. =
+
+For 6 = 0, letting c — oo, (€,0)-DP implies (p,1r)-secret protection with
+
+1
+—~ Loy,”
+l+e =
+
+21
+
+
+
+C.2 Convergence Analysis
+
+Definition C.3 (Per-round mis-selection rate). The per-round mis-selection rate is the
+worst-case (over private points) probability that the selection event fails at round t:
+
+pt 4 sup Pr(- Sel; (x )|S:) € (0, 1].
+
+LED priv
+Here the probability is over the algorithmic randomness at round t given S;.
+
+Claim C.4. Fix a point x € Dp and some iteration t. Suppose z* € S;, is the closest
+point tox, V = VARIATION(z*, L) U{2*}. If ||x — 2*|| > n, then with probability at least
+(1 — p:)/2, some point in V will get noticeably closer to x than z*, i.e.,
+
+log L
+in |[z — z|l2 << (1— — z"llo.
+min || — 2||> S ( ) Iz — 2" 2
+
+Ad
+
+Theorem 4. Assume that log L < d. With probability > 1—7, the non-private cluster-
+evolution algorithm outputs Syy, with Wasserstein distance W,(Dpris Ssyn) < 9 after T
+iterations. Vp € [1, co] whenever
+
+4 dlog(D/n)
+1 — max; pz log L
+
+T
+og(Npriv/T) (or more generally, we — pi) > seegOlD),
+
+~ (8)
+
+Proof. The proof of othertheorem and theorem |4 [4] follows directly from Theorem 1 in
+[21]. In the idealized (no mis- selection) case, T > geal) + log(Npriv/T). Accounting
+for per-round mis-selections at rate p,; weakens the soutrantion by a factor (1 — pz), which
+replaces T with )>/_,(1— p;), or in the worst case, scales by 1/(1 — max; p;).
+
+Theorem 5 (Secret Clustering). Let {C,}4_, = {(ex, ng) }4, denote the set of public
+cluster centers with corresponding cluster sizes. Every private vector is clipped as €prii =
+Clipp(€prii) = Cpris - min{1, R/|leprij||}, and then assigned to its nearest anchor; Let mz
+denote the number of private points assigned to anchor ex. For every cluster k, we release
+the perturbed statistics:
+
+T >
+
+~ Nk x + icc, €pri,i 2R 2
+metmy To SE ng NOs0T) (9)
+Tig = Thy +e + Yes ne ~ N(0, 07).
+where a is chosen by Algorithm [1] with T = 1. Then Algorithm [J satisfies (p, r)-secret
+protection.
+
+Proof. Let Deec denote the dataset containing the secret associated with secret s, and let
+Doi = Dori \ Dooce, where
+
+Deseo = {4 € Dpri | 8 € 2}.
+For any cluster k, suppose that m, is the number of private data containing s that is
+assigned to cluster k, then the distribution of m, is P := N(0,07) for Di,, and Q :=
+
+N(Xox,ep,.. {arg min, d(é;,e;) = k},07) for Dp. where
+
+al
+
+S- 1{arg min d(é;,e;) = k}) < |Dsecl,
+j
+
+£4€Dsec
+
+22
+
+
+and |Ds.¢| is distributed according to  := )7, ep,,, Bern(p;). Hence, invoking Lemma 4.5
+of [7], NV (u, 07) and N(0,07) forms a dominating pair that bounds the blow-up function
+for P and Q. Similarly, for cluster center:
+
+Ne * €k + Vice, Epris | | icc, Eprii — Mk + Ck
+
+_ | icc, (Epri,i — €k)
+
+Nk + Mz Nk + Mz Nk + Mr
+< 2h oR
+Ne + ME Nk
+
+For each iteration, since the noise is calibrated to bound the blow-up function, Theorem 2
+of directly implies that the mechanism satisfies (p,1r)-secret protection.
+
+23

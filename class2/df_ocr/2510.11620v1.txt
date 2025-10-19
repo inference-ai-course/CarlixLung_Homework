@@ -1,0 +1,1895 @@
+arXiv:2510.11620v1 [cs.CL] 13 Oct 2025
+
+Preprint
+
+ENHANCING LONG CHAIN-OF-THOUGHT REASONING
+THROUGH MULTI-PATH PLAN AGGREGATION
+
+Siheng Xiong!, Ali Payani”, Faramarz Fekri!
+‘Georgia Institute of Technology Cisco Research
+sxiong45@gatech.edu apayani@cisco.com fekri@ece.gatech.edu
+
+ABSTRACT
+
+Inference-time scaling enhances the reasoning ability of a language model (LM)
+by extending its chain-of-thought (CoT). However, existing approaches typically
+generate the entire reasoning chain in a single forward pass, which often leads to
+CoT derailment, i.e., the reasoning trajectory drifting off course due to compound-
+ing errors. This problem is particularly severe for smaller LMs with long CoTs due
+to their limited capacity. To address this, we analyze raw long CoTs and uncover
+a reasoning hierarchy consisting of planning and execution steps. Our analysis
+reveals that most reasoning errors stem from incorrect planning. Motivated by this
+observation, we propose Multi-Path Plan Aggregation (MPPA), a framework that
+augments single-pass reasoning with plan exploration and aggregation. Following
+a variable interval schedule based on the token position, MPPA generates multiple
+candidate plans and aggregates them into a refined planning step. To maintain
+efficiency, we adopt a minimal design in which the base LM serves as the primary
+policy, while a lightweight LoRA module implements the plan aggregation policy.
+We further observe that outcome-reward RL is inefficient for long trajectories
+(e.g., exceeding 4K tokens). To overcome this, we introduce online Step-DPO, a
+process-level preference optimization scheme that leverages Twisted Sequential
+Monte Carlo (TSMC) to provide scalable stepwise supervision using small LMs.
+This yields more efficient training, improved stability, and higher accuracy. Exten-
+sive experiments on challenging math, science, and logical reasoning benchmarks
+demonstrate that, with only 10% SFT data and 5% of preference pairs, our method
+outperforms both the DeepSeek-R1 distillation baseline and the outcome-reward
+RL baseline across multiple base models and tasks!)
+
+1 INTRODUCTION
+
+OpenAl’s ol series 2024) introduce inference-time scaling by increasing the length of
+the Chain-of-Thought (CoT) (Wei et al. reasoning process. This design yields significant
+improvements in complex reasoning tasks compared to non-reasoning models, marking a major step
+forward in language model (LM) capabilities. Building on this idea, DeepSeek
+proposes a large-scale reinforcement learning (RL) pipeline that directly incentivizes the generation of
+long CoTs through policy optimization. Despite their empirical success, RL approaches that generate
+the entire reasoning chain in a single forward pass face notable limitations, including CoT derailment,
+where the reasoning trajectory drifts off course due to accumulated errors, and the inherent challenges
+of long-horizon RL with sparse outcome rewards. These issues are especially pronounced for smaller
+LMs with long CoTs due to their limited capacity.
+
+This sequential scaling strategy, i.e., simply extending the CoT length, can therefore be insuffi-
+cient (2025). It typically relies on self-correction from previous mistakes to refine
+reasoning. However, once the model follows an incorrect path, recovery could become difficult, as
+subsequent reasoning remains influenced by earlier failed attempts. To address this limitation, we
+begin by analyzing raw long CoTs from current large reasoning models (LRMs). Our investigation
+reveals that the reasoning process inherently reflects the hierarchical structure of human cognition.
+Due to pre-training priors and the inherent structure of reasoning tasks, reasoning steps are naturally
+segmented (by double newlines \n\n). These steps can be further categorized into planning steps
+
+'Code and data available at https: //github.com/xiongsiheng/MPPA
+
+
+
+Preprint
+
+and execution steps. An analysis of erroneous long-CoT trajectories shows that most errors originate
+from incorrect planning. This observation aligns with the intuition that solving complex reasoning
+tasks often depends on identifying a key insight. To improve planning quality, we introduce Multi-
+Path Plan Aggregation (MPPA). For each planning step, the model generates multiple alternative
+plans and aggregates them into an improved plan before proceeding to the subsequent execution
+steps. This mechanism enables exploration of diverse strategies before committing to a final plan,
+thereby enhancing robustness and accuracy. Moreover, explicitly distinguishing between planning
+and execution steps allows us to preserve plan diversity while maintaining execution accuracy (reduce
+entropy) during optimization.
+
+Beyond enhancing planning, we identify a fundamental challenge in credit assignment for long-
+horizon policy learning (Kaelbling et al.|{1996). To tackle this, we propose an online Step-DPO
+pipeline for long CoT training, which significantly accelerates training and improves reasoning
+performance. Existing RL fine-tuning frameworks struggle to provide effective process-level supervi-
+sion (Guo et al.|/2025). First, evaluating the correctness of intermediate steps is inherently difficult.
+Automated annotation using LLM ee (ea TO yield unreliable or noisy signals
+for long CoTs, while manual annotation (Lightman et al.||2023) is prohibitively expensive at scale.
+Second, introducing a separate process reward model (PRM) adds complexity. It is vulnerable to
+reward hacking (Gao et al.|[2023), requires substantial training data, and complicates the pipeline by
+necessitating repeated retraining. To overcome these limitations, we repurpose Twisted Sequential
+level supervision signal for Step-DPO. In the LM-based reasoning setting, the importance weight in
+TSMC estimates how much more likely a partial trajectory is to lead to a correct outcome under the
+target distribution compared to the current policy. We then define the process preference between
+two candidate continuations at the same step by comparing their incremental log-weights. This
+formulation has two key advantages: 1) it converts the multiplicative nature of sequential importance
+weights into an additive form, improving numerical stability; 2) it aligns naturally with the pairwise
+preference structure of DPO training. We further observe that small LMs can be used to estimate
+survival probabilities efficiently. Empirically, our approach provides stable and informative step-level
+preferences, leading to more efficient training and stronger performance on complex reasoning tasks.
+
+We summarize our key contributions as follows:
+
+¢ We propose a novel Multi-Path Plan Aggregation (MPPA) framework that directly addresses
+the limitations of single-pass long-CoT approaches. Following a variable interval schedule
+based on the token position, the model generates multiple candidate plans and aggregates
+them into an improved planning step, enhancing robustness and accuracy in reasoning.
+
+We repurpose Twisted Sequential Monte Carlo (TSMC) to provide process-level preferences
+for online Step-DPO training. This approach removes the need for a separate process reward
+model, significantly reducing training overhead while delivering stable and informative
+supervision throughout long reasoning trajectories.
+
+e We conduct extensive experiments on challenging benchmarks in mathematics, science, and
+logical reasoning. Results show that our approach consistently outperforms both distillation-
+based long-CoT methods and RL methods that rely solely on outcome rewards.
+
+2  INFERENCE-TIME SCALING VIA LONG CHAIN-OF-THOUGHT
+
+Formulation. Consider a query q, large reasoning models (LRMs) generate a CoT c before pro-
+ducing the final response a, where q, c, a are all sequences of tokens, i.e., c = (c[1], c[2],--- , c[T]).
+To improve model performance, these models extend the length of c by incorporating human-like
+reasoning behaviors such as exploration, self-verification and reflection. The generation of long CoTs
+follows the standard autoregressive modeling: the probability of each token ct] depends only on its
+preceding tokens (c[1 : t — 1]), which enables the factorization of the joint likelihood of the entire
+sequence as:
+
+T
+po(cll : T]) = | | po(eld] | eft : t- 1). (1)
+
+Note that, for notational simplicity, we omit the conditioning on g in Eq. [I]and in the following
+derivations. Training the model ppg involves maximizing the likelihood of each token conditioned on
+its prefix, i.e., optimizing pg(c[t] | c[l : t — 1]) over the training data.
+
+
+Preprint
+
+DeepSeek-R1-Distill-Llama-8B on MATH500 DeepSeek-R1-Distill-Llama-8B on MATH500
+20.0 25
+17.5
+15.0 20
+y 12.5 U
+15
+2 10.0 2
+& © 10
+@7 a
+5.0
+5:
+2.5
+0.04 ‘Mim, ()
+0 5000 10000 15000 20000 25000 30000 0 10
+Number of Generated Tokens Flaine Pastifon ot First eaor ae
+(a) Trajectory length distribution. (b) First error position distribution.
+
+Figure 1: The Chain-of-Thought trajectories can be lengthy and the positions of the first error vary considerably,
+making outcome-based RL fine-tuning inefficient. The statistics in (b) are based on 100 trajectories with incorrect
+final answers, where the first error was manually identified.
+
+Post-training. detail how they incentivize the long CoT generation from a base
+model through large-scale RL without relying on SFT. Specifically, they employ GRPO guided by
+rule-based outcome reward. For each query g, GRPO samples a group of outputs {01, 02,--- ,oc}
+from the old policy 79,,, where each output is composed of a CoT followed by the final response, i.e.,
+0; = [ci, a;], and then optimizes the policy 7 by maximizing the corresponding objective.
+
+Discussion on the weakness of single-pass long CoT. The above approach of using single-pass
+long CoT enables inference-time scaling with LRMs, but introduces several issues:
+
+1) CoT derailment. In single-pass long CoT generation, the entire trajectory is produced in one
+uninterrupted forward pass. Without guidance or structure, errors can accumulate and cause the
+reasoning path to drift off-course (see examples in Section|[D).
+
+2) Long-horizon RL with sparse outcome reward. Long CoTs involve thousands of token-level
+actions before receiving a reward, which hinders effective credit assignment. As shown in
+Figure [I] these trajectories can be extremely long, with errors occurring at widely varying
+positions, which undermines the effectiveness of outcome-based fine-tuning. Moreover, Figure[2]
+shows that latency and memory usage grow rapidly with trajectory length, while outcome-based
+supervision requires the entire trajectory to finish before feedback is provided. Consequently,
+learning is slow and unstable, especially in the early stages when the model rarely produces
+correct trajectories.
+
+Deepseek-R1-Distill-Llama-88 on MATHS00 DeepSeek-R1-Distill-Llama-8B on MATH500
+
+1400 oom
+
+2 1200 0.8 |
+>
+Fs
+% 1000 Fel
+ic} $0.64
+é 7)
+2 800 Fa
+br 0)
+0 a
+(e) & 0.44
+£ 600 €
+
+>
+£ 400 *
+2 0.2
+” 200
+
+0.01
+128 256 512 1k 2k 4k 8k 512 1k 2k 4k 8k 16k 32k
+Maximum Response Length Maximum Response Length
+(a) Single PPO step latency (batch size = 32). (b) Average outcome reward.
+
+Figure 2: Training long trajectories with outcome rewards is highly inefficient. Both latency and memory usage
+increase rapidly with trajectory length, and outcome-based supervision requires the entire trajectory to complete
+before providing feedback. All measurements are obtained using Verl (Sheng et al.|[2024) with vLLM |
+
+fet al.}/2023) on a single A100 node.
+
+
+Preprint
+
+3. METHODOLOGY
+
+3.1 ENHANCING INFERENCE-TIME SCALING WITH MULTI-PATH PLAN AGGREGATION
+
+Reasoning hierarchy. We begin by analyzing the raw long CoTs from current LRMs. Due to
+pre-training priors and the inherent structure of reasoning tasks, reasoning steps can be naturally
+segmented by double newlines (\n\n). During training, we treat each step as the optimization
+unit rather than individual tokens, since token-level optimization is computationally expensive and
+assigning credit to each step is more interpretable. Formally, a long CoT can be expressed as
+c = cM), where c’™ denotes the m-th reasoning step separated by \n\n, and M is the total
+number of steps. We further observe that these steps can be categorized into planning and execution
+steps (see Figure[7), forming a reasoning hierarchy analogous to human cognition. In practice, we
+identify planning steps using indicative phrases, e.g., “Let me’, “Let’s’”, “Wait”, and “Alternatively”.
+
+Multi-path plan aggregation. An analysis of erroneous long CoT trajectories reveals that most
+mistakes originate from incorrect planning. This aligns with intuition that solving complex reasoning
+problems often requires finding a key insight. Current LRMs typically rely on self-correction from
+previous failed attempts to refine their approach. However, once the model follows an incorrect
+direction, it is often difficult to recover, as subsequent reasoning remains influenced by earlier errors.
+
+To address this issue, we introduce Multi-Path Plan Aggregation (MPPA) to enhance long CoTs.
+Specifically, for each planning step c’”), we prompt the model to generate multiple candidate plans
+and then aggregate them into an improved planning step (Figure 3p. This mechanism enables the
+model to explore diverse strategies before committing to a final plan, thereby improving robustness
+and accuracy. Formally, the conditional probability is defined as:
+
+poes(e™) = Py (eo | fm, mime) mm”) |) itme oF (2)
+po (c(™) | cm) ifm dé S#
+(m:m+n)
+
+where c; represents the 2-th candidate rollout covering steps m through m + n, the number
+of candidate plans is 1, and S$ C [1,M] denotes the set of indices corresponding to planning
+steps. Providing n future steps helps the model better assess the quality of each plan. In practice,
+we generate 128 future tokens for each rollout instead of fixing n as a constant, which simplifies
+implementation. We apply search only to planning steps, as they have the greatest influence on the
+reasoning process, while exploring all steps would be computationally intractable for long CoTs
+(which may contain dozens or even hundreds of steps). To further manage computational cost, we
+introduce an interval constraint, performing search only for planning steps that appear after the
+
+Exploration Aggregation
+
+| (atb+c)(ab+actbe) |
+
+Ree ARERR | =ax(abtactbe) +... | Exploration Aggregation
+number of triples “ee
+of nonnegative
+integers (a,b,c)
+satisfyinga+b+c Okay, so I have ....
+= 300 and a*2b + i
+a’2c+b*2at+b*2c} \ 6 aa neo 6244 p28 36 Bain bat bt
+a A2b = abtactba+bc
+soon 005 ab= | | tecfatc%.. eR SBE Wait, but let me ...
+
+Response:
+[>| Alright, let's go
+step-by-step...
+
+... **Final Answer**
+menesenneneeneneness: \boxed{601}
+
+ee eee
+
+| For each unordered '
+| pair (i,j), there are... |
+
+Figure 3: Illustration of multi-path plan aggregation (MPPA) in long CoTs. The green boxes represent
+planning steps, where the model generates and aggregates multiple candidate plans before selecting
+or refining the best one. The white boxes represent execution steps, which follow a fixed reasoning
+path based on the chosen plan. This hierarchical reasoning process allows the model to explore,
+revise, and aggregate diverse plans to improve final reasoning accuracy.
+
+4
+
+
+Preprint
+
+specified interval. To balance performance and efficiency, we adopt a variable interval schedule for
+planning-step search. Let ¢ denote the current token index. The interval is set to 256 tokens for
+t < 1024, 512 tokens for 1024 < t < 4096, and 1024 tokens for t > 4096.
+
+Architecture. The proposed model consists of two components: a base model and a plan aggre-
+gation module. The base model follows the standard architecture of existing LRMs, while the plan
+
+aggregation module is implemented as a LoRA adapter 2022), which offers parameter
+efficiency and has proven empirically effective.
+
+3.2 ONLINE STEP-DPO WITH PROCESS-LEVEL PREFERENCES
+
+To effectively train our model, we adopt an online Step-DPO pipeline (Rafailov et al.|[2023
+
+that integrates stepwise preference optimization with continual data refresh. In each training
+round, we first fine-tune the base model on execution steps, then freeze it and optimize the plan
+aggregation module. For the base model, we explicitly distinguish between planning and execution
+steps, as we aim to maintain high diversity in planning while ensuring accuracy in execution.
+
+Supervised fine-tuning. We collect long CoT examples from DeepSeek-R1 and construct a tailored
+dataset to train the plan aggregation module effectively. Given a correct trajectory, we first identify
+several planning steps (treated as gold references) and then generate / alternative plan options for
+each selected step using a high-temperature sampling strategy. For each option, we sample 128 future
+tokens to expose the downstream consequences of the chosen plan. We consider two training settings:
+1) Select-best: Given the gold step and its alternative options, the model learns to generate the gold
+step as the correct response. 2) Refine: Given only the alternative options, the model learns to refine
+them and generate the gold step as the improved outcome. We design a structured prompt format
+as shown in Figure[8}for this task. In practice, we set | = 3 to achieve a favorable balance between
+reasoning accuracy and computational efficiency.
+
+Process preference modeling. A key component of our online Step-DPO pipeline is the process-
+level supervision applied to each reasoning step. Since stepwise preferences must be continually
+refreshed during online training, manual annotation is infeasible due to both cost and latency. We
+generate stepwise preferences with Twisted Sequential Monte Carlo (TSMC)-based incremental
+log-survivability, which directly measures how a candidate step changes the probability of eventual
+success via fast rollouts. Compared to alternatives, e.g., LLM-as-judge labeling, this yields on-policy,
+margin-calibrated, and style-agnostic supervision without training a separate reward model.
+
+Formally, for a partial trajectory c(!), let G(-) denote the estimated survival probability, the chance
+that the partial trajectory can still lead to a correct final solution. This is estimated via Monte-Carlo
+lookahead: from the current prefix, we generate KK fast rollouts and compute the empirical success
+rate:
+
+“ lim > 1l:m
+alc! )) = 4(c(m41:M) g)~p6(-|q,c'™ ) [Heomec(a | qd, cf )) . (3)
+Monte Carlo rollout estimation accuracy on MATH500 006 Monte Carlo rollout time on MATH500
+—e Qwen-1.5B avg@1 a GH Qwen-1.5B
+> 686 —e Qwen-1.5B avg@4 3 3: Llama-8B
+o- —® Qwen-1.5B avg@8 I 800
+=
+Fs] —s— Llama-8B avg@1 &
+oO 7 n
+= 0.044 —s— Llama-8B avg@4 © 600
+> —s— Llama-8B avg@8 P=]
+> o
+G Z Be}
+a 5
+$0.92 / £ 400
+vo vo
+® =
+5 3 200
+0 0.90 3
+Ke)
+“4
+0
+) 5 10 15 20 25 30 1 5 10 15 20, 25 30
+Prefix step Prefix step
+(a) Accuracy of survival probability estimation. (b) Rollout time for batch size = 64.
+
+Figure 4: Monte Carlo rollout analysis on MATHS500. Steps are segmented by \n\n in the hidden CoTs. (a)
+Estimation accuracy is comparable between DeepSeek-R1-Distill-LLaMA-8B and DeepSeek-R1-Distill-Qwen-
+1.5B. (b) Runtime grows with model size, with DeepSeek-R1-Distill-LLaMA-8B substantially slower than
+DeepSeek-R1-Distill-Qwen-1.5B. All measurements are based on a single A100 using VLLM.
+
+
+Preprint
+
+One key challenge of this approach is its computational cost. To address this, we design a strategy
+that is both efficient and reliable. Specifically, we fine-tune a small LM on the SFT data and use it
+as the rollout policy. This choice is justified for three reasons: (i) the small model shares a similar
+distribution with the base model because it is trained on the same data; (ii) unlike a process reward
+model that must predict precise scalar values, we only need to compare two options and capture the
+correct relative tendency; and (iii) rollout with a smaller model is significantly more cost-effective.
+As shown in Figure[4] the small model achieves comparable estimation accuracy while being much
+faster, supporting this design choice.
+
+We then assign a utility to each candidate step by measuring the increment in log-survivability:
+U(c™) = log (clip (g(c"™), e, 1—«)) — log (clip (ice-oh e, 1—€)). (4)
+
+where U(c‘™)) measures how much the chosen step c‘””) improves (or harms) the chance of eventual
+success, relative to the prior prefix, and « = 10~° is a constant for numerical stability. To create
+process preferences, we compare candidate steps under the same prefix. Given multiple candidates
+with utilities, we form preference pairs (c(")+, ¢°™)—) whenever U(c™+) — U(c™-) > 6 for
+margin threshold 6 = 0.1.
+
+This formulation produces process-level preference labels that are policy-free, interpretable, and
+directly grounded in estimated solvability. By supervising the model to prefer steps that increase
+survivability, Step-DPO obtains fine-grained credit assignment at each reasoning step while avoiding
+the brittleness of handcrafted rules.
+
+Online Step-DPO with process preference. The overall training and inference procedures are
+summarized in Algorithm [I]and Algorithm] In each training round, we sequentially update two
+components: the base model is first optimized on execution steps using Step-DPO to improve accuracy
+and stability, followed by fine-tuning the plan aggregation module on aggregated planning steps to
+enhance plan quality and refinement. This iterative process allows the model to continuously refine its
+reasoning dynamics online, effectively aligning local step decisions with global success probabilities
+in an efficient and self-improving manner.
+
+Algorithm 1: Online Step-DPO for MPPA Training Algorithm 2: MPPA Inference
+1 Inputs: Base policy 74, plan aggregation policy 74", Input: Query q, base policy 79, plan
+aggregation policy 74!
+1 Hyperparams: Number of candidate plans J,
+future steps per rollout n, plan search interval
+J, maximum reasoning steps WZ
+
+reference policies Tye and ai, fast rollout policy Tron,
+training prompts D;
+
+2 Hyperparams: Number of training rounds N,., prompts
+per round Ng, rollouts per step K, training epochs for
+base and aggregation modules F and E77, number of 2m<-1;
+candidate plans /, future steps per rollout n; 3 gap + 0;
+
+3 for r = 1 to N, do 4 while m < M do
+
+4 Sample a batch of Ng prompts Q C D; aan, afi) fien-iy,
+5 Initialize preference buffers B ~ 0, Bu < 9; 5 Sample step c'"" ~ ma(c| q,€ )s
+6 foreach q € Q do 6 if” is a planning step and gap > I
+7 Generate a trajectory with 79; then
+8 Randomly select a subset of execution steps M; a gap s— 0;
+9 foreach m € M do 8 for i = 1 tol do
+10 B™ © COLLECTPAIR(1, CE"), 9 Sample rollout c°"""F”) ~
+Trot, KX); no(c| q,clm-Y),
+u Be BUB™, 10 Aggregate candidate plans using 774!
+1 fore = 1 to Edo conditioned on {c™™"*™ }4_,;
+13 STEPDPOUPDATE(‘¢, rer, B); 1 (m)).
+14 foreach q € Q do u gap < gap +len(e™);
+15 Generate trajectories with the updated 79; 12 if StopCriterion(c°”) then
+16 Randomly select a subset of planning steps M 1; tS break;
+7 foreach m € My do 14 me—m+i;
+18 Generate 1 candidate plan rollouts 1s return c(h):
+{elm with m9:
+19 B&” © CoLLEcTPAIR(nf?, ce"),
+ie a Troll Kx);
+20 By + By UB);
+21 fore = 1to Ey do
+2 STEPDPOUPDATE(1', 72, Biz);
+
+23 return 7, ma .
+
+
+Preprint
+
+Table 1: Overall performance comparison across different benchmarks. The best performance for each task
+using the same base model is in bold. Asterisks (*) denote available results obtained from the official reports.
+
+Math Science Logic
+Method MATHS00 AIME24 GPQA (Diamond) | BoardGameQA (Hard)
+Pass@1 Pass@1 Cons@32 Pass@1 Pass@1
+Qwen-2.5-1.5B
+Base 29.6 + 0.6 0.0 +00 0.0 +00 21.2411 35.0 +18
+Instruct 54.6 +04 3.3415 10.0 +03 25.2414 41.0 +10
+SimpleRL 59.0* 6.7* 4.2* - -
+DeepSeek-R1-Distill 83.9* 28.9* 43.3 404 33.8* 40.0 +22
+MPPA w/ only SFT 63.0 + 1.1 92412 13.3404 26.4 +18 47.2 £13
+MPPA 88.2409 33.0411 50.0404 39.0 + 1.4 63.2 + 1.5
+Qwen-2.5-MATH-7B
+Base 52.0 +0.5 2.0 +10 5.0 +03 20.5 +11 33.0 + 1.6
+Instruct 82.1404 16.7418 34.0+04 27.8 413 44.5 +414
+SimpleRL 80.2* 40.0* 24.0* - -
+DeepSeek-R1-Distill 92.8* 55.5* 78.0 +04 49.1* 42.4414
+MPPA w/ only SFT 87.0409 22.8414 43.3405 36.0 +14 55.2.4 14
+MPPA 94.8407 60.1414 83.3404 53.0 + 1.4 62.5 + 1.0
+Llama-3.1-8B
+Base 13.6 +04 0.0 +00 0.0 +00 1.5 +10 2.0 41.1
+Instruct 51.9 +02 6.7 +18 13.3 +02 22.7 +06 40.0 +12
+SimpleRL 23.0* 0.0* 0.2* - -
+DeepSeek-R1-Distill 89.1* 50.4* 70.0 + 0.4 49.0* 46.0 +38
+MPPA w/ only SFT 64.4412 20.8420 36.7404 38.1 +15 49.9 +16
+MPPA 92.4411 55.0416 76.7403 54.2414 69.1 +12
+
+4 EXPERIMENTS
+
+Dataset We evaluate our approach on a range of challenging reasoning benchmarks, including
+
+math (MATHS00 (Hendrycks et al.|/2021), AIME24 (MAA|/2024)), science (GPQA-diamond
+2023)), and logical reasoning (BoardGameQA-hard (Kazemi et al.|/2023)). Detailed dataset
+
+statistics are provided in Section|B] For training, we divide the datasets into two parts: SFT data
+and online preference data for Step-DPO. The SFT set contains about 80K examples as described
+in Section [3.2| In addition, we reserve 10K prompts for Step-DPO training. These prompts are
+used in the online loop to generate candidate continuations at different reasoning steps, from which
+process-level preference pairs are derived.
+
+Implementation details We fine-tune three base models, Qwen-2.5-1.5B (Yang et al.||2024a),
+Qwen-2.5-MATH-7B (Yang et al.||2024b) and LLaMA-3.1-8B (Grattafiori et al.||2024), on long CoT
+trajectories with full-parameter fine-tuning. The resulting base models are then frozen, and we train
+
+the plan aggregation policy via LoRA fine-tuning 2022) for parameter efficiency. We set
+the number of candidate plans to / = 3 and the number of future tokens per rollout to 128. Our online
+
+Step-DPO pipeline is implemented using the TRL framework and executed
+over four training rounds. In each round, we sample approximately 3K prompts, randomly select four
+planning/execution steps per prompt, and generate two candidate continuations for each selected step.
+These candidates are scored using the utility (Equation (4)). In experiments, we use Qwen-2.5-1.5B
+SFT base model as the rollout policy, with kK = 4 sampled rollouts per prefix. From each prefix,
+we form one preference pair (m+, Eom ), weighted by the utility margin. Pairs are accumulated
+into a replay buffer that mixes 70% fresh and 30% replayed data. Policy updates sequentially within
+each round: we first update the base policy with the collected execution step pairs, followed by
+the plan aggregation policy update. Each update uses mini-batches of size 32 for £ = 4 epochs,
+and applies the standard Step-DPO objective with 6 = 0.1. Generated continuations are capped at
+a maximum length of 8,192 tokens. More implementation details, including ablation settings and
+hyperparameters, are provided in Section|C]
+
+Baselines We compare our method with the following baselines: the base model, the instruction fine-
+
+tuned model, RL applied directly to the base model (SimpleRL (Zeng et al.||2025)), and distillation
+
+using vanilla long CoTs (DeepSeek-R1-Distill 2025)). During evaluation, we use greedy
+decoding for both the base model and the instruction fine-tuned model to produce more coherent and
+
+consistent CoTs. For our method, the base model adopts sampling-based decoding with a temperature
+of 0.6 and top-p of 0.95, while the plan aggregation module uses a lower temperature of 0.2 and the
+
+
+Preprint
+
+Accuracy of judging preferred and undesirable outputs Average length per response
+Base-StepDPO l@l™ Search steps
+8 @mm Final trajectory
+85] = Base-DPO
+ee 7
+80 MPPA _
+an E
+875 a
+> gs
+g 70 ©
+3 34
+g 65 g
+€ 3
+60 2 22 23
+2
+55
+1
+50 100 150 200 250 300 0
+Training steps MATH500 AIME24 GPQA BoardGameQA
+
+Figure 5: Accuracy of preference judgment on Figure 6: Average response length per bench-
+LLaMA-3.1-8B with MPPA and baselines. mark on LLaMA-3.1-8B with MPPA.
+
+same top-p value of 0.95 to ensure stability during refinement. For all other baselines, we follow
+the setup in |Guo et al.| (2025), using sampling-based decoding with a temperature of 0.6 and a
+top-p value of 0.95. For our method and all other baselines, we generate 8 responses per prompt to
+reduce variance. Performance is measured using pass @ 1, corresponding to the average accuracy. For
+AIME24, we also report consensus accuracy over 32 samples, denoted as cons@32.
+
+Empirical results We first present representative model outputs in Section|D] Table [I]reports the
+overall performance across benchmarks. We compare MPPA with instruction fine-tuning, outcome-
+reward RL, and distillation with vanilla long CoTs. MPPA consistently outperforms all baselines,
+with its improved planning leading to more effective reasoning on complex, long-horizon tasks.
+Furthermore, our Online Step-DPO method substantially enhances the SFT model across all bench-
+marks. By supplying fine-grained step-level preference signals and refreshing training data online,
+Online Step-DPO provides denser supervision, accelerates learning, and achieves stronger overall
+reasoning quality. We also report the average response length and the number of search-step tokens
+across benchmarks (Figure [6). The search-step tokens remain shorter than the final trajectory length
+and grow more slowly as trajectory length increases. By exploring multiple candidate plans and
+aggregating them into a refined one, our system effectively reduces CoT derailment and achieves
+superior performance compared to conventional single-pass reasoning.
+
+Ablation study We perform an ablation study to assess the contribution of each component in our
+framework. Specifically, we compare four configurations: (i) the full method, (ii) using only the
+base policy with Step-DPO, (iii) using only the base policy with standard DPO, and (iv) SFT-only
+training. All other settings are kept fixed for a fair comparison. Table [2] summarizes the results.
+The findings show that both multi-path plan aggregation and step-level preferences are essential.
+Removing Step-DPO leads to a clear drop in accuracy, confirming that fine-grained supervision
+provides denser learning signals and more reliable credit assignment along the reasoning trajectory.
+Training only the base policy further reduces performance, highlighting the importance of improving
+the model’s planning capability through plan aggregation. Finally, the SFT-only baseline performs
+worst, demonstrating that online preference optimization is critical for achieving robust reasoning
+ability. Figure[5]further illustrates this trend: our method achieves the highest validation preference
+accuracy throughout training, while removing step-level supervision or limiting optimization to the
+base policy leads to lower curves. Overall, these ablations confirm that each component contributes
+meaningfully, with step-level supervision providing the greatest overall impact.
+
+Table 2: Ablation study results on LLaMA-3.1-8B across different reasoning benchmarks.
+
+Math Science Logic
+Method MATHS500 AIME24 GPQA (Diamond) | BoardGameQA (Hard)
+Pass@ 1 Pass@1 Cons@32 Pass@1 Pass@ 1
+Ours 92.4411 55.0416 76.7403 54.2 41.4 69.1 + 1.2
+Only base policy + Step-DPO 82.4413 42.6420 61.2+405 49.2 +15 62.1 +14
+Only base policy + DPO 74.1415 324418 52.0+06 44.0 41.7 56.0 + 1.7
+Only SFT (no preference optimization) | 64.4412 20.8420 36.7404 38.1 415 49.9 +16
+
+
+
+Preprint
+
+5 RELATED WORK
+
+Reasoning models represent a transforma-
+tive advancement in the evolution of LMs, sparking substantial interest in replicating their strong
+performance. Several subsequent works
+have primarily relied on supervised fine-tuning (SFT), 1.e.,
+
+distillation, using curated datasets composed of long CoTs generated by DeepSeek-R1 on math or
+coding problems. These efforts focus on developing effective data collection and curation strategies
+to obtain high-quality reasoning traces. While this approach has shown promising results, pure SFT
+is generally less efficient in utilizing training signals compared to RL, as it passively imitates given
+demonstrations, lacking both exploration and fine-grained credit assignment.
+
+Follow-up works exploring RL have introduced enhancements along three main dimensions.
+
+1) RL Algorithms. Existing methods can be categorized by the underlying RL algorithm they employ:
+¢ PPO-based: Proximal Policy Optimization (PPO) (Schulman et al.||2017) is an actor-critic
+
+method that utilizes a value network to estimate the expected return of generated responses.
+
+VC-PPO 2025) introduces value pretraining and decoupled Generalized Advan-
+tage Estimation (GAE) to mitigate value initialization bias and reward signal decay. VAPO
+
+2025) further proposes length-adaptive GAE to handle variable-length sequences
+and incorporates additional techniques such as negative log-likelihood (NLL) penalty to
+
+improve training stability and performance.
+
+GRPO-based: Group Relative Policy Optimization (GRPO) (Shao et al.|/2024) removes the
+critic and GAE components from PPO, instead applying reward normalization within groups
+
+of sampled responses. DAPO 2025b) enhances GRPO with four techniques—Clip-
+Higher, Dynamic Sampling, Token-Level Policy Gradient Loss, and Overlong Reward
+
+Shaping. Dr. GRPO 2025) eliminates the normalization term entirely to reduce
+biases related to response length and question difficulty.
+
+REINFORCE-based: REINFORCE (Williams||1992) performs policy updates by directly
+maximizing expected rewards via gradient ascent on sampled trajectories. REINFORCE++
+2025) improves stability by introducing a token-level KL divergence penalty in the
+
+reward function. (2025) further refine this direction by using centralized
+
+rewards and K2-style KL penalties to reduce variance and accelerate convergence.
+
+Despite their effectiveness, these approaches rely primarily on sparse outcome rewards, which are
+inefficient for training on long trajectories.
+
+2) Reward Design. Most existing approaches define rewards based on outcome accuracy, format
+
+compliance, and length constraints (Zhang et al.||2025a). Process rewards remain largely unexplored
+
+in current pipelines.
+
+3) Data Sampling Strategies. Several works 2025} {Zhang et al.|/2025b) adopt curriculum
+
+learning techniques that gradually increase task difficulty over the course of training. Rejection
+sampling has also been employed to improve sample quality and
+stabilize training dynamics. In addition, epoch-level history resampling has been proposed
+[2025}, wherein easy examples are dropped from future epochs, allowing the model to focus on harder
+cases and improve learning efficiency.
+
+To overcome sparse outcome rewards, recent work (Lightman et al.| 2023 2023)
+has explored Process Reward Models (PRM), but they struggle in practice (Guo et al.||2025): 1)
+
+explicitly defining fine-grained reasoning steps is difficult; 2) reliably verifying the correctness of
+each intermediate step is non-trivial; 3) training a separate reward model introduces the risk of reward
+hacking and requires additional training. MPPA alleviates these issues by providing process-level
+supervision through stepwise preferences derived via TSMC, eliminating the need for an explicit
+reward model.
+
+A parallel line of research explores the integration of structured reasoning representations, such as
+graphs, programs, or symbolic traces, to enhance interpretability and compositional generalization.
+
+Graph-based reasoning models (Xiong et al.| /2024alb} 2025a) represent intermediate
+
+reasoning states and dependencies as nodes and edges, enabling explicit tracking of logical relations
+
+
+Preprint
+
+or causal chains throughout multi-step reasoning. Similarly, symbolic or program-guided approaches
+use formal structures (e.g., equations,
+function calls, tables, or logic programs) as intermediate supervision, promoting consistency and error
+recovery during long-chain reasoning. These approaches provide stronger inductive biases than purely
+text-based reasoning and can be naturally combined with RL or process-level supervision. On the other
+hand, agentic reasoning methods extend this direction by treating
+the model as an active problem-solving agent. Such methods emphasize tool use and environment
+interaction, enabling more adaptive and self-corrective reasoning behaviors. In our context, MPPA
+can be viewed as complementary to such paradigms, as it captures planning dependencies in a latent,
+text-based form.
+
+6 CONCLUSION
+
+We introduced Multi-Path Plan Aggregation (MPPA), a novel framework that enhances inference-time
+scaling by strengthening the planning capabilities of large reasoning models (LRMs). MPPA enables
+the model to explore multiple candidate plans and aggregate them into a refined, higher-quality plan
+before execution. By sidestepping the limitations of prior outcome supervision methods, MPPA
+provides a scalable and robust pathway for training LRMs. Extensive experiments demonstrate
+consistent performance gains across math, science, and logical reasoning tasks, highlighting the
+potential of MPPA as a general-purpose framework for advanced reasoning. Future directions include
+enabling adaptive allocation of reasoning steps to problem complexity, and developing self-improving
+fast rollout policies that enhance survival probability estimation through iterative distillation.
+
+LIMITATIONS
+
+Our method requires maintaining two separate policies and performing additional steps for process-
+level supervision, which increases overall training complexity. To keep computation practical, we
+freeze the base model when training the plan aggregation policy, decouple supervision estimation from
+trajectory generation, and sequentially update the two policies. These strategies help control training
+overhead; however, on resource-constrained hardware, further optimizations, such as quantization,
+activation checkpointing, or memory-efficient attention, may still be required. The framework also
+introduces several additional hyperparameters, though most can be assigned reasonable default values
+that transfer well across tasks. Empirically, we find that performance is robust to moderate variations
+in these settings, reducing the need for extensive hyperparameter tuning.
+
+ACKNOWLEDGMENTS
+
+This work is supported in part by DARPA SciFy program, Award No.HR001125C0302, and CISCO
+Systems, Inc.
+
+REFERENCES
+Bespoke-Labs. Bespoke-stratos: The unreasonable effectiveness of reasoning distil-
+lation. https://www.bespokelabs.ai/blog/bespoke-stratos-the-unreasonable-effectiveness-of-
+
+reasoning-distillation, 2025. Accessed: 2025-01-22.
+
+Mark Briers, Arnaud Doucet, and Simon Maskell. Smoothing algorithms for state-space models.
+Annals of the Institute of Statistical Mathematics, 62:61-89, 2010.
+
+Pierre Del Moral, Arnaud Doucet, and Ajay Jasra. Sequential monte carlo samplers. Journal of the
+Royal Statistical Society Series B: Statistical Methodology, 68(3):411-436, 2006.
+
+Arnaud Doucet, Nando De Freitas, Neil James Gordon, et al. Sequential Monte Carlo methods in
+practice, volume 1. Springer, 2001.
+
+Leo Gao, John Schulman, and Jacob Hilton. Scaling laws for reward model overoptimization. In
+International Conference on Machine Learning, pp. 10835-10866. PMLR, 2023.
+
+10
+
+
+Preprint
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad
+Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al. The llama 3 herd of
+models. arXiv preprint arXiv:2407.21783, 2024.
+
+Jiawei Gu, Xuhui Jiang, Zhichao Shi, Hexiang Tan, Xuehao Zhai, Chengjin Xu, Wei Li, Yinghan Shen,
+Shengjie Ma, Honghao Liu, et al. A survey on Ilm-as-a-judge. arXiv preprint arXiv:2411.15594,
+2024.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in Ilms
+via reinforcement learning. arXiv preprint arXiv:2501.12948, 2025.
+
+Chengbo He, Bochao Zou, Xin Li, Jiansheng Chen, Junliang Xing, and Huimin Ma. Enhanc-
+ing Ilm reasoning with multi-path collaborative reactive and reflection agents. arXiv preprint
+arXiv:2501.00430, 2024.
+
+Jujie He, Jiacai Liu, Chris Yuhao Liu, Rui Yan, Chaojie Wang, Peng Cheng, Xi-
+aoyu Zhang, Fuxiang Zhang, Jiacheng Xu, Wei Shen, Siyuan Li, Liang Zeng,
+Tianwen Wei, Cheng Cheng, Bo An, Yang Liu, and Yahui Zhou. Skywork open
+reaonser _ series.
+
+Skywork-Open-—Reaonser-Series-—1d0bc9ae823a80459b46c149e4£51680
+
+2025. Notion Blog.
+
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song,
+and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. arXiv
+preprint arXiv:2103.03874, 2021.
+
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang,
+Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. JCLR, 1(2):3, 2022.
+
+Jian Hu. Reinforce++: A simple and efficient approach for aligning large language models. arXiv
+preprint arXiv:2501.03262, 2025.
+
+Jingcheng Hu, Yinmin Zhang, Qi Han, Daxin Jiang, and Heung- Yeung Shum Xiangyu Zhang. Open-
+reasoner-zero: An open source approach to scaling reinforcement learning on the base model.
+
+https://github.com/Open-Reasoner-Zero/Open-Reasoner- Zero, 2025.
+
+HuggingFace. Open rl: A fully open reproduction of deepseek-r1, January 2025. URL/https?
+//github.com/huggingface/open-rl
+
+Leslie Pack Kaelbling, Michael L Littman, and Andrew W Moore. Reinforcement learning: A survey.
+Journal of artificial intelligence research, 4:237—285, 1996.
+
+Mehran Kazemi, Quan Yuan, Deepti Bhatia, Najoung Kim, Xin Xu, Vaiva Imbrasaite, and Deepak
+Ramachandran. Boardgameqa: A dataset for natural language reasoning with contradictory
+information. Advances in Neural Information Processing Systems, 36:39052-39074, 2023.
+
+Kimi-Team, Angang Du, Bofei Gao, Bowei Xing, Changjiu Jiang, Cheng Chen, Cheng Li, Chenjun
+Xiao, Chenzhuang Du, Chonghua Liao, Chuning Tang, Congcong Wang, Dehao Zhang, Enming
+Yuan, Enzhe Lu, Fengxiang Tang, Flood Sung, Guangda Wei, Guokun Lai, Haiqing Guo, Han
+Zhu, Hao Ding, Hao Hu, Hao Yang, Hao Zhang, Haotian Yao, Haotian Zhao, Haoyu Lu, Haoze Li,
+Haozhen Yu, Hongcheng Gao, Huabin Zheng, Huan Yuan, Jia Chen, Jianhang Guo, Jianlin Su,
+Jianzhou Wang, Jie Zhao, Jin Zhang, Jingyuan Liu, Junjie Yan, Junyan Wu, Lidong Shi, Ling Ye,
+Longhui Yu, Mengnan Dong, Neo Zhang, Ningchen Ma, Qiwei Pan, Qucheng Gong, Shaowei Liu,
+Shengling Ma, Shupeng Wei, Sihan Cao, Siying Huang, Tao Jiang, Weihao Gao, Weimin Xiong,
+Weiran He, Weixiao Huang, Wenhao Wu, Wenyang He, Xianghui Wei, Xianqing Jia, Xingzhe Wu,
+Xinran Xu, Xinxing Zu, Xinyu Zhou, Xuehai Pan, Y. Charles, Yang Li, Yangyang Hu, Yangyang
+Liu, Yanru Chen, Yejie Wang, Yibo Liu, Yidao Qin, Yifeng Liu, Ying Yang, Yiping Bao, Yulun Du,
+Yuxin Wu, Yuzhi Wang, Zaida Zhou, Zhaoji Wang, Zhaowei Li, Zhen Zhu, Zheng Zhang, Zhexu
+Wang, Zhilin Yang, Zhiqi Huang, Zihao Huang, Ziyao Xu, and Zonghan Yang. Kimi k1.5: Scaling
+
+reinforcement learning with Ilms, 2025. URL https: //arxiv.org/abs/2501.12599
+
+11
+
+
+Preprint
+
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E.
+Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model
+serving with pagedattention. In Proceedings of the ACM SIGOPS 29th Symposium on Operating
+Systems Principles, 2023.
+
+Xin Lai, Zhuotao Tian, Yukang Chen, Senqiao Yang, Xiangru Peng, and Jiaya Jia. Step-dpo: Step-
+wise preference optimization for long-chain reasoning of Ilms. arXiv preprint arXiv:2406.18629,
+2024.
+
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan
+Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In The Twelfth
+International Conference on Learning Representations, 2023.
+
+Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, and Min
+Lin. Understanding rl-zero-like training: A critical perspective. arXiv preprint arXiv:2503.20783,
+2025.
+
+Yichen Luo, Yebo Feng, Jiahua Xu, Paolo Tasca, and Yang Liu. Llm-powered multi-agent system for
+automated crypto portfolio management. arXiv preprint arXiv:2501.00826, 2025.
+
+MAA. American invitational mathematics examination - aime. In
+American Invitational | Mathematics Examination - AIME ~ 2024, Febru-
+
+ary 2024. URL https://maa.org/math-competitions/
+
+american-invitational-mathematics-—examination-aime
+
+Niklas Muennighoff, Zitong Yang, Weijia Shi, Xiang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi, Luke
+Zettlemoyer, Percy Liang, Emmanuel Candés, and Tatsunori Hashimoto. s1: Simple test-time
+
+scaling, 2025. URL https://arxiv.org/abs/2501.19393
+
+OpenAI. Learning to reason with language models, 2024. URL, https: //openai.com/index/
+Accessed: 2025-05-15
+
+OpenThoughts-Team. Open Thoughts. January 2025.
+
+Qwen-Team. Qwq: Reflect deeply on the boundaries of the unknown, November 2024. URL
+https://qwenlm.github.io/blog/qwq- 32b-preview/
+
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea
+Finn. Direct preference optimization: Your language model is secretly a reward model. Advances
+in neural information processing systems, 36:53728-53741, 2023.
+
+David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani,
+Julian Michael, and Samuel R Bowman. GPQA: A graduate-level google-proof q&a benchmark.
+arXiv preprint arXiv:2311.12022, 2023.
+
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv: 1707.06347, 2017.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, YK Li, Y Wu, et al. Deepseekmath: Pushing the limits of mathematical
+reasoning in open language models. arXiv preprint arXiv:2402.03300, 2024.
+
+Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng,
+Haibin Lin, and Chuan Wu. Hybridflow: A flexible and efficient rlhf framework. arXiv preprint
+arXiv: 2409.19256, 2024.
+
+Zhenjie Sun, Naihao Deng, Haofei Yu, and Jiaxuan You. Table as thought: Exploring structured
+thoughts in llm reasoning. arXiv preprint arXiv:2501.02152, 2025.
+
+Peiyi Wang, Lei Li, Zhihong Shao, RX Xu, Damai Dai, Yifei Li, Deli Chen, Yu Wu, and Zhifang Sui.
+Math-shepherd: Verify and reinforce Ilms step-by-step without human annotations. arXiv preprint
+arXiv:2312.08935, 2023.
+
+12
+
+
+Preprint
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny
+Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models. Advances in
+neural information processing systems, 35:24824—24837, 2022.
+
+Liang Wen, Yunke Cai, Fenrui Xiao, Xin He, Qi An, Zhenyu Duan, Yimin Du, Junchen Liu, Lifu
+Tang, Xiaowei Ly, et al. Light-r1: Curriculum sft, dpo and rl for long cot from scratch and beyond.
+arXiv preprint arXiv:2503.10460, 2025.
+
+Ronald J. Williams. Simple statistical gradient-following algorithms for connectionist reinforcement
+learning. Mach. Learn., 8(3—4):229-256, May 1992. ISSN 0885-6125. doi: 10.1007/BF00992696.
+
+URL|https://doi.org/10.1007/BF00992696
+
+Siheng Xiong, Ali Payani, Ramana Kompella, and Faramarz Fekri. Large language models can
+learn temporal reasoning. In Proceedings of the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pp. 10452—10470, 2024a.
+
+Siheng Xiong, Ali Payani, Yuan Yang, and Faramarz Fekri. Deliberate reasoning in language models
+as structure-aware planning with an accurate world model. arXiv preprint arXiv:2410.03136,
+2024b.
+
+Siheng Xiong, Jieyu Zhou, Zhangding Liu, and Yusen Su. Symplanner: Deliberate planning in
+language models with symbolic representation. arXiv preprint arXiv:2505.01479, 2025.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li,
+Dayiheng Liu, Fei Huang, Haoran Wei, et al. Quwen2. 5 technical report. arXiv preprint
+arXiv:2412.15115, 2024a.
+
+An Yang, Beichen Zhang, Binyuan Hui, Bofei Gao, Bowen Yu, Chengpeng Li, Dayiheng Liu,
+Jianhong Tu, Jingren Zhou, Junyang Lin, Keming Lu, Mingfeng Xue, Runji Lin, Tianyu Liu,
+Xingzhang Ren, and Zhenru Zhang. Qwen2.5-math technical report: Toward mathematical expert
+
+model via self-improvement, 2024b. URL https://arxiv.org/abs/2409.12122
+
+Wenkai Yang, Shuming Ma, Yankai Lin, and Furu Wei. Towards thinking-optimal scaling of test-time
+compute for Ilm reasoning. arXiv preprint arXiv:2502. 18080, 2025.
+
+Yuan Yang, Siheng Xiong, Ali Payani, Ehsan Shareghi, and Faramarz Fekri. Can Ilms reason in the
+wild with programs? In Findings of the Association for Computational Linguistics: EMNLP 2024,
+pp. 9806-9829, 2024c.
+
+Yuan Yang, Siheng Xiong, Ali Payani, Ehsan Shareghi, and Faramarz Fekri. Harnessing the power of
+large language models for natural language to first-order logic translation. In Annual Meeting of the
+Association for Computational Linguistics 2024, pp. 6942-6959. Association for Computational
+Linguistics (ACL), 2024d.
+
+Longxuan Yu, Delin Chen, Siheng Xiong, Qingyang Wu, Dawei Li, Zhikai Chen, Xiaoze Liu, and
+Liangming Pan. Causaleval: Towards better causal reasoning in language models. In Proceedings of
+the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational
+Linguistics: Human Language Technologies (Volume 1: Long Papers), pp. 12512—12540, 2025a.
+
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Tiantian Fan, Gaohong
+Liu, Lingjun Liu, Xin Liu, et al. Dapo: An open-source Ilm reinforcement learning system at scale.
+arXiv preprint arXiv:2503.14476, 2025b.
+
+Yufeng Yuan, Yu Yue, Ruofei Zhu, Tiantian Fan, and Lin Yan. What’s behind ppo’s collapse in
+long-cot? value optimization holds the secret. arXiv preprint arXiv:2503.01491, 2025.
+
+Yu Yue, Yufeng Yuan, Qiying Yu, Xiaochen Zuo, Ruofei Zhu, Wenyuan Xu, Jiaze Chen, Chengyi
+Wang, TianTian Fan, Zhengyin Du, Xiangpeng Wei, Gaohong Liu, Juncai Liu, Lingjun Liu, Haibin
+Lin, Zhigi Lin, Bole Ma, Chi Zhang, Mofan Zhang, Wang Zhang, Hang Zhu, Ru Zhang, Xin Liu,
+Mingxuan Wang, Yonghui Wu, and Lin Yan. Vapo: Efficient and reliable reinforcement learning
+
+for advanced reasoning tasks, 2025. URL https: //arxiv.org/abs/2504.05118
+
+13
+
+
+Preprint
+
+Weihao Zeng, Yuzhen Huang, Qian Liu, Wei Liu, Keqing He, Zejun Ma, and Junxian He. Simplerl-
+zoo: Investigating and taming zero reinforcement learning for open base models in the wild. arXiv
+preprint arXiv:2503.18892, 2025.
+
+Chong Zhang, Yue Deng, Xiang Lin, Bin Wang, Dianwen Ng, Hai Ye, Xingxuan Li, Yao Xiao,
+Zhanfeng Mo, Qi Zhang, et al. 100 days after deepseek-r1: A survey on replication studies and
+more directions for reasoning language models. arXiv preprint arXiv:2505.00551, 2025a.
+
+Xiaojiang Zhang, Jinghui Wang, Zifei Cheng, Wenhao Zhuang, Zheng Lin, Minglei Zhang, Shaojie
+Wang, Yinghan Cui, Chao Wang, Junyi Peng, Shimiao Jiang, Shiqi Kuang, Shouyu Yin, Chaohang
+Wen, Haotian Zhang, Bin Chen, and Bing Yu. Srpo: A cross-domain implementation of large-scale
+
+reinforcement learning on Ilm, 2025b. URL https: //arxiv.org/abs/2504.14286
+
+14
+
+
+Preprint
+
+A IMPLEMENTATION DETAILS
+
+We analyze long CoTs to understand how reasoning unfolds within LRMs. As shown in Figure[7|
+reasoning trajectories can be naturally segmented into discrete steps, typically separated by double
+newlines (\n\n), due to pre-training priors and the inherent structure of reasoning tasks. Further
+examination reveals that these steps can be categorized into planning and execution phases, forming
+a hierarchical reasoning structure analogous to human cognition. In practice, planning steps are often
+identifiable by indicative phrases such as “Let me”, “Let’s”, “Wait”, or “Alternatively”’.
+
+Building on this hierarchical observation, we design a structured prompt format for plan aggregation,
+as shown in Figure[8] Each candidate plan is enclosed within special tokens, for example: <plan
+1> ... </plan 1><plan 2> ... </plan 2>.... This formatting clearly delineates
+multiple candidate plans, enabling the model to interpret, compare, and aggregate them effectively
+during reasoning.
+
+Prompt: The set of points $(x,y,z)$ that satisfy $2x = 3y = -z$ is a line. The
+
+set of points $(x,y,z)$ that satisfy $6x = -y = -4z$ is another line. Find the
+
+angle between these lines, in degrees.
+
+Response:
+
+<think>
+
+Okay, so | have this problem ... Let me try to recall how to approach this. cO Planning
+First, the problem states that ... c@) Execution
+Starting with the first line: ... c®) Execution
+Let me set 2x = 3y=-z=t. cH Planning
+Alternatively, to make it simpler, ... c 2) Planning
+Wait, let me check that. ... c 3) Planning
+</think>
+
+To find the angle between the two lines ....
+
+Figure 7: Step segmentation and reasoning hierarchy. A long CoT from current LRMs naturally splits
+into steps (by double newlines \n\n), which can be classified as planning or execution based on
+indicative phrases (e.g., “Let me’, “Let’s”, “Wait”, or “Alternatively’”).
+
+B- DATASET STATISTICS
+
+In this section, we provide statistics for all benchmark datasets used in our study. We consider
+
+MATHS00 (Hendrycks et al.||2021), AIME24 (MAA}/|2024) for math reasoning, GPQA-diamond
+2023) for science reasoning, and BoardGameQA-hard 2023) for logical
+
+reasoning. For MATH, there are 7,500 training samples and 5,000 test samples. MATHS500 is a
+subset of 500 representative test samples extracted by|Lightman et al.}(2023), with the remaining test
+
+samples added to the training set.
+
+The AIME dataset is based on the American Invitational Mathematics Examination, a high-level
+math contest administered by the Mathematical Association of America (MAA) for high-achieving
+middle and high school students. We use the datd?|collected from 1983 to 2024, where each year
+contains 15 questions prior to 2000 and 30 questions thereafter. The 2024 dataset is used as the test
+set, while data from all previous years serve as the training set.
+
+GPQA is a multiple-choice, Q&A dataset of very hard questions written and validated by experts
+in biology, physics, and chemistry. It includes three subsets: main (448 questions), diamond (198
+questions), and extended (546 questions). We use the diamond subset as the test set and combine the
+
+‘https://www.kaggle.com/datasets/hemishveeraboina/aime-problem-set—1983-2024
+
+15
+
+
+
+Preprint
+
+Prompt:
+
+The set of points $(x,y,z)$ that satisfy $2x = 3y = -z$ is a line. The set of points
+$(x,y,z)$ that satisfy $6x = -y = -4z$ is another line. Find the angle between these
+lines, in degrees.
+
+Instruction:
+
+You are given multiple alternative plans for the next reasoning step.
+
+Each plan represents a possible strategy to proceed with the reasoning.
+
+Read all candidate plans carefully and synthesize a single improved plan that
+combines their best ideas while removing redundancy or errors.
+
+Output only the final aggregated plan, without repeating the candidate tags.
+
+<plan 1>
+| can represent each line ...
+Then, find the cosine ...
+
+</plan 1>
+
+<plan 2>
+To find the angle, let’s ...
+
+</plan 2>
+
+<plan 3>
+First, convert each equation into ...
+
+</plan 3>
+
+Response:
+Okay, so | have this problem ... Let me try to recall how to approach this.
+
+Figure 8: Structured prompt for the plan aggregation task. The module receives multiple alternative
+plans, each enclosed within special tokens (<plan 1>...</plan 1>,<plan 2>...</plan
+2>, etc.). It is instructed to synthesize a single refined plan that integrates the best ideas from the
+candidates.
+
+remaining subsets for training. To prevent data leakage, any questions overlapping with the test set
+are removed from the training set.
+
+BoardGameQA is a claim verification problem with three types of labels (proved, disproved, un-
+known), which involves reasoning with contradictory information guided by preferences over rules as
+board games. The dataset is divided into 15 subsets based on reasoning depth and levels of conflict
+or distractors, each with separate train, validation, and test splits. We define BoardGameQA-hard
+as the union of all test sets from five challenging subsets: Main-depth3, DifficultConflict-depth2,
+HighConflict-depth2, KnowledgeHeavy-depth2, and ManyDistractors-depth?2, resulting in a total test
+set of 500 examples. The remaining data from all subsets are used for training.
+
+C EXPERIMENT DETAILS
+
+Base model. We construct training data for both the SFT and Step-DPO stages using all available
+training splits from the aforementioned datasets, following a 6:4 train—validation ratio. During SFT,
+we employ the DeepSeek-R1 API to generate multiple reasoning trajectories per prompt via rejection
+sampling, retaining only those that yield correct final answers. Each base model is trained on 80K
+examples with a batch size of 256, a peak learning rate of 2 x 10~°, and a maximum sequence length
+of 8,192 tokens for 3 epochs. Unless otherwise stated, all models are optimized using AdamW with a
+cosine learning-rate schedule and a linear warmup for 5% of total steps. After SFT, the base model is
+frozen.
+
+Plan aggregation module. Given a verified reasoning trajectory, we identify several planning steps
+(treated as gold references) and generate / alternative plan candidates for each selected step m using
+high-temperature (J’ = 0.9) sampling. For each candidate, we sample 128 future tokens to expose the
+downstream consequences of the plan. We consider two training modes: (1) Select-best: given the
+gold step and its alternative candidates, the model learns to reproduce the gold step as the preferred
+
+16
+
+
+Preprint
+
+response; and (2) Refine: given only alternative candidates, the model learns to synthesize and refine
+them into the gold step. The structured prompt format is illustrated in Figure[8} In practice, we set
+| = 3 to balance reasoning accuracy and computational efficiency. The plan aggregation module is
+trained with a higher peak learning rate of 1 x 10~* to encourage faster adaptation.
+
+Step-DPO pipeline. Our online Step-DPO training follows the TRL framework and runs for four
+rounds. In each round, we sample approximately 3K prompts, randomly select four planning/execu-
+tion steps per prompt, and generate two candidate continuations for each step using temperature 0.7
+and top-p = 0.9 sampling. Each continuation is truncated at 8,192 tokens and scored using the utility
+function (Equation (4). We employ the Qwen-2.5-1.5B SFT model as the rollout policy, sampling
+i = 4rollouts per prefix. From each prefix, we form one preference pair (m+, ch), weighted
+by the corresponding utility margin. All pairs are stored in a replay buffer that mixes 70% newly
+generated and 30% replayed data, with a maximum capacity of 50K pairs (oldest entries discarded
+when full). To improve sample efficiency, we apply a dynamic dropout strategy that removes “easy”
+prefixes whose candidates yield identical utilities; the dropout rate increases linearly from 0.1 to
+0.9 during training. Within each round, policy updates proceed sequentially: the base policy is first
+updated using execution-step pairs, followed by plan aggregation policy updates. Each update uses a
+mini-batch size of 32 for E = 4 epochs under the standard Step-DPO objective with 3 = 0.1. The
+SFT checkpoint serves as the reference model for KL regularization. All experiments are conducted
+on 4xA800 GPUs with bf16 precision.
+
+Evaluation. During evaluation, we employ greedy decoding for both the base and instruction-tuned
+models to obtain coherent and consistent CoTs. For our method, the base model adopts sampling-
+based decoding with temperature 0.6 and top-p 0.95, while the plan aggregation module uses a lower
+temperature 0.2 with the same top-p to ensure stability during refinement. For all other baselines,
+we follow the setup in [Guo et al.] (2025), using temperature 0.6 and top-p 0.95. For our method
+and all other baselines, we generate eight responses per prompt to reduce variance. The maximum
+generation length is set to 16,384 tokens for all models. Performance is reported using pass @ 1
+(average accuracy). For AIME24, we additionally report consensus accuracy over 32 samples,
+denoted as cons@32.
+
+D ADDITIONAL RESULTS
+
+In this section, we present additional results to further illustrate and analyze the effectiveness of our
+approach. We provide representative output examples generated by MPPA (Section[D). As shown,
+MPPA follows a variable-interval schedule based on token positions, generating multiple candidate
+plans and aggregating them into a single refined planning step, which leads to better robustness and
+accuracy in reasoning.
+
+17
+
+
+Preprint
+
+Example of CoT derailment (DeepSeek-R1-Distill-Llama-8B on MATHS00)
+
+Prompt:
+What is the least positive integer multiple of 30 that can be written with only the digits 0 and 2?
+
+Response:
+
+<think>
+
+Okay, so I need to find the smallest positive integer multiple of 30 that can be written using only the digits 0
+and 2. Hmm, let me think about how to approach this.
+
+First, I remember that a multiple of 30 must be divisible by both 3 and 10. So, let's break down what that
+means.
+
+Divisibility by 10: For a number to be divisible by 10, it must end with a 0. That makes sense because any
+number ending in 0 is a multiple of 10. So, whatever number I come up with must end with a 0. That means
+the last digit is fixed as 0.
+
+Divisibility by 3: For a number to be divisible by 3, the sum of its digits must be a multiple of 3. Since the
+number can only have digits 0 and 2, the sum of the digits will just be the number of 2s multiplied by 2. So,
+
+the total sum is 2 times the number of 2s. This sum needs to be divisible by 3.
+
+So, putting that together, I need a number that consists of one or more 2s followed by a 0. The number of 2s
+should be such that the total sum (which is 2 times the number of 2s) is divisible by 3.
+
+Let me formalize that. Let's say the number has 'n' number of 2s followed by a 0. So, the number would be
+222...20, with 'n' 2s and ending with a 0.
+
+The sum of the digits is 2n, and we need 2n to be a multiple of 3. So, 2n = 0 mod 3. Which means n must be a
+multiple of 3 because 2 and 3 are coprime (they have no common divisors other than 1). So, n needs to be
+
+divisible by 3.
+
+Therefore, the smallest number of 2s needed is 3, right? Because 3 is the smallest positive integer divisible by
+3.
+
+So, if n = 3, the number would be 2220. Let me check that.
+
+2220 is a multiple of 30? Let's see. 2220 divided by 30 is 74, which is an integer. So, yes, 2220 is a multiple
+of 30.
+
+But is it the smallest?
+
+Wait, maybe I can find a smaller number with fewer digits? Let me think. The number must end with a 0, so
+the last digit is fixed. The other digits can be 0 or 2. But if I try to make a smaller number, maybe with fewer
+digits, but still only Os and 2s.
+
+Let me consider numbers of different lengths and see if they can satisfy the conditions.
+
+Starting with the smallest possible number: 1 digit. It would have to be 0, but 0 is not positive. So, no good.
+
+2 digits: The number would be 20. Is 20 a multiple of 30? 20 divided by 30 is less than 1, so no. Also, 20 is
+not a multiple of 30.
+
+3 digits: Let's see. The possible numbers are 200, 220, and 222.
+
+200: 200 divided by 30 is approximately 6.666, not an integer. 220 divided by 30 is about 7.333, not integer.
+222 divided by 30 is 7.4, which isn't integer either. So, none of these are multiples of 30.
+
+4 digits: Let's list possible numbers. They end with 0, so the last digit is 0, and the first three digits are either 0
+or 2.
+
+Possible numbers: 2000, 2200, 2220, 2222, 2020, 2022, 2202, 2220, 2222, etc. Wait, but actually, the first
+three digits can be any combination of 0s and 2s. So, all numbers of the form 2220, 2202, 2022, 0222, but
+0222 is not a valid number since it starts with 0. So, the numbers are 2220, 2202, 2022.
+
+Check each:
+
+18
+
+
+Preprint
+
+2220: As before, 2220 / 30 = 74, which is integer. So, that's a multiple.
+2202: 2202 / 30 is 73.4, which isn't integer.
+
+2022: 2022 / 30 is 67.4, which isn't integer.
+
+So, the only 4—digit number that works is 2220.
+
+But earlier, with 3 digits, we had 2220 as well. Wait, so 2220 is a 4—digit number, but 3—digit numbers didn't
+work. So, 2220 is the first one.
+
+Wait, but hold on. Maybe there's a 3—digit number that's a multiple of 30, but I haven't considered all
+possibilities. Let me check again.
+
+Wait, 2220 is a 4—digit number, but what about a 3—digit number? 222 is 222. 222 divided by 30 is 7.4, which
+isn't integer. 2220 is 74. So, maybe 2220 is the first one.
+
+Wait, but hold on. Maybe a 3—digit number with two 2s and a 0. Let's see: 220, 202, 022. But 022 isn't a 3-—
+digit number, it's just 22. So, 220 is 220, which is 220 / 30 “= 7.333, not integer. 202 is 202 / 30 “= 6.733, also
+
+not integer. So, no luck.
+
+So, in the 3—digit numbers, there's no multiple of 30 that can be formed with Os and 2s. So, moving on to 4—
+digit numbers.
+
+Wait, but 2220 is a 4—digit number, but is that the smallest? Wait, let me think. Is there a smaller number with
+4 digits, but starting with 2, and having 2s and Os, but not necessarily 3 2s? Wait, no, because if you have 2 2s,
+then 220, 202, 022. None of these are divisible by 30.
+
+So, the only 4—digit number is 2220, which is 2220. But wait, maybe a 5—digit number? No, 2220 is already a
+4—digit number, which is smaller than a 5—digit number. So, 2220 is smaller.
+
+But wait, hold on. Let me consider 2220. It's 2220, but is there a smaller number with 4 digits that can be
+formed with Os and 2s? Wait, 2220 is 2220. But what about 2220, 2202, 2022, etc. Wait, none of the other
+permutations of 2s and Os in 4 digits are multiples of 30. So, 2220 is the only one.
+
+But wait, is 2220 the minimal? Because 2220 is a 4—digit number, but is there a 3—digit number that's a
+multiple of 30? Wait, I don't think so, because 2220 is the first multiple of 30 with only 2s and Os.
+
+Wait, hold on. Let me think differently. Maybe instead of 2220, there's a smaller number.
+
+Wait, 2220 is 2220, but if I can find a number with fewer digits, like 220, but 220 is not a multiple of 30. 220
+divided by 30 is 7.333. Not integer.
+
+Wait, 202: 202 / 30 is 6.733. Not integer. 200: 200 / 30 is 6.666. Not integer. 222: 222 / 30 is 7.4. Not integer.
+So, none of these are multiples of 30.
+
+Wait, so maybe 2220 is the first one. But 2220 is a 4—digit number. Is there a 3—digit number that can be
+formed with 2s and Os that is a multiple of 30? Let me think.
+
+Wait, 2220 is the first one. So, 2220 is 2220. But 2220 is 2220, which is 2220. But if I can write a 3—digit
+number with 2s and Os that's a multiple of 30, that would be smaller than 2220.
+
+Wait, 2220 is 4 digits, but 222 is 3 digits. But 222 is not a multiple of 30. So, no.
+
+Wait, maybe 220 is 220, but that's 220, which is not a multiple of 30. 200 is 200, which is not a multiple of 30.
+222 is 222, which is not a multiple of 30. So, yeah, no luck.
+
+So, 2220 is the first one.
+
+Wait, but hold on. Let me think again. If I can have a number that is 200...0, but with some 2s in between. But
+the sum of digits must be a multiple of 3, so as we saw earlier, the number of 2s must be a multiple of 3.
+
+So, with 3 2s, we get 2220, which is 2220. But is there a way to have 2s in other positions? Like 2020, 2002,
+2022, etc. But as we saw, those are not multiples of 30.
+
+19
+
+
+
+Preprint
+
+Wait, 2020: sum of digits is 2+ 0 + 2 + 0 =4, which is not a multiple of 3, so it's not divisible by 3, hence not
+divisible by 30. Similarly, 2002: 2 +0+0+2=4, same thing. 2200:2+2+0+0=4, same. 2220:2+24+2
++ 0 =6, which is a multiple of 3. So, 2220 is the first one.
+
+So, perhaps 2220 is the minimal.
+
+Wait, but hold on. Let me check if 2220 is indeed the minimal. Maybe a number with 4 digits but starting with
+2, and with other digits as 2s and Os, but the number of 2s is more than 3? But no, because 2220 is the first
+one where the number of 2s is 3, which is the minimal multiple of 3.
+
+Wait, but maybe 2220 is the minimal, but is there a smaller number? Let me think.
+
+Wait, 2220 is 2220, which is a 4—digit number. Is there a 3—digit number with 2s and Os that is a multiple of
+30? As we saw, 2220 is the first one. So, 2220 is the minimal.
+
+Wait, but hold on. Maybe I can have a number like 2200, which is 2200, but the sum is 4, which isn't a
+multiple of 3. So, not divisible by 3. So, no.
+
+Wait, 2202: sum is 2 + 2 +0 + 2 = 6, which is a multiple of 3, but 2202 divided by 30 is 73.4, which isn't
+integer. So, not a multiple.
+
+Similarly, 2022: sum is 2 + 0 + 2 + 2 = 6, which is a multiple of 3, but 2022 / 30 is 67.4, not integer. So, no.
+2002: sum is 4, not multiple of 3.
+
+2220: sum is 6, which is multiple of 3, and 2220 / 30 is 74, which is integer. So, that works.
+
+Therefore, 2220 is the minimal number.
+
+Wait, but hold on. Let me think if there's a smaller number.
+
+Wait, 2220 is 2220, which is a 4—digit number. Is there a 3—digit number that can be formed with 2s and Os,
+which is a multiple of 30? As we saw, 2220 is the first one, so no, there's no smaller number.
+
+Wait, but hold on again. Let me think about 2220. Is it the minimal, or is there a smaller number with 4 digits
+but starting with 2, and having 2s and Os, but arranged in a different way?
+
+Wait, for example, 2020: sum is 4, which is not multiple of 3, so not divisible by 3. 2002: same. 2200: same.
+So, no.
+
+So, 2220 is the minimal.
+
+Wait, but hold on, let me think of another approach. Maybe think of numbers in base 10, with digits only 0
+and 2, and divisible by 30.
+
+So, the number must end with 0, and the sum of digits must be a multiple of 3.
+So, as we saw, the number must have a number of 2s equal to 3, 6, 9, etc.
+Therefore, the minimal number is 2220, which is 3 digits.
+
+Wait, 2220 is 4 digits. So, 2220 is 2220, which is 4 digits, and it's the first one.
+
+But wait, 2220 is a 4—digit number. Is there a 3—digit number? 2220 is 2220, which is 2220. But 222 is 3
+digits, but 222 is not a multiple of 30.
+
+Wait, so 2220 is the minimal.
+Wait, but I just thought of another way. Maybe if we can have a number with a 0 at the end, and two 2s, but
+also have another 2 somewhere in the middle. But the sum of digits must be a multiple of 3,so2+2+0=4,
+
+which isn't a multiple of 3. So, that's not good. So, 2220 is the minimal.
+
+Wait, but 2220 is a 4—digit number, but 2220 is 2220, which is 2220, which is 2220. Hmm, but 2220 is the
+minimal.
+
+20
+
+
+
+Preprint
+
+Wait, hold on, but is 2220 the minimal? Let me think of 20220, but that's a 5—digit number, which is larger
+than 2220, so not helpful.
+
+Wait, so 2220 is 2220, which is 4 digits, and it's the minimal.
+
+Wait, but hold on, maybe 20220 is a 5—digit number, but 2220 is smaller.
+Wait, so 2220 is 2220, which is 4 digits, and it's smaller than 20220.
+Therefore, 2220 is the minimal.
+
+Wait, but now, hold on, another thought. Maybe a number with 2220 is 2220, but is there a number with 2220
+in a different arrangement? For example, 20220 is a 5—digit number, but 2220 is 4 digits, so 2220 is smaller.
+
+Therefore, 2220 is the minimal.
+
+Wait, but let me just confirm once again. 2220 is 2220, which is 2220. Let me see if any number with fewer
+digits can be formed.
+
+Wait, 2220 is 4 digits. 222 is 3 digits, but 222 is not a multiple of 30. 2220 is 4 digits, and it's a multiple of 30.
+Wait, so 2220 is the minimal.
+Wait, but wait, 20220 is a 5—digit number, which is 20220, which is 20220. But 2220 is smaller.
+
+Wait, but hold on, 2220 is a 4—digit number, which is 2220, so 2220 is smaller than 20220, which is a 5—digit
+number.
+
+Therefore, 2220 is the minimal.
+
+Wait, but I just thought of another approach. Maybe think of the number as starting with 2, followed by 2s and
+Os.
+
+So, for example, 2220, 2202, 2022, 2002, 2220, etc. But as we saw, only 2220 is a multiple of 30.
+
+Wait, but 2220 is a 4—digit number, which is 2220. 2220 is 2220, which is 2220, so it's a 4—digit number.
+Wait, but let me think of the number 2220. Is that the minimal?
+
+Wait, 2220 is 2220, which is 2220. So, 2220 is a multiple of 30, but is there a smaller number?
+
+Wait, 2220 is 2220, which is 2220, which is 2220, which is 2220.
+
+Wait, but 2220 is 2220, which is 2220, so is that the minimal? Or is there a number with fewer digits?
+Wait, 2220 is 4 digits. 222 is 3 digits. 222 is not a multiple of 30. So, 2220 is the minimal.
+
+Wait, but wait, another idea: 2220 is 2220, which is 2220, which is 2220, which is 2220.
+
+Wait, but if I can have a number with 2s and Os, but with leading 2s and trailing Os, but in between, perhaps 2s
+can be placed in different positions.
+
+Wait, but as we saw, the sum of digits must be a multiple of 3, so the number of 2s must be a multiple of 3.
+Therefore, the minimal number is 2220, which is 2220.
+Wait, so 2220 is 4 digits, and it's the minimal. So, 2220 is the answer.
+
+Wait, but wait, I just thought of something else. What if the number is 20220? That's 5 digits, but it's 20220,
+which is 20220. 2220 is 2220, which is smaller. So, 2220 is smaller.
+
+Wait, but 2220 is 2220, which is a 4—digit number. 20220 is 20220, which is a 5—digit number, so 2220 is
+smaller.
+
+21
+
+
+
+Preprint
+
+Therefore, 2220 is the minimal.
+Wait, but I'm confused because 2220 is 2220, which is 2220. So, that's a 4—digit number, and it's the minimal.
+Wait, but hold on, let me just confirm if 2220 is indeed the minimal.
+
+Wait, 2220 is 2220, which is 2220. Let me check if 2220 is a multiple of 30. 2220 divided by 30 is 74, which
+is an integer. So, yes, it is.
+
+So, 2220 is the minimal.
+Wait, but hold on, 2220 is 2220, which is 2220, which is a 4—digit number.
+But, is there a smaller number?
+
+Wait, 2220 is 2220, which is 2220. But, 2220 is 2220, which is 2220. So, it's 2220, which is 2220. So, 2220 is
+the minimal.
+
+Wait, but wait, 2220 is 2220, which is 2220, which is a 4—digit number. So, 2220 is 2220, which is 2220.
+Wait, so that's the minimal.
+
+Wait, but wait, hold on, 2220 is 2220, which is 2220, which is 2220. So, it's 2220.
+
+Wait, so is 2220 the minimal.
+
+Wait, but hold on, another thought. Let me think of numbers with 2s and Os, but in different positions, but the
+sum of digits must be a multiple of 3.
+
+So, 2220 is 2220, which is 2220, sum is 6, which is a multiple of 3.
+
+Wait, but if I have a number like 20220, which is 5 digits, sum is 6, which is multiple of 3, but 20220 is 20220,
+which is larger than 2220.
+
+So, 2220 is the minimal.
+
+Wait, but hold on, another idea. Maybe 20220 is 20220, which is 20220, which is a 5—digit number, which is
+20220, which is larger than 2220, which is 4—digit.
+
+So, 2220 is smaller.
+Wait, so 2220 is the minimal.
+
+Wait, but, wait, let me think of the number 2220. It's 2220, which is 2220, which is 2220. So, 2220 is a 4—
+digit number.
+
+But, 2220 is 2220, which is 2220, so that's 2220.
+Wait, so, yeah, 2220 is the minimal.
+
+Wait, but, hold on, I just thought of another number. Let's say 2220 is 2220, which is 2220. But, 2220 is 2220,
+which is 2220. So, is there a smaller number?
+
+Wait, 2220 is 2220, which is 2220, which is 2220, which is 2220. So, 2220 is 2220, which is 2220. So, 2220
+is 2220, which is 2220.
+
+Wait, so, that's the minimal.
+Wait, so, conclusion: 2220 is the minimal.
+
+Wait, but hold on, I just thought of something else. Maybe a number like 2220 is 2220, but 2220 is 2220,
+which is 2220, which is 2220, which is 2220.
+
+Wait, so, yeah, 2220 is 2220, which is 2220, which is 2220.
+
+22
+
+
+
+Preprint
+
+Wait, so, 2220 is 2220, which is 2220, which is 2220.
+Wait, so, yeah, 2220 is 2220, which is 2220.
+
+Wait, so, that's 2220, which is 2220, which is 2220.
+Wait, but, hold on, let me think again.
+
+Wait, 2220 is 2220, which is 2220, which is 2220.
+Wait, but 2220 is 2220, which is 2220.
+
+Wait, so, yeah, 2220 is 2220, which is 2220.
+
+MPPA Output (Llama-3.1-8B on MATHS500)
+
+Problem:
+
+The set of points (a, y, z) that satisfy 27 = 3y = —z isa line.
+
+The set of points (x, y, z) that satisfy 62 = —y = —4z is another line.
+Find the angle between these lines, in degrees.
+
+Solution:
+
+<plan 1>
+
+Alright, so I have this problem where I need to find the angle between two lines in 3D space. Each line is
+defined by a set of equations, right? The first line is given by 2x = 3y = —z, and the second line is given by 6x
+=~-y = —4z. Hmm, okay. I remember that to find the angle between two lines, we can use the direction vectors
+of each line. The angle between the lines is the same as the angle between their direction vectors. So, my first
+task is to figure out ...
+
+</plan 1>
+
+<plan 2>
+
+Okay, so I have this problem where I need to find the angle between two lines in 3D space. Each line is
+defined by a set of equations, so I need to figure out their direction vectors first. Once I have the direction
+vectors, I can use the dot product formula to find the angle between them. Let me break this down step by step
+
+First, let's look at the first line: the set of points (x, y, z) that satisfy 2x = 3y = —z. Hmm, this is a bit tricky
+because it's an equation where all three variables are set equal ...
+</plan 2>
+
+<plan 3>
+
+Okay, so I have this problem where I need to find the angle between two lines in 3D space. Each line is
+defined by a set of equations, and I need to figure out the angle between them. Hmm, let me recall how to
+approach this.
+
+First, I remember that two lines in space can either be parallel, intersecting, or skew. Since the problem is
+talking about the angle between them, I think they must either be intersecting or parallel. But given that the
+equations are 2x = 3y = —z and 6x = -...
+
+</plan 3>
+
+Okay, so I need to find the angle between two lines in 3D space. The lines are given by the equations 2x = 3y
+= ~z and 6x = —y = —4z. Hmm, let me recall how to approach this. I think the angle between two lines is
+determined by the angle between their direction vectors. So first, I need to find the direction vectors of each
+line.
+
+Starting with the first line: 2x = 3y = —z. Let me parse this equation. It's saying that 2x, 3y, and —z are all
+equal to each other. Let me denote this common value as some parameter, say t. So, 2x =t, 3y =t, -z=t.
+
+Then, solving for x, y, z in terms of t:
+
+x=t/2, y=t/3,z=-t.
+
+23
+
+
+Preprint
+
+So the parametric equations for the first line are:
+
+x =(1/2)t,
+y=(1/3)t,
+z=-t.
+
+Therefore, the direction vector of the first line is given by the coefficients of t, which is (1/2, 1/3, -1). But to
+make it easier, maybe I can multiply by 6 to eliminate the denominators. Multiplying each component by 6
+gives (3, 2, -6). So the direction vector is (3, 2, -6).
+
+<plan 1>
+
+Ican also note that direction vectors are unique up to scalar multiplication, so this is fine.
+
+Now moving on to the second line: 6x = —y = —4z. Similarly, this equation suggests that 6x, —y, and —4z are
+equal. Let me denote this common value as another parameter, say s. So, 6x = s, -y = s, —4z = s. Solving for x,
+y, Zin terms of s:
+
+x=s/6,
+
+yas,
+z=-s/4.
+
+So the parametric equations for the ...
+</plan 1>
+
+<plan 2>
+I can also check that these satisfy the original equation: 2x = 2+(3/6) = 1, 3y = 3*(2/6) = 1, and —z = —(-6/6)
+= 1. So that works.
+
+Now, moving on to the second line: 6x = —y = —4z. Again, I can set this common value equal to some
+parameter, say s. So, 6x = s, -y =s, —4z =s. Solving for x, y, z:
+
+x=s/6...
+</plan 2>
+
+<plan 3>
+I can also note that direction vectors can be scaled, so direction is what matters, not the magnitude.
+
+Now, moving on to the second line: 6x = —y = —4z. Similarly, this implies that 6x, —y, and —4z are equal to
+each other. Let me denote this common value as another parameter, say s. So, 6x = s, ~y = s, —4z =s. Solving
+for x, y, Z:
+
+x=s/6,
+y=—S,
+z=-s/4.
+
+So the parametric equations for ...
+
+</plan 3>
+
+Let me check that: starting from 2x = 3y = —z, if I set t = 6x, then 3y = 6x => y = 2x, and -z = 6x => z = -6x.
+So the direction vector is (x, y, Z) = (x, 2x, —6x), which is in the direction of (1, 2, -6). Wait, but earlier I got
+(3, 2, -6). Hmm, maybe I made a mistake there. Let me clarify.
+
+If 2x = 3y = —z, then let me set 2x =k. Then 3y =k => y =k/3, and-z=k=> z= -k. Sox =k/2, y=k/3,z
+= ~-k. So the direction vector is (k/2, k/3, —k). To make this a direction vector, we can take k = 6 (the least
+common multiple of denominators 2 and 3). Then x = 3, y = 2, z = -6. So the direction vector is (3, 2, -6). So
+that's correct. Okay, so direction vector v is (3, 2, —6).
+
+Now the second line: 6x = —y = —4z. Similarly, let's set 6x = m. Then -y = m => y = -m, and -4z =m => z
+=-m/4. So x = m/6, y = —m, z = —m/4. Therefore, the direction vector is (m/6, —-m, —m/4). Again, to eliminate
+
+24
+
+
+
+Preprint
+
+denominators, multiply by 12 (the least common multiple of 6 and 4). Then x = 2, y = -12, z= —3. So the
+direction vector is (2, —12, —3).
+
+<plan 1>
+
+Alternatively, to make it simpler, maybe factor out 1. Wait, maybe I can represent it as (2, —-12, —3) or
+simplify it further.
+
+Wait, direction vectors can be scaled, so perhaps I can divide each component by 1 to keep it as is, but maybe
+it's better to represent it in the simplest form. Let me see if I can factor out something. The direction vector is
+(2, -12, -3). Let me check if these have a common factor. 2 and 3 are coprime, but 2 and 12 share a factor of
+D ycone
+
+</plan 1>
+
+<plan 2>
+
+Wait, but let me see: if m = 12, then x = 2, y = -12, z= —3. So the direction vector is (2, -12, -3).
+
+Alternatively, maybe I can keep it in terms of m/6, —m, —m/4. Let me check that. The direction vector is (1/6,
+—1, -1/4). Hmm, to make it cleaner, maybe multiply by 12: (2, -12, —3). Yes, that's the same as before. So
+direction vector Wis ...
+
+</plan 2>
+
+<plan 3>
+
+Alternatively, maybe I can write it as (2, -12, —3). But let me see if I can simplify that. Let me factor out a
+common factor. 2, -12, —3 have a common factor of 1, but if I factor 1, it's still the same. Alternatively,
+maybe it's better to write it as (2, -12, -3). Hmm.
+
+Alternatively, let me see if I can express it as (2, -12, —3) or maybe divide by something. If I divide each
+component by 1, it's the same. So perhaps that ...
+</plan 3>
+
+Alternatively, simplifying further, we can factor out a common factor. Let's see, 2, -12, —3. The greatest
+common divisor is 1, so maybe that's the simplest form.
+
+Alternatively, we can divide by 1, so the direction vector is (2, -12, —3). Alternatively, maybe we can write it
+as (2, —12, —3) or simplify by dividing by a common factor. Let's check: 2 and —12 have a common factor of
+2, but —3 doesn't. So maybe (2, —12, —3) is the simplest.
+
+Alternatively, if we factor out a 1, it's still the same. So direction vector u is (2, -12, -3).
+
+Now, to find the angle between the two lines, we need the angle between their direction vectors v and u. The
+formula for the angle 6 between two vectors is:
+
+cos @ = (v- u)/(|[vi{|Jul|)
+So first, let's compute the dot product of v and u. v is (3, 2, -6), wis (2, -12, -3).
+
+Dot product = (3)(2) + (2)(-12) + (—6)(-3) = 6 -24 + 18 = 6 -24 is -18, -18 +18 is 0.
+
+<plan 1>
+So the dot product is 0. Hmm, that's interesting. That means the vectors are perpendicular, so the angle
+between them is 90 degrees.
+
+Wait, is that right? Let me double-check the calculations.
+
+v-u = (3)(2) + (2)(—12) + (—6)(—3) =6— 24+ 18.
+
+6 —24 is indeed —18, and -18 +18 is 0. So the dot product is 0, so the vectors are orthogonal. Therefore, the
+angle between the two lines is 90 ...
+</plan 1>
+
+<plan 2>
+0? Wait, that's interesting. The dot product is zero. So the cosine of theta is zero, which means theta is 90
+degrees. So the angle between the two lines is 90 degrees.
+
+Wait, that seems too straightforward. Let me double-check my direction vectors.
+
+25
+
+
+
+Preprint
+
+First line: 2x = 3y = —z. So, direction vector is (3, 2, -6), correct.
+Second line: 6x = —y = —4z. So direction vector is (2, -12, -3). Hmm, let me confirm.
+
+From 6x = -y =...
+</plan 2>
+
+<plan 3>
+So the dot product is 0. Wait, that's interesting. So the dot product is zero, which means the vectors are
+perpendicular. Therefore, the angle between them is 90 degrees.
+
+But let me double-check the direction vectors to make sure I didn't make a mistake.
+For the first line: 2x = 3y = —z.
+
+Let me set t = 2x, so 3y =t => y= 1/3, and -z=t=> z=-t.
+
+Sox =t/2, y=t/3,z=-t.
+
+Therefore, direction vector ...
+
+</plan 3>
+
+Wait, the dot product is zero? That would mean the vectors are perpendicular, so the angle between them is 90
+degrees. But that seems surprising. Let me double-check the calculations.
+
+v- u= (3)(2) + (2)(-12) + (-6)(-3) = 6 —24 + 18.
+
+6 —24 is —18, -18 +18 is 0. Yep, that's correct. So the dot product is indeed zero, which implies that the
+vectors are orthogonal. Therefore, the angle between them is 90 degrees. Hmm, so is that the answer? 90
+degrees? That seems straightforward, but let me confirm once again.
+
+Alternatively, maybe I made a mistake in determining the direction vectors. Let me check the direction
+vectors again.
+
+First line: 2x = 3y = —z. Let me parametrize it differently. Let's set 2x =k. Then 3y =k => y =k/3, and -z =
+k => z=-k. Sox =k/2, y =k/3, z = -k. So direction vector is (k/2, k/3, —k). To eliminate fractions, multiply
+by 6: (3, 2, -6). Correct.
+
+Second line: 6x = —y = —4z. Let's set 6x = m. Then -y = m => y = —m, and -4z =m => z=-m/4.Sox=m
+/6, y =—m, z = —m/4. Direction vector is (m/6, —m, —m/4). Multiply by 12: (2, -12, —-3). Correct.
+
+So direction vectors are (3, 2, -6) and (2, -12, —3). Their dot product is 3+2 + 2*(—12) + (-6)*(-3) = 6 -24 +
+18 = 0. So yes, they are perpendicular. Therefore, the angle between the lines is 90 degrees.
+
+But wait, just to be thorough, maybe I should check if the lines are indeed skew lines or intersecting lines. If
+they intersect, then the angle between them is still defined as the angle between their direction vectors. If they
+are skew lines, the angle is still the same. So regardless, the angle between them is determined by their
+direction vectors.
+
+<plan 1>
+
+Since the direction vectors are perpendicular, the angle is 90 degrees.
+
+Alternatively, maybe I can think of the lines in terms of their parametric equations and see if they intersect or
+not. For the first line, direction vector (3,2,-6), parametric equations:
+
+x = (1/2)t,
+y=(1/3)t,
+z=-t.
+
+Second line, direction vector (2,-12,—3), parametric equations:
+
+x =(1/6)m,
+
+26
+
+
+
+Preprint
+
+y=—-m,
+z= (-1/4)m.
+
+Suppose they intersect at some point (x,y,z). Then: ...
+</plan 1>
+
+<plan 2>
+So since the direction vectors are perpendicular, the angle is 90 degrees.
+
+Alternatively, maybe the equations can be rewritten in vector form. Let me see.
+First line: 2x = 3y = —z. Let me think of this as 2x — 3y + z = 0. Similarly, the second line: 6x + y + 4z = 0.
+Wait, so the first line is 2x — 3y + z = 0, and the second line is 6x + y + 4z =0.
+
+So if I can write these in ...
+</plan 2>
+
+<plan 3>
+So since the direction vectors are perpendicular, the angle is 90 degrees.
+
+But just to make sure, let me see if the lines intersect. For the first line, the parametric equations are:
+
+x =(1/2)t,
+y = (1/3)t,
+z=-t.
+
+For the second line, let's write its parametric equations. Let me set 6x = m. So x = m/6, y = —m, z = —m/4. So
+parametric equations are:
+
+x=m/6,
+
+So, ...
+</plan 3>
+
+Alternatively, maybe I can check if the lines are coplanar or not, but since they are in 3D space, unless they
+are parallel or intersecting, they are skew. But since their direction vectors are not scalar multiples, they are
+not parallel, so they are skew lines. But the angle between them is still the angle between their direction
+vectors.
+
+Alternatively, maybe the problem is designed such that the angle is 90 degrees, but let me verify once more.
+
+Alternatively, maybe I can check with another method. Let me compute the cross product of the direction
+vectors to find the sine of the angle, but since the dot product is zero, the angle must be 90 degrees.
+
+Alternatively, if the dot product is zero, the vectors are perpendicular, so the angle is 90 degrees.
+Alternatively, maybe the problem is designed to have a right angle, but I need to confirm.
+
+Alternatively, maybe I made a mistake in the direction vectors. Let me check again.
+
+First line: 2x = 3y = —z. Let me take a point on the line. Let me choose x=0. Then 3y = —z. Let me set y=0,
+then z=0. So the point (0,0,0) is on the line. Then, direction vector is (1/2, 1/3, —1) as found earlier. So
+
+direction vector is (1/2, 1/3, -1). So if I take t=1, the point is (1/2, 1/3, -1). So direction vector is (1/2, 1/3,
+—1). Multiplying by 6 gives (3, 2, -6). Correct.
+
+27
+
+
+
+Preprint
+
+Second line: 6x = —y = —4z. Let me take x=0. Then —y = —4z => y = 4z. Let me set z=0, then y=0. So the
+point (0,0,0) is on this line as well. Wait, both lines pass through the origin? Then they intersect at the origin.
+But if they intersect, then they are coplanar, but in 3D space, two lines that intersect are coplanar, but the
+angle between them is still determined by their direction vectors. However, if they intersect, the angle
+between them is the angle between their direction vectors, which is 90 degrees. So even if they intersect, the
+angle between them is 90 degrees. So that's consistent.
+
+<plan 1>
+
+So the answer is 90 degrees.
+
+Wait, but just to be thorough, let me see if they actually intersect at the origin. The first line has direction
+vector (3,2,—6) and passes through the origin, as shown by the parametrization with t=0. The second line also
+has direction vector (2,-12,—3) and also passes through the origin when m=0. So both lines pass through the
+origin, so they intersect at the origin. Therefore, they are not skew lines but intersecting lines. However, since
+their direction vectors are perpendicular, the angle between them is 90 degrees. ...
+
+</plan 1>
+
+<plan 2>
+So that's fine.
+
+Alternatively, if they didn't intersect, the angle between skew lines is still the angle between their direction
+vectors. So either way, 90 degrees is the answer.
+
+Wait, but just to double-check, let me compute the cross product to find the sine of the angle. Although if the
+dot product is zero, the angle is 90 degrees, but let's see.
+
+Compute cross product: v x u.
+
+v = (3, 2,—6), u = (2,—12...
+</plan 2>
+
+<plan 3>
+So maybe the lines intersect at the origin and are perpendicular.
+
+Wait, let me check. If both lines pass through the origin, and their direction vectors are perpendicular, then
+they are orthogonal lines intersecting at the origin. So that's another way to see it.
+
+Alternatively, perhaps the lines are not only intersecting but also perpendicular, which is a special case. So, in
+any case, the angle between them is 90 degrees. Therefore, the answer is 90 degrees.
+
+But just to be thorough, let me compute the cross product as well, just for the sake of it. The cross product
+magnitude is equal to the product ...
+
+</plan 3>
+
+But wait, if both lines pass through the origin, and they intersect at the origin, but their direction vectors are
+perpendicular, then the angle between them is 90 degrees. So that's correct.
+
+Alternatively, maybe I can check with another point. Let's take a point on the first line. For example, take x=1.
+Then 2*1=3y => y=3/2, and —-z=3*1 => z=—3. So the point (1, 3/2, —3). Similarly, take x=1 on the second
+line. Then 6*1=—-y => y=—6, and —4z= —6 => z=1.5. So the point (1, —6, 1.5). Now, check if these two points
+are connected by a line that is perpendicular to both direction vectors. But maybe that's overcomplicating.
+Since the direction vectors are perpendicular, the angle is 90 degrees.
+
+Alternatively, maybe I can check the angle using another formula. The angle between two lines is given by
+the angle between their direction vectors. Since the dot product is zero, the angle is 90 degrees. So I think that'
+
+s correct.
+
+«Final Answer
+
+The angle between the two lines is | 90° |.
+
+28

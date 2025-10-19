@@ -1,0 +1,1751 @@
+arXiv:2510.11372v1 [es.CL] 13 Oct 2025
+
+Early Detection and Reduction of Memorisation for Domain Adaptation
+and Instruction Tuning
+
+Dean L. Slack Noura Al Moubayed
+
+Durham University, U.K.
+{dean.1.slack, noura.al-—moubayed} @durham.ac.uk
+
+Abstract
+
+Although large language models excel
+across many tasks, they can memorise train-
+ing data and thereby expose private or copy-
+righted text. Most defences target the pre-
+training stage, leaving memorisation during
+fine-tuning—especially for domain adap-
+tation and instruction tuning—poorly un-
+derstood. We fine-tune Pythia, Llama3,
+and Mistral models spanning 1.4B—70B pa-
+rameters on common evaluation datasets
+and track verbatim memorisation through-
+out training. We find that memorisation in-
+creases dramatically in the first few epochs,
+often significantly before either validation
+perplexity or evaluation performance is op-
+timised. We use a simple but effective
+n-gram memorisation score which reliably
+precedes verbatim memorisation; using it as
+an early-stopping criterion mitigates mem-
+orisation with minimal performance loss.
+Further, we introduce an n-gram—aware loss
+regulariser and show that it reduces mem-
+orisation across all model families tested
+by up to 40% while minimising evaluation
+performance trade-offs when compared to
+an existing memorisation mitigation strat-
+egy. These results yield practical, scalable
+insights into memorisation dynamics during
+language model fine-tuning.
+
+1 Introduction
+
+Large Language Models (LLMs) have become in-
+creasingly powerful, achieving remarkable per-
+formance across diverse tasks and domains as
+they scale from millions to trillions of param-
+eters (Brown et al., 2020; Fedus et al., 2022).
+Transformer-based architectures have propelled
+significant advancements in Natural Language
+Processing (NLP), setting new benchmarks in
+various applications (Vaswani et al., 2017; De-
+vlin et al., 2019; Radford et al., 2019). How-
+ever, alongside these achievements, concerns have
+
+emerged about the extent to which these models
+memorise their training data rather than genuinely
+understanding and generalising linguistic patterns
+(Khandelwal et al., 2020; Tanzer et al., 2022).
+Memorisation in LLMs poses serious privacy and
+security risks, where models have been shown to
+reproduce verbatim passages from their training
+data, including sensitive personal information and
+copyrighted materials (Patil et al., 2024). This not
+only presents ethical challenges and potential le-
+gal issues, but can potentially undermine user con-
+sent when deploying models in a generative envi-
+ronment. Training data extraction attacks (Carlini
+et al., 2021) demonstrate that adversaries can re-
+cover spans of pretraining sample data, highlight-
+ing the practical threat of generative model de-
+ployment.
+
+Most existing mitigation efforts focus on un-
+learning strategies and regularisation techniques
+applied during pre-training (Carlini et al., 2023;
+Cheng et al., 2023). While valuable, these ap-
+proaches often lack scalability and are not easily
+deployable in practice, especially given the im-
+mense computational resources required to retrain
+large models or apply differential privacy methods
+(Anil et al., 2022). Moreover, on large datasets,
+exhaustive extraction tests are infeasible, making
+it challenging to assess and mitigate memorisa-
+tion effectively. Fine-tuning pre-trained LLMs on
+domain-specific and instruction-specific data is a
+common practice to adapt models to new domains
+and tasks, often utilising datasets with private and
+sensitive information. Despite this widespread ap-
+plication, there is a gap in understanding how fine-
+tuning for domain adaptation or instruction tuning
+impacts memorisation dynamics.
+
+Our preliminary observations, illustrated in Fig.
+1, show significant memorisation occurring early
+during fine-tuning, before the model achieves opti-
+mal validation perplexity or task evaluation perfor-
+mance. This suggests that LLMs rapidly memo-
+
+
+rise new information before reaching typical early
+stopping criteria, potentially exposing sensitive in-
+formation. Owing to this, we conduct an empirical
+investigation into memorisation in LLMs during
+fine-tuning, focusing on fast, deployable mitiga-
+tion strategies and insights applicable during both
+domain adaptation and instruction tuning, leverag-
+ing widely used memorisation metrics. We per-
+form fine-tuning experiments with the Pythia (Bi-
+derman et al., 2023) models family across multiple
+parameter scales (1.4B - 12B), as well as Llama2
+7B (Touvron et al., 2023), Llama3 8B and 70B
+(Dubey et al., 2024), and Mistral 7B (Jiang et al.,
+2023) models for both domain adaptation and in-
+struction tuning across a range of common LLM
+evaluation datasets.
+Our key contributions are:
+
+¢ Memorisation dynamics during _fine-
+tuning paradigms: we examine how
+memorisation manifests during common
+fine-tuning approaches; domain adaptation
+and instruction tuning, across a wide range
+of both model sizes and datasets.
+
+¢ N-gram memorisation as a precursor to
+verbatim memorisation: we use an n-
+gram based partial memorisation metric as
+an early indicator of longer phrase memori-
+sation, finding high-rates in samples prior to
+becoming memorised, across the majority of
+datasets, model scales, and fine-tuning meth-
+ods.
+
+¢ Optimal stopping criteria: we identify op-
+timal stopping criteria during fine-tuning that
+significantly reduce memorisation with mini-
+mal impact on performance, providing a gen-
+eralisable heuristic to mitigate memorisation
+risks in real time.
+
+¢ Comparison of mitigation techniques: we
+explore loss-based regularisation approaches,
+demonstrating further reductions in memo-
+risation that are scalable, generalisable, and
+competitive with an existing approach.
+
+2 Related Work
+
+Prior research on memorisation in LLMs spans
+three main areas: measurement, characterisation
+across pre-training versus fine-tuning, and mitiga-
+tion, each covered in the following section.
+
+—— Domain = ----- Best perplexity (avg)
+— Instruction — ----- Best accuracy (avg)
+
+fon) 00
+
+Memorisation increase
+bh
+
+N
+
+Epoch
+
+(b) Pythia 12B
+
+Epoch
+(a) Pythia 1.4B
+
+Figure 1: Memorisation increases (number of new
+samples memorised at a given epoch) at succes-
+sive fine-tuning epochs, comparing fine-tuning for
+domain adaptation (orange) and instruction tuning
+(purple) on the same data. Dashed vertical lines
+mark the average epoch for which validation per-
+plexity (orange) and task evaluation accuracy (pur-
+ple) are achieved, showing high memorisation be-
+fore for both (a) Pythia 1.4B and (b) Pythia 12B
+models.
+
+2.1 Measuring Memorisation
+
+Evaluating the extent of memorisation in LLMs
+necessitates robust metrics and evaluation tech-
+niques. Carlini et al. (2023) introduce the concept
+of k-extractable memorisation, which measures a
+model’s tendency to reproduce training data when
+provided with specific input prefixes, representing
+a stringent test for data leakage. Complementary
+approaches include membership inference attacks
+aimed at classifying pretraining samples (Shokri
+et al., 2017). Memorisation and generalisation
+have been shown to carry some interdependent re-
+lationships (Tanzer et al., 2022; Khandelwal et al.,
+2020; Yeom et al., 2018), with memorisation dy-
+namics in large scale LLMs studied in Tirumala
+et al. (2022); Carlini et al. (2023).
+
+2.2. Memorisation in Pre-training Versus
+Fine-tuning
+
+The dynamics of memorisation exhibit distinct
+characteristics during the pre-training and fine-
+tuning stages of LLM development. In the pre-
+training phase, models are exposed to extensive
+and often publicly available datasets, where fac-
+tors such as data redundancy and model size
+play critical roles in determining the extent of
+memorisation (Tanzer et al., 2022; Khandelwal
+et al., 2020; Carlini et al., 2023, 2019). Research
+indicates that larger models are more prone to
+rapidly memorising training data (Tirumala et al.,
+
+
+Category Dataset Domain Input type Output type
+Classification SST-5 Movie reviews Single review sentence 5-way sentiment
+QQP Quora community QA Question;, Question, Duplicate? (yes/no)
+RTE News & Wikipedia Premise, Hypothesis Entail / Not-entail
+WANLI MultiNLI-derived genres Premise, Hypothesis Entail / Neutral / Contradict
+Question-Answering (QA) SQuAD v2 Wikipedia articles Paragraph context, Question Answer span or [NoAnswer]
+HellaS wag WikiHow narratives Context + 4 candidate endings Correct ending (MC-4)
+PubMedQA Biomedical abstracts Abstract (no conclusion), Question Yes / No / Maybe
+Summarisation XSum BBC news Full news article One-sentence abstractive summary
+CNN/DailyMail CNN & Daily Mail news Full news article Multi-sentence highlights
+Instruction Following Alpaca Mixed user prompts Instruction (+ optional input) Free-form response
+FLAN v2 Multi-domain tasks Instruction template Free-form response
+
+Table 1: Summary and grouping of datasets used for performing fine-tuning.
+
+2022; Nasr et al., 2025). Conversely, during
+fine-tuning on specialized or private datasets, dif-
+ferent memorisation risks emerge. Studies have
+demonstrated that specific fine-tuning methodolo-
+gies, like adapter-based techniques, can reduce the
+likelihood of memorising sensitive information
+(Mireshghallah et al., 2022; Dodge et al., 2021;
+Raffel et al., 2020). Additionally, counterfactual
+memorisation assessments (Zhang et al., 2023)
+aid in distinguishing between memorisation aris-
+ing from pre-training and that from fine-tuning,
+thereby informing targeted mitigation strategies
+tailored to each training phase.
+
+2.3 Mitigation Strategies and Regularisation
+
+During the training process, regularisation meth-
+ods such as the addition of noise to input em-
+beddings (Jain et al., 2024) are employed to mit-
+igate memorisation (Feldman and Zhang, 2020;
+Tirumala et al., 2022). Post-training techniques
+include fine-tuning and machine unlearning ap-
+proaches (Maini et al., 2023), which aim to re-
+move specific data from the model without ne-
+cessitating a complete retraining. Despite these
+measures, achieving a balance between preserv-
+ing model performance and ensuring data privacy
+remains a significant challenge. Mitigating mem-
+orisation in language models is critical for pre-
+serving privacy and preventing the leakage of sen-
+sitive information. Conventional regularisation
+techniques, such as weight decay and dropout, are
+designed to prevent overfitting and thereby reduce
+memorisation (Feldman and Zhang, 2020). How-
+ever, these methods have proven inadequate in
+fully reducing memorisation within LLMs (Tiru-
+mala et al., 2022). Advanced regularisation ap-
+proaches, including data-dependent token dropout
+(Hans et al., 2025) and targeted token masking
+(Jain et al., 2024), offer partial mitigation but often
+
+fail to eliminate the risk of memorising entire data
+passages, especially when dealing with highly du-
+plicated datasets.
+
+3 Methodology
+
+We begin by defining how we will measure mem-
+orisation, leveraging an existing approach and in-
+troducing a partial measure for fine-grained mea-
+surement. We follow this by introducing the ex-
+perimental setup of our study for fine-tuning for
+domain adaptation and instruction tuning.
+
+3.1
+
+For an exact and scalable measure of verbatim
+memorisation, we employ the widely used extrac-
+tion metric introduced in Carlini et al. (2023).
+
+Memorisation Metrics
+
+Memorisation: Let f be a generative LLM
+trained on data D, with prefix-suffix pair (p, s)
+contained within a sample in D. A suffix s is said
+to be k-extractable (memorised) if f generates a
+string containing s exactly when prompted with a
+prefix of length k using greedy decoding.
+
+Therefore we can compute the percentage of
+the fine-tuning data memorised at each fine-tuning
+epoch as:
+
+>> k-extractable suffixes s
+Mem = - x 100.
+total samples in data D
+
+This definition provides a directly computable
+metric on the generated output from our fine-
+tuned models, allowing fast evaluation at each
+fine-tuning epoch. We use the above as the defi-
+nition for memorisation throughout.
+
+3.2. N-gram Memorisation
+
+For fine-grained measure of memorisation, we
+implement a partial memorisation metric.
+
+
+N-gram Memorisation: For a set of n-gram sizes
+N = {ny,ne,...,n,}, the n-gram memorisa-
+tion score between the model’s output f(p) and
+the target sequence s is defined as the proportion
+of matching n-grams of sizes in N, where the
+matches are exact for each n-gram but invariant
+to ordering of n-grams.
+
+Formally, given MM; as the fraction of matching
+n-grams in N between f(p;) and s;, the n-gram
+memorisation score is then calculated as:
+
+n-gram Mem = (22) x 100.
+|D|
+
+This metric provides a finer-grained measure of
+memorisation that allows for different lengths and
+number of n-grams, which can be tuned for suit-
+ability for specific datasets, sequence length sizes,
+and granularity of sensitive information.
+
+3.3 Datasets
+
+We leverage datasets taken from three open in-
+struction pools—the Public Pool of Prompts (P3)
+(Sanh et al., 2022), the FLAN collection (Long-
+pre et al., 2023), and the Alpaca-52K cor-
+pus (Taori et al., 2023). We conduct both in-
+struction tuning and domain adaptation experi-
+ments by choosing to include/remove the task-
+specific instruction prompt for each dataset. These
+datasets encompass a range of core NLP task
+types—including classification, Natural Language
+Inference (NLIJ), coreference resolution, Question-
+Answering (QA), and free-form instruction fol-
+lowing—and span diverse domains such as en-
+cyclopedic, news, clinical notes, biomedical re-
+search, and social media text. A summary of all
+datasets used is outlined in Table 1, with further
+details in Appendix A. We categorise them into the
+following:
+
+¢ Classification & NLI: short, label-based
+prompts (sentiment, paraphrase, entailment).
+
+* Question-Answering: a mix of extractive,
+multiple-choice, and yes/no items.
+
+¢ Summarisation: single-sentence (XSum)
+and multi-sentence (CNN/DailyMail) sum-
+maries.
+
+¢ Instruction Following: open-ended prompts
+from Alpaca and FLAN tasks.
+
+These datasets are chosen to provide task and
+domain diversity for evaluating how this impacts
+
+memorisation, as well as providing datasets which
+can be used for both domain adaptation and in-
+struction tuning.
+
+3.4 Pre-trained Models
+
+Experiments are run on the Pythia model family
+(Biderman et al., 2023) using sizes of 1.4B, 2.8B,
+6.9B, and 12B parameters. Pythia pre-training
+keeps hyper-parameters and dataset composition
+fixed while doubling model size at each step, giv-
+ing a clean scaling ladder to evaluate on. Addi-
+tionally, we use Llama2 7B (Touvron et al., 2023),
+Llama3 8B and 70B (Dubey et al., 2024), and the
+Mistral 7B model (Jiang et al., 2023). These mod-
+els are chosen to enable comparisons between ar-
+chitectural variants at similar model sizes. All pre-
+trained model checkpoints are publicly accessible
+via Huggingface (Wolf et al., 2020). Fine-tuning is
+performed using the Adam optimiser (Kingma and
+Ba, 2015). We perform full-parameter fine-tuning
+and, for comparison, perform partial fine-tuning
+in which only the top n transformer layers are up-
+dated while the rest remain frozen, enabling us to
+measure how restricting the trainable subset of pa-
+rameters alters memorisation behaviour.
+
+3.5 Fine-Tuning Approach
+
+We employ domain adaptation and instruction tun-
+ing by fine-tuning each model for up to 8 epochs
+on a maximum of 5,000 samples of the target
+dataset. When performing domain adaptation, we
+simply remove the task-specific instructions from
+the input. We evaluate on a held-out validation
+set for both validation perplexity and task-specific
+evaluation performance. For evaluation perfor-
+mance, we use the standard evaluation metrics
+used to measure performance for that task (de-
+tails of each can be found in the Appendix A). For
+our memorisation and n-gram memorisation met-
+rics, we evaluate on the 5,000 samples of train-
+ing data used to fine-tune. The small number of
+fine-tuning samples allows us to rapidly experi-
+ment over model scales and datasets while main-
+taining relevant to typically small and private fine-
+tuning datasets. Evaluations are performed at each
+epoch to monitor the progression of memorisation
+relative to validation performance and evaluation
+performance.
+
+Following Carlini et al. (2023), we test
+k-extractable memorisation with three prefix
+lengths, k € {12,16,20}, and a fixed 20-token
+suffix. Lengths below 12 tokens collide frequently
+
+
+-- Non-memorised samples —e— Memorised samples before transition Memorised samples range
+
+w
+o
+
+304 304 304
+
+N
+lor)
+
+284
+
+N
+a
+
+264
+
+244
+
+N
+N
+
+224
+
+204
+
+N
+o
+
+Partial memorisation (%)
+N
+a
+yoda uoljesioway ~
+
+RP
+00
+
+184
+
+16 16-4 T T — 16+ T i — 1645
+1 3 5 ad 1 3 5 7 1 3 5 7 1 3 5 Fé
+Epoch Epoch Epoch Epoch
+(a) Summarisation (b) Summarisation (do- (c) Instruction (d) Instruction (domain)
+main)
+304 304 304 304
+g 7
+= 284 284 284 285
+6 =z
+2261 26 | 264 264 3
+Ba Ea
+S24 244 244 244 3
+o Sg
+£224 224 224 o
+5 a H
+5 204 204 20+ >
+184 18 | 184 a oe ae
+, oe
+16 Tm 16+4 t 1  16-—+ tT T r
+1 3 5 7 1 oj 5 7
+Epoch Epoch Epoch Epoch
+(e) QA (f) QA (domain) (g) Classification (h) Classification (domain)
+
+Figure 2: Partial n-gram memorisation across fine-tuning epochs for the four dataset categories, with
+domain indicating domain adaptation fine-tuning. In each panel the coloured solid line reports, at epoch f,
+the median score of samples that become memorised at subsequent epoch ¢+1; the point colour encoding
+that memorisation epoch. The grey shaded region spans the full score range of all samples that ever
+become memorised, irrespective of when the transition occurs. Error bars show the standard deviation
+over five random seeds, while the black dashed line is the baseline for samples that are never memorised.
+Results are averages over Pythia model sizes from 1.4 B to 12 B parameters.
+
+across corpora, whereas prefixes longer than 20to- 4.1 N-gram Memorisation Predicts Verbatim
+kens limits the number of samples we can use from Memorisation
+
+each dataset. We empirically find that 4, 5, and
+6-grams for our n-gram memorisation metric pro-
+vides a good signal for highly memorised phrases
+without being computationally prohibitive. All re-
+sults are averaged over 10 runs with random seed
+initialisations. For robustness, we use different
+randomly sampled prefix-suffix pairs for each of
+the 10 randomly initialised fine-tuning runs.
+
+Driven by the observation shown in Fig. 1 that
+high-rate memorisation occurs in the early epochs
+preceding optimal stopping criteria for both vali-
+dation perplexity and task evaluation performance,
+we investigate n-gram memorisation values as a
+proxy for fine-grained memorisation. To correctly
+identify early warning signs of samples at high risk
+of verbatim memorisation, we evaluate n-gram
+memorisation after each fine-tuning epoch. Fig. 2
+shows our results for this evaluation on each of the
+4 Results and Discussion dataset categories outlined in Table 1, with domain
+
+indicating the domain-adaptation fine-tuning. For
+
+all samples which are identified as memorised dur-
+We begin by evaluating n-gram memorisation re- _ing 8 fine-tuning epochs, we track their associated
+sults over model scales and domains. After, we | n-gram memorisation score on the epochs preced-
+discuss epoch selection criteria for minimising ing the transition to verbatim memorisation. This
+memorisation and performance trade-offs. Finally, | allows us to understand if the partial memorisa-
+we compare mitigation strategies across model _ tion score is higher in the epoch preceding a tran-
+scales. sition to verbatim memorisation, relative to non-
+
+
+-- Non-memorised samples
+
+—e— Memorised samples before transition
+
+Memorised samples range
+
+w
+o
+i
+
+305
+
+N
+lo)
+f
+
+2875
+
+N
+a
+f
+
+265
+
+244
+
+N
+N
+L
+
+224
+
+N
+fo}
+i
+
+204
+
+Partial memorisation (%)
+N
+oS
+
+a
+lon)
+1
+
+184
+
+BR
+a
+
+™ 16-—+
+
+284 284
+264 264
+244 24
+
+Epoch
+
+(a) Pythia 1.4B
+
+Epoch
+
+(b) Pythia 2.8B
+
+304 304
+
+yoda uojesioway ~
+
+224 ae —oa | 224 a is
+50 en aed - 501 | nae”
+184 184
+ea 3 5 7G 3 3 j
+Epoch Epoch
+(c) Pythia 6.9B (d) Pythia 12B
+
+w
+ro}
+L
+
+305
+
+NON
+a ow
+Pd
+
+Partial memorisation (%)
+N
+eS
+
+304
+2875
+264
+244
+
+ ypoda uoljesowaW ~
+
+224 22 —
+204 204 eT
+18 | isif
+16 164 t — 1614 t i :
+1 3 5 7 1 3 5 7 1 3 5 7
+Epoch Epoch Epoch
+(e) Mistral 7B (f) Llama3 8B (g) Llama3 70B
+
+Figure 3: Partial memorisation across epochs for different models. The coloured solid line gives the
+median score of samples that will be memorised at epoch t+1; point colour marks that future epoch. The
+grey region shows the full range for all eventually memorised samples, while the black dashed line is
+the baseline for samples never memorised. Error bars denote the standard deviation across five random
+
+seeds.
+
+memorised phrases. For this, we plot the average
+n-gram memorisation for non-memorised phrases
+throughout fine-tuning as a baseline.
+
+For each of the dataset categories visualised, we
+observe a clear distinction in partial memorisation
+between the memorised and non-memorised sam-
+ples, with the majority of epochs scoring markedly
+higher than the baseline for non-memorised sam-
+ples. We see the degree to which this is higher
+varies significantly between domains, with largest
+discrepancy observed in Instruction following and
+Summarisation. The News domains used in
+the summarisation tend to include high-frequency
+stock phrases, as such, these datasets are known
+to encourage extractive copying (Tejaswin et al.,
+2021), which our results agree with. Most notably,
+we find that for all datasets, the domain adapta-
+tion version sees a significant increase in partial
+memorisation over the baseline, whereas the base-
+line scores do not change significantly. Interest-
+ingly, there is a large increase in partial memorisa-
+tion scores of samples which are memorised in the
+early epochs when performing domain adaptation.
+
+We perform the same evaluation but compare
+
+model size and architecture, shown in Fig. 3. We
+identify the expected trend that larger model sizes
+correlate to higher memorisation capacity, which
+is reflected in the partial memorisation score in-
+crease across the Pythia models. The partial mem-
+orisation score gap between memorised and non-
+memorised samples increases significantly with
+increasing model size, showing a strong indicator
+that this metric serves as a scalable precursor to
+verbatim memorisation. An unexpected result is
+that for the smaller 1.4B model, partial memorisa-
+tion decreases for samples memorised in the latter
+epochs of fine-tuning; a trend which does not fol-
+low for the larger model sizes. Comparing differ-
+ent architectures, we find similar gaps to baseline
+and the same trend of increasing partial memori-
+sation gap to baseline over fine-tuning epochs.
+
+Figure 4 repeats the analysis for Llama3 8B
+when only the top n transformer layers are up-
+dated. The non-memorised baseline is unaf-
+fected, but unfreezing more layers suppresses par-
+tial memorisation in the first few epochs and
+heightens it in later epochs. This is consistent with
+a capacity-bottleneck view in which extra train-
+
+
+-- Non-memorised samples | —e— Memorised samples before transition Memorised samples range
+
+w
+3
+
+304
+
+N
+ic}
+
+284
+264
+
+a
+
+Bs
+
+244
+
+N
+
+224
+
+NN NN
+
+°
+
+204
+
+Partial memorisation (%)
+ ypoda uonjesiioway ~~
+
+Bb
+©
+
+184
+
+164,
+
+Bb
+a
+
+Epoch Epoch
+
+(a) Final layer (b) Final 4 layers
+
+w
+3
+
+304
+
+N
+BD ©
+
+Partial memorisation (%)
+N
+
+NN NN
+
+is}
+
+ ypoda uoljesuoway ~
+
+a
+c-}
+
+BR
+a
+
+— 164+
+
+Epoch Epoch
+
+(c) Final 8 layers (d) Final 16 layers
+
+Figure 4: Final-layer partial fine-tuning compari-
+son of the Llama3 8B model. The final n layers
+of the model are unfrozen and updated when fine-
+tuning, with the remaining layers frozen.
+
+able layers delay, yet ultimately amplify, overfit-
+ting during fine-tuning.
+
+4.2 Selection Criteria as Mitigation
+
+Following our findings that high-rate memorisa-
+tion occurs before optimal validation perplexity
+or task evaluation performance, and that partial
+memorisation serves as a potential precursor to
+memorisation, we now investigate the efficacy of
+utilising this as an early stopping criterion. With-
+out resorting to regularisation or unlearning strate-
+gies, we explore using n-gram memorisation as
+a threshold for early stopping. To adapt n-gram
+memorisation as an early stopping criterion, we
+test different threshold values for which to stop
+fine-tuning if exceeded. We find that an average
+partial memorisation threshold score of 20 on the
+fine-tuning set yields good results. We compare
+this to the naive selection criterion of validation
+perplexity and task evaluation for domain adapta-
+tion and instruction tuning, respectively, although
+we experiment with applying validation perplexity
+and best accuracy to both.
+
+Results for these experiments are shown in Fig.
+5, highlighting the trade-offs between different
+early stopping criteria and their impact on both
+memorisation and model performance. Using
+
+evaluation performance/accuracy as the selection
+criterion consistently reduces memorisation rates
+in both domain adaptation and instruction tuning
+scenarios (Fig. 5a and Fig. 5c). This could be due
+to task evaluation performance correlating more
+highly to the latent capabilities of the pretrained
+model, rather than validation perplexity on a sin-
+gle domain, and therefore is optimised at lower
+memorisation. However, this comes at the cost of
+a significant decrease in validation perplexity, as
+indicated by the high variance and larger differ-
+ences to the best perplexity scores shown in Fig.
+5b and Fig. 5d. Conversely, when validation per-
+plexity is used as the selection criterion, the mod-
+els tend to show the opposite behaviour through
+achieving better perplexity scores, but with sub-
+stantially higher memorisation rates, particularly
+for instruction-tuned models which consistently
+exhibit the highest memorisation levels compared
+to domain adaptation results.
+
+Interestingly, the n-gram selection criterion
+strikes a balance, reducing memorisation without
+the steep performance trade-offs observed in the
+other criteria. It provides a more favourable bal-
+ance by keeping memorisation lower and main-
+taining better accuracy and perplexity than either
+of the naive criteria (evaluation accuracy or vali-
+dation perplexity), as seen by the smaller perfor-
+mance differences at consistently lower memori-
+sation percentages. In summary, instruction tuning
+appears more prone to memorisation, particularly
+under validation-based selection, whereas domain
+adaptation is relatively less affected by these se-
+lection criteria, and n-gram thresholding as a stop-
+ping criterion is a simple and effective memorisa-
+tion mitigation strategy.
+
+4.3 Comparing Mitigation Strategies
+
+We test if our n-gram approach can be baked into
+a loss regularisation function by adapting the typ-
+ical causal LLM loss to include a term to pe-
+nalise high-confidence n-grams exceeding a tun-
+able confidence threshold, above that of the pre-
+trained model. Intuitively, this penalty is designed
+to discourage the model from assigning exces-
+sively high probabilities to these n-grams as a
+proxy measure for n-gram memorisation. The
+key limitations of this strategy are in requiring
+the original model to run inference alongside fine-
+tuning to acquire the baseline confidence values,
+and keeping n-gram sizes within practical bounds
+
+
+Domain
+1k=16 [ZZ Instruction
+
+Domain
+[ZZ] Instruction
+
+[= Evaluation performance
+3 Validation perplexity
+
+H
+N
+
+Y
+[o)
+
+Memorisation (%)
+
+L Tl
+Bestacc Bestn-gram_ Best val
+
+Selection criterion
+(a) Pythia 1.4B
+
+Best val
+
+H N
+° ul oO
+
+Memorisation (%)
+
+ul
+
+Best val
+
+Selection criterion
+(c) Pythia 12B
+
+Best val Best acc Best n-gram
+
+Best acc Best n-gram
+
+N
+ul
+
+N
+fo)
+
+ray
+u
+|
+1
+
+Difference to best (%)
+
+Best val Best n-gram Best acc
+
+Selection criterion
+(b) Llama 8B
+
+Best n-gram
+
+Difference to best (%)
+
+Best val
+
+Best n-gram Best acc
+Selection criterion
+
+Best n-gram
+
+(d) Llama3 8B
+
+Figure 5: Memorisation and performance comparison for domain adaptation and instruction tuning
+across different early stopping selection criteria. (a) and (c) show the verbatim memorisation percent-
+age for different values of extraction prompt prefix length k € {12, 16,20} using three early stopping
+selection criteria: validation perplexity (Best val), evaluation performance (Best acc), and n-gram memo-
+risation (Best n-gram) for domain adaptation (solid) and instruction tuning (hatched). (b) and (d) present
+the difference to the best task evaluation performance (orange) and validation perplexity (green), across
+
+the same selection criteria and fine-tuning approaches.
+
+to not become computationally intensive. Further
+details of this approach can be found in Appendix
+B.
+
+We compare our n-gram regularisation to the
+Goldfish loss regularisation technique (Hans et al.,
+2025), incorporating random sampling of dropped
+tokens from the loss calculation for a given train-
+ing sample. We test across all models to evaluate
+transferability and scalability of approach.
+
+We present our results in Table 2, grouped by
+model size and dataset category, including com-
+parisons to naive baseline results for both domain
+adaptation and instruction tuning (top row of each
+model group). We include the stopping criterion
+Best n-gram as a simple non-regularisation ap-
+proach based on the promising findings in Sec-
+
+tion 4.2. We consider memorisation (Mem %)
+and evaluation performance (Eval %), where Eval
+is taken as the difference to the best achieved
+performance - essentially measuring the perfor-
+mance trade-off of the memorisation mitigation
+technique. We group our results by model size,
+and report the best (bold) within each group.
+
+4.3.1 Impact of model size
+
+These results highlight key trends across differ-
+ent model scales and mitigation strategies. Gen-
+erally, memorisation increases with model size, as
+observed with the unmitigated baseline for Pythia
+2.8B of 12.2% rising to 21.8% for Pythia 12B and
+25.7% for Llama3 70B. Importantly, the mitiga-
+tion strategies show consistent reductions in mem-
+
+
+QA Summarisation Instruction Average
+Model + Strategy Mem| Eval| Mem Eval) Mem Evall | Mem | | Eval |
+Pythia 2.8B 9.71 - 12.59 - 14.30 - 12.20 -
++ Best n-gram 4.36 7.51 5.63 6.53 6.43 8.09 5.47 7.38
++ n-gram reg 2.90 5.08 3.75 4.25 4.29 6.54 3.65 5.29
++ Goldfish reg 3.37 5.04 4.38 4.31 5.01 6.07 4.25 5.14
+Pythia 6.9B 12.80 - 16.50 - 18.70 - 16.00 -
++ Best n-gram 5.76 7.54 742 6.21 8.42 8.30 7.20 7.35
++ n-gram reg 3.84 5.15 4.95 4.54 5.61 6.30 4.80 5.33
++ Goldfish reg 4.48 5.07 5.77 4.83 5.55 6.59 5.27 5.50
+Mistral 7B 13.65 - 17.50 - 19.88 - 17.01 -
++ Best n-gram 6.12 7.55 7.88 6.00 8.91 8.89 7.64 7.48
++ n-gram reg 4.18 5.53 5.25 4.40 5.34 6.08 4.92 5.34
++ Goldfish reg 4.01 5.40 5.12 4.42 4.97 6.21 4.70 5.34
+Llama3 8B 14.40 - 18.50 - 20.94 - 17.95 -
++ Best n-gram 6.48 9.21 8.33 6.56 9.41 10.31 8.07 8.69
++ n-gram reg 4.32 4.38 5.55 3.81 6.27 5.32 5.38 4.50
++ Goldfish reg 5.04 5.02 6.47 4.33 732 6.99 6.28 5.45
+Pythia 12B 17.66 - 22.50 - 25.30 - 21.82 -
++ Best n-gram 7.92 9.20 10.12 6.41 11.39 = 8.30 9.81 7.97
++ n-gram reg 5.28 3.98 6.75 4.02 7.59 4.91 6.54 4.30
++ Goldfish reg 6.10 3.90 7.57 4.36 8.86 5.00 7.51 4.42
+Llama3 70B 20.80 - 26.50 - 29.70 - 25.67 -
++ Best n-gram 9.36 9.39 11.93 5.96 13.37 = 8.45 11.55 7.93
++ n-gram reg 6.24 5.54 7.05 3.91 8.91 5.44 7.40 4.96
++ Goldfish reg 7.18 5.50 7.27 4.01 10.40 6.11 8.28 5.21
+
+Table 2: Main memorisation mitigation results across model scales and mitigation strategies. For each
+result we report the memorisation (Mem, lower is better), and Evaluation difference (Eval, lower is better)
+to the best performance achieved for the naive unmitigated strategy (top row of each model group). Bold
+values indicate the best (lowest) score within each model group (base row excluded). Memorisation
+scores are taken as the average of all prefix lengths k € {12, 16,20} extractions. Results are averages
+
+over 10 randomly initialised fine-tuning runs.
+
+orisation across all models. For example, n-gram
+regularisation reduces memorisation from 12.2%
+to 3.6% in Pythia 2.8B, and from 21.8% to 6.5%
+in Pythia 12B. We see similar reductions in the
+Llama3 and Mistral models. Goldfish regularisa-
+tion is also effective, though its impact is more
+pronounced on the Mistral 7B model, whereas our
+n-gram reg outperforms this on all other models.
+Across the board, larger models present greater
+challenges in balancing memorisation, validation
+perplexity, and accuracy. The results suggest that
+as model size increases, the trade-offs become
+more pronounced.
+
+4.3.2 Impact of mitigation strategy
+
+Averaged over all models, n-gram regularisa-
+tion delivers the best trade-off, lowering memo-
+risation to 5.45% with a performance evaluation
+gap of 4.95%; this is a ~40% relative reduc-
+tion in memorisation and a ~35% smaller perfor-
+mance hit compared with the simple Best n-gram
+early-stopping rule (8.29%, 7.80%). Goldfish is
+a close second (6.05%, 5.18%), performing best
+on Mistral 7B. While the early-stopping heuristic
+of Best n-gram consistently sees higher memori-
+sation and worse evaluation performance, it still
+significantly reduces memorisation from the naive
+baseline - highlighting the importance of a simple
+
+
+Hy Mem early 45 - Mem high-partial 149 Mem all
+12
+>
+=
+S
+op 19
+Ww
+©
+o 8
+=
+wn
+oO 6
+wn
+©
+oe
+rem
+5 4
+e
+(o)
+x 2
+al N N
+Fe FF Ss SF VP FC SF KS LK
+SF SC KT SF CF CC SF
+RS CS &
+® S
+
+n-gram category
+
+Figure 6: Distribution of memorised n-grams
+across coarse semantic categories. Bars show the
+percentage of phrases within each category that
+are: memorised within the first two fine-tuning
+epochs and remained memorised (‘Mem early’,
+green), memorised after exhibiting higher than
+baseline partial memorisation in a preceding
+epoch (‘Mem high-partial’, blue), and all verba-
+tim memorised phrases (‘Mem all’, violet).
+
+non-regularisation approach.
+
+4.3.3 Categorical Analysis
+
+We construct coarse semantic categories of
+n-grams over all datasets, randomly sample 500
+unique n-grams per category, and plot their mem-
+orisation outcomes in Figure 6. Memorisation
+differs markedly between categories, with medi-
+cal, question, and entity forming the highest-risk
+groups, while financial, news, and review remain
+lowest. Both medical and question show high
+rates of early memorised samples that persist, and
+most categories include many phrases that en-
+ter a high-partial state before verbatim copying,
+with code being the clearest example. Categories
+whose text is highly templated and repetitive (e.g.,
+medical, questions, and named-entity lists) likely
+present many identical n-gram patterns for the
+model to latch onto, whereas free-form prose like
+news or reviews offers far fewer exact repeats.
+Qualitative examples of memorised phrases are re-
+ported in Appendix C.
+
+5 Limitations
+
+Our study provides insights into memorisation
+during domain adaptation and instruction tuning
+of causal LLMs, but has limitations. We fo-
+
+cused on greedy decoding, while real-world ap-
+plications often use more complex methods like
+beam search, which likely influence memorisation
+differently - future research should explore mem-
+orisation under various decoding strategies.
+
+We used validation perplexity and evaluation
+performance as metrics, but their trade-offs with
+memorisation aren’t necessarily equivalent. In-
+vestigating alternative metrics could offer a more
+nuanced understanding of these relationships.
+Our experiments were limited to a single high-
+parameter model (Llama3 70B) due to computa-
+tional budget limitations - ideally we would eval-
+uate these finding are a larger pool of models and
+sizes, as well as different fine-tuning protocols.
+
+6 Conclusion and Future Work
+
+This study explores memorisation dynamics dur-
+ing both domain adaptation and instruction tun-
+ing across eight open-weight LLMs (1.4B-70B
+parameters). We show that a simple n-gram par-
+tial memorisation score indicates at-risk samples.
+The gap between memorised and non-memorised
+items is widest in domain adaptation and sum-
+marisation datasets, reflecting repetition and lack
+of diversity seen with instruction-tuning, whereas
+classification and QA tasks exhibit a smaller, but
+still measurable, rise. We also show that our par-
+tial memorisation metric scales very well with in-
+creasing model size, where memorisation is more
+pronounced. Building on these observations, we
+explore memorisation mitigation strategies. A
+threshold-based early stopping with the n-gram
+score halves memorisation relative to the base-
+line at low performance cost, but an explicit n-
+gram penalty in the loss is more effective, aver-
+aging 5.45% memorisation and a 4.95% perfor-
+mance gap: roughly a 40% reduction in memo-
+risation. We show this scales from small models
+to 70B-parameter models and generalises across
+datasets and tasks.
+
+Future work will extend this analysis in two di-
+rections. First, alternative decoding strategies such
+as beam search may surface different leakage pat-
+terns and should be audited with the same metrics.
+Secondly, we will test whether the n-gram reg-
+ulariser curbs memorisation in code generation,
+mathematical reasoning and multimodal tasks.
+
+
+Acknowledgments
+
+This work was funded by the European Regional
+Development Fund, and Wordnerds.
+
+References
+
+Rohan Anil, Badih Ghazi, Vineet Gupta, Ravi Ku-
+mar, and Pasin Manurangsi. 2022. Large-scale
+differentially private BERT. In Findings of
+the Association for Computational Linguistics:
+EMNLP 2022, pages 6481-6491, Abu Dhabi,
+United Arab Emirates. Association for Compu-
+tational Linguistics.
+
+Stella Biderman, Hailey Schoelkopf, Quentin Gre-
+gory Anthony, Herbie Bradley, Kyle O’Brien,
+Eric Hallahan, Mohammad Aflah Khan, Shiv-
+anshu Purohit, USVSN Sai Prashanth, Edward
+Raff, et al. 2023. Pythia: A suite for analyzing
+large language models across training and scal-
+ing. In International Conference on Machine
+Learning, pages 2397-2430. PMLR.
+
+Tom Brown, Benjamin Mann, Nick Ryder,
+Melanie Subbiah, Jared D Kaplan, Prafulla
+Dhariwal, Arvind Neelakantan, Pranav Shyam,
+Girish Sastry, Amanda Askell, et al. 2020.
+Language models are few-shot learners. Ad-
+vances in neural information processing sys-
+tems, 33:1877-1901.
+
+Nicholas Carlini, Daphne Ippolito, Matthew
+Jagielski, Katherine Lee, Florian Tramer, and
+Chiyuan Zhang. 2023. Quantifying memoriza-
+tion across neural language models.
+
+Nicholas Carlini, Chang Liu, Ulfar Erlingsson,
+Jernej Kos, and Dawn Song. 2019. The se-
+cret sharer: Evaluating and testing unintended
+memorization in neural networks. In 28th
+USENIX security symposium (USENIX security
+19), pages 267-284.
+
+Nicholas Carlini, Florian Tramér, Eric Wallace,
+Matthew Jagielski, Ariel Herbert-Voss, Kather-
+ine Lee, Adam Roberts, Tom Brown, Dawn
+Song, Ulfar Erlingsson, Alina Oprea, and Colin
+Raffel. 2021. Extracting training data from
+large language models. In 30th USENIX Se-
+curity Symposium (USENIX Security 21), pages
+2633-2650. USENIX Association.
+
+Hao Cheng, Zhaowei Zhu, Xing Sun, and Yang
+Liu. 2023. Mitigating memorization of noisy
+labels via regularization between representa-
+tions. In The Eleventh International Conference
+on Learning Representations.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training
+of deep bidirectional transformers for language
+understanding. In Proceedings of the 2019
+Conference of the North American Chapter
+of the Association for Computational Linguis-
+tics: Human Language Technologies, Volume
+I (Long and Short Papers), pages 4171-4186,
+Minneapolis, Minnesota. Association for Com-
+putational Linguistics.
+
+Jesse Dodge, Maarten Sap, Ana Marasovic¢,
+William Agnew, Gabriel [lharco, Dirk Groen-
+eveld, Margaret Mitchell, and Matt Gardner.
+2021. Documenting large webtext corpora: A
+case study on the colossal clean crawled corpus.
+In Proceedings of the 2021 Conference on Em-
+pirical Methods in Natural Language Process-
+ing, pages 1286-1305, Online and Punta Cana,
+Dominican Republic. Association for Computa-
+tional Linguistics.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav
+Pandey, Abhishek Kadian, Ahmad AI-Dahle,
+Aiesha Letman, Akhil Mathur, Alan Schel-
+ten, Amy Yang, Angela Fan, Anirudh Goyal,
+Anthony Hartshorn, Aobo Yang, Archi Mitra,
+Archie Sravankumar, Artem Korenev, Arthur
+Hinsvark, Arun Rao, Aston Zhang, Aurélien
+Rodriguez, Austen Gregerson, Ava Spataru,
+Baptiste Roziére, Bethany Biron, Binh Tang,
+Bobbie Chern, Charlotte Caucheteux, Chaya
+Nayak, Chloe Bi, Chris Marra, Chris Mc-
+Connell, Christian Keller, Christophe Touret,
+Chunyang Wu, Corinne Wong, Cristian Can-
+ton Ferrer, Cyrus Nikolaidis, Damien Allon-
+sius, Daniel Song, Danielle Pintz, Danny
+Livshits, David Esiobu, Dhruv Choudhary,
+Dhruv Mahajan, Diego Garcia-Olano, Diego
+Perino, Dieuwke Hupkes, Egor Lakomkin,
+Ehab AlBadawy, Elina Lobanova, Emily Dinan,
+Eric Michael Smith, Filip Radenovic, Frank
+Zhang, Gabriel Synnaeve, Gabrielle Lee, Geor-
+gia Lewis Anderson, Graeme Nail, Grégoire
+Mialon, Guan Pang, Guillem Cucurell, Hai-
+ley Nguyen, Hannah Korevaar, Hu Xu, Hugo
+Touvron, Iliyan Zarov, Imanol Arrieta Ibarra,
+
+
+Isabel M. Kloumann, Ishan Misra, Ivan Ev-
+timov, Jade Copet, Jaewon Lee, Jan Geffert,
+Jana Vranes, Jason Park, Jay Mahadeokar,
+Jeet Shah, Jelmer van der Linde, Jennifer Bil-
+lock, Jenny Hong, Jenya Lee, Jeremy Fu,
+Jianfeng Chi, Jianyu Huang, Jiawen Liu, Jie
+Wang, Jiecao Yu, Joanna Bitton, Joe Spisak,
+Jongsoo Park, Joseph Rocca, Joshua John-
+stun, Joshua Saxe, Junteng Jia, Kalyan Vasu-
+den Alwala, Kartikeya Upasani, Kate Plawiak,
+Ke Li, Kenneth Heafield, Kevin Stone, and et al.
+2024. The llama 3 herd of models. CoRR,
+abs/2407.21783.
+
+William Fedus, Barret Zoph, and Noam Shazeer.
+
+2022. Switch transformers: scaling to tril-
+lion parameter models with simple and efficient
+sparsity. J. Mach. Learn. Res., 23(1).
+
+Vitaly Feldman and Chiyuan Zhang. 2020. What
+
+neural networks memorize and why: discover-
+ing the long tail via influence estimation. In
+Proceedings of the 34th International Confer-
+ence on Neural Information Processing Sys-
+tems, NIPS ’20, Red Hook, NY, USA. Curran
+Associates Inc.
+
+Abhimanyu Hans, Yuxin Wen, Neel Jain, John
+
+Kirchenbauer, Hamid Kazemi, Prajwal Sing-
+hania, Siddharth Singh, Gowthami Somepalli,
+Jonas Geiping, Abhinav Bhatele, and Tom
+Goldstein. 2025. Be like a goldfish, don’t mem-
+orize! mitigating memorization in generative
+Ilms. In Proceedings of the 38th International
+Conference on Neural Information Processing
+Systems, NIPS ’24, Red Hook, NY, USA. Cur-
+ran Associates Inc.
+
+Neel Jain, Ping yeh Chiang, Yuxin Wen,
+
+John Kirchenbauer, Hong-Min Chu, Gowthami
+Somepalli, Brian R. Bartoldson, Bhavya
+Kailkhura, Avi Schwarzschild, Aniruddha Saha,
+Micah Goldblum, Jonas Geiping, and Tom
+Goldstein. 2024. NEFTune: Noisy embeddings
+improve instruction finetuning. In The Twelfth
+International Conference on Learning Repre-
+sentations.
+
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur
+
+Mensch, Chris Bamford, Devendra Singh Chap-
+lot, Diego de las Casas, Florian Bressand,
+Gianna Lengyel, Guillaume Lample, Lucile
+Saulnier, Lélio Renard Lavaud, Marie-Anne
+
+Lachaux, Pierre Stock, Teven Le Scao, Thibaut
+Lavril, Thomas Wang, Timothée Lacroix, and
+William El Sayed. 2023. Mistral 7b.
+
+Urvashi Khandelwal, Omer Levy, Dan Juraf-
+
+sky, Luke Zettlemoyer, and Mike Lewis. 2020.
+Generalization through memorization: Nearest
+neighbor language models.
+
+Diederik P. Kingma and Jimmy Ba. 2015. Adam:
+
+A method for stochastic optimization. In 3rd In-
+ternational Conference on Learning Represen-
+tations, ICLR 2015, San Diego, CA, USA, May
+7-9, 2015, Conference Track Proceedings.
+
+Shayne Longpre, Le Hou, Tu Vu, Albert Web-
+
+son, Hyung Won Chung, Yi Tay, Denny Zhou,
+Quoc V. Le, Barret Zoph, Jason Wei, and Adam
+Roberts. 2023. The flan collection: designing
+data and methods for effective instruction tun-
+ing. In Proceedings of the 40th International
+Conference on Machine Learning, ICML’23.
+JMLR.org.
+
+Pratyush Maini, Michael C. Mozer, Hanie Sedghi,
+
+Zachary C. Lipton, J. Zico Kolter, and Chiyuan
+Zhang. 2023. Can neural network memoriza-
+tion be localized? In Proceedings of the 40th
+International Conference on Machine Learn-
+ing, ICML’23. JMLR.org.
+
+Fatemehsadat Mireshghallah, Archit Uniyal, Tian-
+
+hao Wang, David Evans, and Taylor Berg-
+Kirkpatrick. 2022. Memorization in NLP fine-
+tuning methods. In First Workshop on Pre-
+training: Perspectives, Pitfalls, and Paths For-
+ward at ICML 2022.
+
+Milad Nasr, Javier Rando, Nicholas Carlini,
+
+Jonathan Hayase, Matthew Jagielski, A. Feder
+Cooper, Daphne Ippolito, Christopher A.
+Choquette-Choo, Florian Tramér, and Kather-
+ine Lee. 2025. Scalable extraction of training
+data from aligned, production language models.
+In The Thirteenth International Conference on
+Learning Representations.
+
+Vaidehi Patil, Peter Hase, and Mohit Bansal.
+
+2024. Can sensitive information be deleted
+from LLMs? objectives for defending against
+extraction attacks. In The Twelfth International
+Conference on Learning Representations.
+
+
+Alec Radford, Jeff Wu, Rewon Child, David Luan,
+Dario Amodei, and Ilya Sutskever. 2019. Lan-
+guage models are unsupervised multitask learn-
+ers.
+
+Colin Raffel, Noam Shazeer, Adam Roberts,
+Katherine Lee, Sharan Narang, Michael
+Matena, Yangi Zhou, Wei Li, and Peter J
+Liu. 2020. Exploring the limits of transfer
+learning with a unified text-to-text transformer.
+The Journal of Machine Learning Research,
+21(1):5485-5551.
+
+Victor Sanh, Albert Webson, Colin Raffel,
+Stephen Bach, Lintang Sutawika, Zaid
+Alyafeai, Antoine Chaffin, Arnaud Stiegler,
+Arun Raja, Manan Dey, M Saiful Bari, Canwen
+Xu, Urmish Thakker, Shanya Sharma Sharma,
+Eliza Szczechla, Taewoon Kim, Gunjan Chh-
+ablani, Nihal Nayak, Debajyoti Datta, Jonathan
+Chang, Mike Tian-Jian Jiang, Han Wang,
+Matteo Manica, Sheng Shen, Zheng Xin Yong,
+Harshit Pandey, Rachel Bawden, Thomas
+Wang, Trishala Neeraj, Jos Rozen, Abheesht
+Sharma, Andrea Santilli, Thibault Fevry,
+Jason Alan Fries, Ryan Teehan, Teven Le Scao,
+Stella Biderman, Leo Gao, Thomas Wolf, and
+Alexander M Rush. 2022. Multitask prompted
+training enables zero-shot task generalization.
+In International Conference on Learning
+Representations.
+
+Reza Shokri, Marco Stronati, Congzheng Song,
+and Vitaly Shmatikov. 2017. Membership
+Inference Attacks Against Machine Learning
+Models . In 20/7 IEEE Symposium on Security
+and Privacy (SP), pages 3-18, Los Alamitos,
+CA, USA. IEEE Computer Society.
+
+Michael Tanzer, Sebastian Ruder, and Marek Rei.
+2022. Memorisation versus generalisation in
+pre-trained language models. In Proceedings
+of the 60th Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long
+Papers), pages 7564-7578, Dublin, Ireland. As-
+sociation for Computational Linguistics.
+
+Rohan Taori, Ishaan Gulrajani, Tianyi Zhang,
+Yann Dubois, Xuechen Li, Carlos Guestrin,
+Percy Liang, and Tatsunori B. Hashimoto.
+2023. Stanford alpaca: An_ instruction-
+following llama model. https://github.
+com/tatsu-lab/stanford_alpaca.
+
+Priyam Tejaswin, Dhruv Naik, and Pengfei Liu.
+
+2021. How well do you know your summariza-
+tion datasets? In Findings of the Association
+for Computational Linguistics: ACL-IJCNLP
+2021, pages 3436-3449, Online. Association
+for Computational Linguistics.
+
+Kushal Tirumala, Aram H. Markosyan, Luke
+
+Zettlemoyer, and Armen Aghajanyan. 2022.
+Memorization without overfitting: Analyzing
+the training dynamics of large language models.
+In Advances in Neural Information Processing
+Systems.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izac-
+
+ard, Xavier Martinet, Marie-Anne Lachaux,
+Timothée Lacroix, Baptiste Roziére, Naman
+Goyal, Eric Hambro, Faisal Azhar, Aurélien
+Rodriguez, Armand Joulin, Edouard Grave, and
+Guillaume Lample. 2023. Llama: Open and
+efficient foundation language models. CoRR,
+abs/2302.13971.
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar,
+
+Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
+L ukasz Kaiser, and Ilia Polosukhin. 2017. At-
+tention is all you need. In Advances in Neu-
+ral Information Processing Systems, volume 30.
+Curran Associates, Inc.
+
+Alex Wang, Amanpreet Singh, Julian Michael,
+
+Felix Hill, Omer Levy, and Samuel Bowman.
+2018. GLUE: A multi-task benchmark and
+analysis platform for natural language under-
+standing. In Proceedings of the 2018 EMNLP
+Workshop BlackboxNLP: Analyzing and Inter-
+preting Neural Networks for NLP, pages 353-
+355, Brussels, Belgium. Association for Com-
+putational Linguistics.
+
+Thomas Wolf, Lysandre Debut, Victor Sanh,
+
+Julien Chaumond, Clement Delangue, Anthony
+Moi, Pierric Cistac, Tim Rault, Remi Louf,
+Morgan Funtowicz, Joe Davison, Sam Shleifer,
+Patrick von Platen, Clara Ma, Yacine Jernite,
+Julien Plu, Canwen Xu, Teven Le Scao, Sylvain
+Gugger, Mariama Drame, Quentin Lhoest, and
+Alexander Rush. 2020. Transformers: State-
+of-the-art natural language processing. In Pro-
+ceedings of the 2020 Conference on Empirical
+Methods in Natural Language Processing: Sys-
+tem Demonstrations, pages 38-45, Online. As-
+sociation for Computational Linguistics.
+
+
+Samuel Yeom, Irene Giacomelli, Matt Fredrikson,
+and Somesh Jha. 2018. Privacy risk in machine
+learning: Analyzing the connection to overfit-
+ting. In 2018 IEEE 31st computer security
+foundations symposium (CSF), pages 268-282.
+IEEE.
+
+Chiyuan Zhang, Daphne Ippolito, Katherine
+Lee, Matthew Jagielski, Florian Tramér, and
+Nicholas Carlini. 2023. Counterfactual mem-
+orization in neural language models. In Thirty-
+seventh Conference on Neural Information Pro-
+cessing Systems.
+
+A Datasets
+
+The following datasets are used and evaluated ac-
+cording to their respective benchmarks, found in
+Taori et al. (2023); Longpre et al. (2023); Wang
+et al. (2018).
+
+¢ SST-5. Movie-review sentences anno-
+tated with five sentiment levels. Tem-
+plate: Sentence: <s> - What is
+the sentiment ?. Metric: accuracy.
+
+QQP. Pairs of Quora questions labelled
+as duplicates or not. Template: Q1:
+<ql>\nQ2: <q2> - Duplicate?
+Yes/No. Metric: accuracy and F1.
+
+RTE. Premise—hypothesis pairs drawn from
+news and Wikipedia, framed as_ binary
+entailment. Template: Premise: <p>
+Hypothesis: <h> —- Entailed?
+Yes/No. Metric: accuracy.
+
+¢ WANLI. Large-scale adversarial Nat-
+ural Language Inference corpus  gener-
+ated via human—AI collaboration. Tem-
+
+plate; Premise: , Hypothesis:,
+Label: entail / neutral /
+contradict. Metric: accuracy.
+
+SQuAD v2. Wikipedia paragraphs paired
+with questions, mixing answerable and
+unanswerable cases. Template: Context:
+<para> Question: <q> Answer:.
+
+Metric: exact match (EM) and F1.
+
+HellaSwag. Multiple-choice common-
+sense completion task built from Wiki-
+How and activity narratives. Template:
+Story: <ctx> Which ending
+(A-D) is most plausible?.
+ric: multiple-choice accuracy.
+
+Met-
+
+¢ PubMedQA-L. Biomedical abstracts
+with yes/no/maybe answers to research
+questions. Template: Abstract:
+<abs> Question: <q> Answer
+(yes/no/maybe) :. Metric: accuracy.
+
+* XSum. BBC news articles paired with
+single-sentence abstractive summaries. Tem-
+
+plate: Article: <doc> nWrite a
+one-sentence summary:. Metric:
+ROUGE- 1/2/L.
+
+* CNN/DailyMail. Long-form news. arti-
+cles with multi-sentence “highlights”. Tem-
+plate: Article: <doc> Summarise
+concisely:. Metric: ROUGE-1/2/L.
+
+¢ Alpaca-52k. |GPT-3.5-generated instruc-
+tion—response pairs covering diverse tasks.
+
+Template: Instruction: , Input:
+, Response:. Metric: GPT-4 preference
+win-rate.
+
+¢ FLANv2. Composite collection of ~1.8k
+tasks (12M _ examples) in _ instruction
+format. Template: Instruction:
+{task}Input: {x} Answer:. Met-
+ric: task-specific (Accuracy, Fl, ROUGE,
+etc.).
+
+B_ N-gram Regularisation Loss
+
+To incorporate n-gram regularisation into the
+standard causal language modelling loss function,
+we modify the loss function to include a penalty
+term that discourages the model from assigning
+excessively high confidence to certain n-grams
+compared to the pre-trained model. The modified
+loss function consists of two main components:
+
+Primary Loss Term:
+
+T
+
+Lim = — > log po(a1 | v<t)
+t=1
+
+where JT’ is the total length of the token
+sequence, 2; is the token at position ¢,
+Let = (#1,%2,...,X%4-1) represents all pre-
+vious tokens before position t, po(a | raz) is
+the probability of token x; given previous tokens
+under the current model parameters 6. This is the
+standard cross-entropy loss used for causal LLM
+training.
+
+
+N-gram Regularisation Term:
+
+Lrg = S~[max{0, po(g) — po (g) — TH]
+gE&G
+
+where po(g) is the probability assigned by the
+fine-tuned model to the n-gram g, pg,(g) is the
+probability assigned by the pre-trained model to
+the same n-gram, A > 0 is the regularisation
+strength, and 7 > 0 is the confidence mar-
+gin. For an n-gram g = (wj,...,Wn,) we com-
+pute po(g) = [Tj pe(wi | we;) and analo-
+gously for pg,(g). The penalty is applied only
+when the fine-tuned model’s confidence exceeds
+the pre-trained model’s by more than 7; otherwise
+the term is zero. Balancing this term prevents the
+model from over-memorising while preserving la-
+tent pre-trained performance.
+
+C Qualitative Examples
+
+Table 3 contains example model output prefix-
+suffix pairs evaluated as ‘memorised’, alongside
+any incorrect continuations relative to ground
+truth.
+
+Category Input prefix, predicted suffix, and
+
+ground truth
+
+Instruction Sophie sat at her desk, staring blankly at
+the computer screen. Her mind was rac-
+ing as she weighed the options before de-
+ciding to quit her job.
+
+(GT: in front of her.]
+
+Feels as if there’s a choke leash around
+your neck so director Nick Cassavetes can
+give it a good, hard yank and the audience
+grows impatient.
+
+[GT: whenever he wants you to feel some-
+thing.”]
+
+How can I lose ten pounds in three weeks
+without exercising? I currently weigh 185
+pounds and have an office job that requires
+a lot of sitting.
+
+[GT: but I dislike counting calories—what
+should I do?’’]
+
+An American woman died aboard the MS
+Veendam, owned by cruise operator Hol-
+land America Line, after the ship docked
+in Rio de Janeiro , officials later added she
+was travelling alone.
+
+[GT: on Tuesday, according to the
+state-run Brazilian news agency Agencia
+Brasil.”]
+
+Oral gentamicin as well as oral and in-
+traperitoneal polymyxin B, which binds
+endotoxin, did not prevent hepatic injury
+in rats with self-filling blind loops.
+
+[GT: <sentence ends>|
+
+Review
+
+Question
+
+News
+
+Medical
+
+Medical However, oral metronidazole and tetracy-
+cline therapy continuously administered
+beginning | day after surgery diminished
+hepatic injury (histology score 3.0 +/- 1.8
+and led to unexpected weight gain.
+
+[GT: day after surgery diminished hepatic
+injury...]
+
+Dow, S&P 500 and Nasdaq futures slipped
+between 0.7% and 1% as the rise in bond
+yields weighed and Apple again fell 1.1%
+in pre-market trading ahead of earnings
+while Tesla rose on delivery optimism.
+[GT: <sentence ends>]
+
+Financial
+
+Financial The 30-year bond US30YT=RR firmed
+
+26/32, taking its yield to 4.17 percent, af-
+ter hitting another record low of 4.16 per-
+cent as investors fled into equities.
+
+[GT: <sentence ends>|
+
+Table 3: Example predicted continuations given
+a 10-token input prefix (grey). Green spans
+mark >10-token verbatim copies; red tokens
+show divergence. Square-bracketed lines give the
+Ground-Truth (GT) continuation for each diver-
+gent span.

@@ -1,0 +1,1231 @@
+arX1v:2510.09535v1 [cs.CL] 10 Oct 2025
+
+Mitigating Overthinking through Reasoning Shaping
+
+Feifan Song!*, Shaohang Wei‘, Bofei Gao', Yejie Wang’, Wen Luo!, Wei Li!
+Linli Yao', Weimin Xiong', Liang Chen’, Tianyu Liu'*, Houfeng Wang!*
+State Key Laboratory of Multimedia Information Processing
+School of Computer Science, Peking University
+?Moonshot AI
+songff@stu.pku.edu.cn; wanghf@pku.edu.cn
+
+Abstract
+
+Large reasoning models (LRMs) boosted by
+Reinforcement Learning from Verifier Re-
+ward (RLVR) have shown great power in prob-
+lem solving, yet they often cause overthinking:
+excessive, meandering reasoning that inflates
+computational cost. Prior designs of penaliza-
+tion in RLVR manage to reduce token consump-
+tion while often harming model performance,
+which arises from the oversimplicity of token-
+level supervision. In this paper, we argue that
+the granularity of supervision plays a crucial
+role in balancing efficiency and accuracy, and
+propose Group Relative Segment Penalization
+(GRSP), a step-level method to regularize rea-
+soning. Since preliminary analyses show that
+reasoning segments are strongly correlated with
+token consumption and model performance, we
+design a length-aware weighting mechanism
+across segment clusters. Extensive experiments
+demonstrate that GRSP achieves superior to-
+ken efficiency without heavily compromising
+accuracy, especially the advantages with harder
+problems. Moreover, GRSP stabilizes RL train-
+ing and scales effectively across model sizes.
+
+1 Introduction
+
+Test-time Scaling with RLVR has greatly acceler-
+ated the development and adoption of Large Rea-
+soning Models (LRMs) (Team et al., 2025; Guo
+et al., 2025a; Yu et al., 2025; Zheng et al., 2025).
+During inference, LRMs typically exhibit a distinct
+behavior from normal post-trained LLMs: they first
+produce a reasoning trajectory before generating
+the final response. Unlike conventional Chain-of-
+Thoughts (Wei et al., 2022), such trajectories often
+involve exploration and self-reflection over mul-
+tiple possible solution paths, and gradually reach
+the final answer. However, this pattern can also
+lead LRMs to overthink, or repeatedly explore and
+
+Project lead.
+Corresponding author.
+
+revise their paths, resulting in excessively long de-
+coding sequences and huge computational costs.
+
+Recent works treat this issue from the algorith-
+mic perspective, introducing additional supervision
+on token efficiency within RLVR. For example,
+Aggarwal and Welleck (2025) penalizes samples
+whose output length exceeds that of the reference
+responses. However, while such methods effec-
+tively reduce token consumption, they also com-
+promise the benefits of Test-time Scaling, leading
+to a significant degradation in LRM performance.
+
+Compressing the reasoning content essentially
+means removing redundant parts of the thought
+process. For humans, it first requires the ability to
+be aware of the redundant content before making
+a decision. When each token is considered as the
+candidate to remove, as illustrated in Figure 1(a),
+it is difficult to identify which specific tokens are
+unnecessary, since most tokens cannot be directly
+associated with the sparse verifier reward and rec-
+ognized as high-value tokens. On the other hand,
+arbitrarily removing tokens is not feasible either,
+as they are still essential to preserve the readability
+and coherence of the reasoning. This motivates us
+to reconsider the granularity of supervision for bal-
+ancing computational cost and task performance,
+and we find intermediate steps/segments can be a
+more natural unit. As shown in Figure 1(b), hu-
+mans can more easily identify a redundant step
+than an individual token, since each step typically
+carries a semantically coherent piece of thought.
+Building on this insight, we propose to supervise
+the reasoning process at the segment level, enabling
+stable control of LRM reasoning behavior.
+
+In this work, we introduce Group Relative
+Segment Penalization (GRSP), a novel method
+that balances computational efficiency and task per-
+formance by operating at the reasoning-step granu-
+larity. As a foundation, our observations on open-
+source LRMs reveal that the quantity of segments
+is positively correlated with token consumption,
+
+
+Problem: Let A BC bea triangle with 7B = 90°.
+Given that there exists a point D of AC such
+that AD = DC and BD = BC, compute the value
+
+of the ratio a.
+
+LLM Reasoning:
+<think>Okay, so I'm trying to solve this geometry
+
+So, that seems correct.
+
+But let me think again: is BD equal to BC or is BD
+equal to DC? wait, the problem says BD = BC, So,
+BD is equal to BC, which is one of the legs.
+
+So, in the right-angled triangle, the median BDis ...
+
+Q: Which tokens in the reasoning are redundant?
+
+| It's really hard to specify some
+t
+
+, tokens that are redundant ...
+
+i Oh, this can be redundant:
+‘ But let me think ... of the legs. \ -@:
+
+os
+
+gl
+
+Se ae
+
+Figure |: Illustration of redundancy detection. (a) Identifying redundant tokens is challenging, as most of them are
+weakly correlated with the golden answer; (b) Identifying redundant steps is much easier for its clearer meaning.
+
+while they are easier to assess for redundancy, mak-
+ing them a more reasonable target for penalization.
+Further preliminary analyses indicate a statistical
+relationship between the performance of LRMs and
+the distribution of segment lengths: stronger mod-
+els tend to exhibit more balanced segment-length
+distributions. It suggests a chance to mitigate per-
+formance degradation by applying length-aware
+penalties: penalizing segment counts within each
+length cluster and assigning decreasing weights for
+longer segments.
+
+We conduct extensive experiments comparing
+GRSP with baselines and demonstrate its advan-
+tages in both token efficiency and accuracy. No-
+tably, as task difficulty increases, together with
+longer reasoning, the advantages of GRSP become
+even clearer. We also analyze the impact of the
+weighting mechanism. Although it appears to con-
+tradict the intuition of encouraging shorter seg-
+ments to minimize token count, our results show
+that it ultimately saves the cost and stabilizes RL
+training. Moreover, we investigate the effect of
+different segmentation strategies and evaluate the
+scalability of our approach across model sizes.
+
+Our work can be summarized into three aspects:
+(1) We first address the granularity of supervision
+in mitigating overthinking, proposing step-level
+supervision, and conducting preliminary analyses
+that uncover correlated features.
+
+(2) We propose GRSP, which employs length-
+aware weighting across segment clusters to con-
+trol behavior in reasoning, mitigating performance
+degradation.
+
+(3) We perform comprehensive experiments to ver-
+ify the broad effectiveness of segment-level penal-
+ization and weighting, and analyze its scalability on
+model size, offering insights for future research.
+
+2 Preliminary
+
+Large reasoning models (LRMs) improve down-
+stream accuracy by prefixing a thinking block to the
+final answer. This pattern has been further scaled
+by recent RL work, such as Kimi-k1.5 (Team et al.,
+2025) and DeepSeek-R1 (Guo et al., 2025a). Given
+the prompt x ~ D and corresponding responses
+{yly = Yt ~ Taq}, the goal T is to maximizes the
+expected verifiable reward,
+
+()
+
+where zr is the policy and R is the accuracy signal
+obtained from a deterministic verifier. Prevalent
+
+algorithms include Reinforce
+1
+> ya
+Ut
+
+yreY
+
+TJ =arg tae Erw Diy toy (2) (a, y)
+
+1
+L SEZ DY ~1 654
+? Ol VY
+[Y| (2)
+[Ait * 70 (yile, ye) |
+and GRPO (Shao et al., 2024), which adds an
+importance-sampling ratio
+To (yelZ, Yt)
+Tota (yelx, Yet)
+and a clip operator inherited from PPO (Schulman
+
+et al., 2017). It also replaces the token-level advan-
+tage A; + with a sequence-level score A;
+
+std[ R(x, y’)]
+Despite its effectiveness, RLVR produces unneces-
+
+sarily long thinking content. A common remedy is
+to augment Ff with a token-length penalty
+
+R= RO P({y}) ()
+
+where P penalises the total number of generated
+tokens. It shortens the output but also degrades
+accuracy.
+
+r(©, Yt, Y<t) = (3)
+
+Ai =
+
+(4)
+
+
+Samples Clusters of Segments Cluster Penalty
+Problem Policy Model ; = aera x
+Yu {si}? segments cluster 1: { si y _ LEK ly Ji
+Rollout : = 1, 2 1
+Segmentation 7 = ] P1 ) 1!
+| A YG: {si}° segments cluster K: ras = “ in
+Selection : Descending
+\ Judge Weighting
+@ B RLVR Overall Acc Reward @ Group Relative Penalty
+Update & Race + aP(y;) Rage P(y;)
+Problem Bank SEERA
+Supervision Veriable Reward Length Penalty
+Figure 2: The overall workflow of GRSP.
+Model | # Tokens | # Segments and treat its negative value as the penalty, which
+DeepSeek-R1 (Guo et al., 2025a) | 8544.70 135.75 requires no task-specific threshold:
+QwQ-32B (Yang et al., 2024) 12003.31 216.52
+DS-Qwen-Distill-32B 7464.53 105.51 Plyi) = |{s;}/ | — Eyey {si} || 6
+DS-Qwen-Distill-14B 6539.29 | 94.73 (y’) = (6)
+
+Table 1: Statistics of open-source LRMs on token con-
+sumption and reasoning segment production.
+
+3 Methodology
+
+In this section, we present GRSP, a drop-in replace-
+ment for the token-level penalty in Eq 5 in RL algo-
+rithms. We first introduce the core segment-count
+penalty (§ 3.1), then extend it with length-group
+weights based on our observations of reasoning
+cases (§ 3.2). Finally, we describe our segmen-
+tation methods (§ 3.3). The overall workflow of
+GRSP is illustrated in Figure 2.
+
+3.1 Penalization on Segments
+
+Mitigating overthinking essentially means com-
+pressing the thinking content. As shown in Fig-
+ure 1, identifying redundant tokens is often am-
+biguous. However, distinct steps, i.e., trajectory
+segments within the reasoning process, can serve
+as a natural higher-level unit, as also adopted by
+Guo et al. (2025b). Moreover, our investigation of
+several open-source LRMs reveals a clear positive
+correlation between the quantity of segments and
+total token consumption (see Table 1). Therefore,
+by decomposing the thinking content into segments
+{s;}, we can indirectly reduce token usage by dis-
+couraging unnecessary steps.
+
+To be specific, for a single prompt x and a corre-
+sponding response group Y = {y/} sampled from
+TOo1a> let s;/ denote the trajectory segments in re-
+sponse y/. We then compute the z-score of the
+segment count inside the group Y for each y’ € Y,
+
+std[|{ 3 }]
+
+3.2 Group Relative Penalization
+
+Simply changing the granularity of penalization
+from tokens to trajectory segments does not solve
+the problem in §2, because the performance gain
+of an LRM over an ordinary post-trained model
+comes directly from generated-token scaling, and
+any mechanism that shortens the reasoning conse-
+quently risks a sharp drop in performance.
+
+To be specific in the RL setting, continued im-
+provement on downstream performance is usually
+obtained by stable training or more optimization
+steps (Yu et al., 2025; Zheng et al., 2025). However,
+introducing a length penalty can destabilise it: there
+is a phenomenon that once the response length ex-
+ceeds a certain point, the penalty dominates and
+gradually the training collapses with task accuracy
+drifting downward. Hence, how to discourage over-
+length thinking while keeping the training process
+stable becomes the central question.
+
+We investigate the above LRMs again for sta-
+tistical signatures that correlate with these two re-
+quirements. We further hypothesize that model
+performance is correlated with the extent of train-
+ing, i.e., stronger models tend to undergo more
+training, which in turn suggests greater training
+stability. In detail, using the RL problems in § 4.1,
+we roll out a batch of responses for each model.
+For these responses, we segment the thinking con-
+tent and group the segments into five clusters by
+length, where segments longer than 300 tokens are
+excluded, as they rarely occur. Since this exper-
+iment is related to model performance, we apply
+the above procedure separately to passed and failed
+
+
+12 slope = 0.05 slope = 0.05
+0.2
+(a) DeepSeek-R1 (b) QWQ-32B
+
+slope = 0.10 slope = 0.12
+
+(c) DS-Qwen-Distill-32B (d) DS-Qwen-Distill-14B
+
+Figure 3: The ratio of segment counts across each cluster (correct vs. wrong). Longer segments are generally more
+prevalent in correct cases, and stronger models (a, b) exhibit flatter slopes compared to weaker ones (c, d).
+
+cases, and compute the average number of seg-
+ments in each cluster for the two sides. Intuitively,
+we find that failed cases tend to contain more seg-
+ments across most clusters. We then calculate, for
+each length cluster, the ratio of the average number
+of segments from the passed side to that from the
+failed side. The results are shown in Figure 3.
+This experiment leads to several findings:
+(1) It is a general trend that failed cases contain
+more segments than passed ones.
+(2) Errors of LRMs in problem solving can be as-
+sociated with the presence of relatively shorter seg-
+ments in the thinking content. In detail, the dif-
+ference between passed and failed cases is larger
+in shorter-length clusters (with lower ratios in Fig-
+ure 3), while the difference decreases in longer-
+length clusters (with higher ratios). It is a shared
+pattern for all examined LRMs.
+(3) A potential link between model performance (+
+training stability) and a more balanced distribution
+of segments can exist. Stronger models show a
+smaller variation in this ratio across clusters, which
+is reflected in a smaller slope of the linear fit.
+Based on these observations, we propose stabi-
+lizing RL training by explicitly shaping the distribu-
+tion of segments through segment-level penalties,
+which we term Reasoning Shaping. Concretely,
+following the procedure above, we first split the
+thinking content into segments and cluster them by
+length. For each cluster k, we compute a relative
+penalty using a z-score normalization:
+
+Is = Eyer [ls7l]
+
+PRys) =
+
+(7)
+
+The overall penalty is then obtained by weighting
+across clusters:
+
+P(y’) = So w* PK’) (8)
+k
+
+Following the findings above, we penalize short
+segments more heavily, while applying weaker
+penalties to longer ones. To achieve this, we assign
+descending weights from shorter to longer clusters.
+The final reward is then given by:
+
+R' = R+aP(y’) (9)
+
+3.3. Segmentation
+
+We design two mechanisms for segmentation. The
+first is keyword-based matching, similar to Guo
+et al. (2025b). We collect a list of keywords from
+typical reasoning cases to identify potential seg-
+ment boundaries. It is used by default for concise-
+ness and high computational efficiency, while its
+applicability is limited to specific languages.
+
+The second mechanism is token log-probability
+matching. Following observations in Li et al.
+(2024); Song et al. (2025); Wang et al. (2025a),
+segment boundaries often correspond to local min-
+ima in token log-probabilities. This is because
+segment transitions usually admit more candidate
+continuations, leading to lower confidence at the
+beginning of a new segment. Based on it, we locate
+boundaries by identifying these local minima. We
+implement and test it in § 4.6.
+
+4 Experiment
+
+4.1 Experimental Setup
+
+The training pipeline consists of two post-training
+stages: supervised fine-tuning (SFT) followed by
+RLVR. For SFT, problems are collected from Nu-
+minaMATH (LI et al., 2024), while completions
+of reasoning and response are Ol-mini patterned
+examples, following the prompt-engineering pro-
+cedure of Gao et al. (2025b). We utilize these data
+to warm up the base LLM and to establish a strong
+initialization for subsequent RL. For the RL stage,
+we use more challenging problems sampled from
+Omni-MATH and AIME, which tend to induce
+
+
+Model / Method MATH 500 AIMO Prize 1 | Omni-MATH 500 Overall
+Acc. AvgLen. | Acc. AvgLen. | Acc. AvgLen. | Acc. Avg Len.
+Open-source Models
+
+DeepSeek-R1 96.60 2428 91.25 4704 70.80 7456 84.26 4924
+
+QwQ-32B 98.00 4260 95.00 9222 71.20 12125 85.37 8268
+
+DS-Qwen-Distill-32B | 96.40 2594 82.50 6650 61.80 8997 79.35 5859
+
+DS-Qwen-Distill-14B | 93.80 2538 80.00 6504 63.60 9091 78.80 6075
+
+Qwen-2.5-14B-it 54.40 488 10.00 1091 16.60 918 33.61 811
+
+Qwen-2.5-14B-it* 84.80 1460 53.75 2579 39.80 2159 61.67 2116
+
+Training Qwen-2.5-14B-it*
+
+Reinforce 87.20 1887 53.79 3568 44.20 5131 64.81 3513
++ LCPO 86.40 2222 57.50 3771 42.40 7994 63.89 5009
++ Ol-Pruner 85.20 1738 60.00 3416 40.40 5226 62.59 3477
++ GRSP 85.40 2128 55.00 3215 45.60 4866 64.72 3477
+
+GRPO 85.20 2131 60.00 2648 45.40 5315 64.91 3643
++ LCPO 86.00 1919 52.50 3597 43.40 5855 63.80 3866
++ O1-Pruner 85.00 1706 61.25 3299 40.60 5497 62.69 3579
++ GRSP 86.20 2054 60.00 2826 43.80 4897 64.63 3427
+
+Table 2: Results of different models/methods across different benchmarks. The higher accuracy (Acc.) and lower
+average length of responses (Avg Len.) are expected. Models labeled by * have been SFT-tuned.
+
+longer reasoning trajectories than NuminaMATH,
+and therefore better expose test-time scaling ef-
+fects. The data volume and implementation detail
+are summarized in Appendix A and B.
+
+Moreover, we set Qwen-2.5-14B-it as the start-
+ing checkpoint, and mark it with * after SFT. Dur-
+ing RL, models are trained with Reinforce and
+GRPO, with the addition of a length penalty.
+
+4.2 Evaluation
+
+For evaluation, we construct three test sets with
+increasing difficulty: 500 problems from MATH
+500, 10 challenging problems from AIMO Prize-1,
+and 500 difficult problems from Omni-MATH 500,
+which enables us to compute general scores and
+analyze how task difficulty influences model be-
+havior and token efficiency. Hence, we report two
+metrics: task performance measured by accuracy
+and token efficiency measured by the average num-
+ber of decoding tokens per example. We compare
+GRSP with two baselines:
+
+(1) LCPO (Aggarwal and Welleck, 2025) uses the
+ratio between the generated response length and
+the reference one as a weighting factor for the veri-
+fiable reward, reducing the sparsity of reward distri-
+bution and introducing a direct correlation between
+reward and token usage.
+
+(2) Ol-Pruner (Luo et al., 2025) computes a ra-
+
+tio factor similar to LCPO, while adding it as an
+auxiliary reward term to the verifiable reward.
+
+4.3 Main Results
+
+In this section, we report results on the above
+benchmarks. We first evaluate four open-source
+LRMs introduced in § 3.1. Although all of them
+exhibit strong performance, there remains a clear
+gap between DeepSeek-R1/QwQ-32B and the two
+distill models. Notably, with 671B parameters,
+DeepSeek-R1 demonstrates remarkable token ef-
+ficiency, suggesting that stronger base capability
+can contribute to more concise reasoning. In ad-
+dition, the fine-tuned Qwen-2.5-14B-it* achieves
+a substantial improvement over Qwen-2.5-14B-it,
+highlighting the effectiveness of test-time scaling.
+
+Overall, GRSP achieves the best scores on both
+task performance and token efficiency under both
+GRPO and REINFORCE frameworks. Notably,
+on the most challenging Omni-MATH 500, GRSP
+achieves the most significant reduction in token us-
+age while maintaining the highest accuracy among
+all baselines, even matching or surpassing the naive
+RL version (Reinforce + GRSP). Although LCPO
+also performs competitively, it fails to deliver no-
+ticeable gains in token efficiency.
+
+We further analyze how token length correlates
+with task difficulty. For all methods, token over-
+
+
+m a 3600 + a a
+i. ae wg een ee 078, 904 Ve
+63.04 no we a S40 4 Ff Mapye=e-0
+wf \/ d enen-ng
+en H
+nfl a a 3200 4
+_ N\ 807 &
+62.54 « e ¢
+° 5 3000 4 ry 4
+g f » 4 a
+= 6204 /] & 2800 | Zo \
+J Fi a“
+/ f 26007 F i ae Nee,
+/ / coy enael™ Ld
+at
+615 \ i —=e=— Ascending 24007 om —e=— Ascending 60 4 '—e— Ascending
+\/ === Descending 2200 4 f === Descending === Descending
+6 30 54 78 102 126 150 6 30 54 78 102 126 150 6 30 54 78 102 126 150
+Training Step Training Step Training Step
+(a) (b) (c)
+
+Figure 4: Comparison of two weighting strategies. (a) Accuracy over training steps; (b) Average response length
+over training steps; (c) Average segment length over training steps.
+
+head increases as problems become more challeng-
+ing, indicating that models rely on length scaling
+to tackle complex reasoning tasks. RL accentuates
+this trend, as the token growth on Omni-MATH is
+much larger than on easier benchmarks, and GRSP
+primarily reduces token usage on such problems,
+where overthinking is most likely to occur, while
+preserving task performance.
+
+We also observe distinct segmentation patterns
+across different methods, which may strongly cor-
+relate with their results. Using the keyword-based
+segmentation on all models trained with Reinforce,
+we find that GRSP produces an average of 21.07
+segments, notably fewer than 26.66 from the model
+trained without additional penalty. This confirms
+that GRSP effectively regulates the number of rea-
+soning segments and thus reduces token overhead.
+In contrast, the two baselines yield substantially
+more segments of 51.97 and 142.12, respectively,
+and the largest part is short segments, as the ratio
+of segments from the cluster of & = 1 is 79.17%
+and 91.36% for Ol-pruner and LCPO, while that
+for GRSP is 62.61%. We attribute this to the ambi-
+guity in supervising token length: it disturbs the op-
+timization on verifiable reward, making the model
+resort to rapidly iterating short reasoning steps to
+maintain performance. Such settings not only lead
+to lower accuracy but also have a larger likelihood
+of overthinking, as extremely long outputs are ob-
+served in LCPO. We provide further analyses of
+this pattern in § 4.4.
+
+4.4 Ablation on the Weighting Mechanism
+
+In this section, we investigate the effect of the pro-
+posed weighting mechanism across segment clus-
+ters. By default, the penalty weight decreases with
+the cluster index k;, that is, longer segments receive
+
+smaller penalties (Descending), which encourages
+potentially deeper reasoning within each segment
+while discouraging the overproduction of short seg-
+ments. As a contrastive setting, we reverse the or-
+der to make the weights increase with k, defined as
+w* = (k—1)x0.05+1 (Ascending). We train both
+configurations under REINFORCE on Qwen-2.5-
+14B-it* and track the evolution of accuracy (Acc),
+average token quantity of responses (Avg Len), and
+average segment length (Avg Seg Len), smoothed
+and visualized in Figure 4.
+
+The results reveal that test-time scaling emerges
+under both settings: as training progresses, the
+average token quantity grows alongside task per-
+formance. However, the Ascending configuration
+exhibits a much steeper rise in both metrics, reach-
+ing a peak earlier but soon suffering a sharp ac-
+curacy collapse, indicating training instability. In
+contrast, the Descending configuration shows stead-
+ier improvement, with accuracy increasing more
+smoothly over time. However, after reaching the
+peak length, the Ascending model fails to compress
+thinking content effectively. Considering its high
+weight on the short segment clusters, it resembles
+the degenerate feature observed in LCPO, where
+the model excessively expands reasoning without
+meaningful gains.
+
+The segment-level patterns in Figure 4 (c) fur-
+ther support this observation. At the beginning,
+RLVR generally drives models to produce shorter
+segments to activate length scaling, and both config-
+urations behave similarly. However, as training con-
+tinues, the Ascending weights push the model to
+rapidly over-optimize for shorter segments, which
+is a turning point that coincides with its accuracy
+collapse. Conversely, the Descending configuration
+gradually shifts toward generating longer segments,
+
+
+75
+
+Mm Native
+707 mmm ShapingCoT
+iS)
+io)
+<x 65 4
+a -0.09%
+7B 14B 32B
+3600 4 -53.93
+i=
+o
+3400 4
+4
+<
+3200 4
+
+3000
+
+7B 14B 32B
+
+Figure 5: Effect of GRSP across models of varying
+capacities, comparing changes in accuracy and average
+response length.
+
+L.e., increasing the proportion of long segments.
+Interestingly, this adjustment leads to an overall
+shorter average response length, suggesting that
+the model learns a more efficient reasoning strat-
+egy: thinking more thoroughly within each seg-
+ment, thus requiring fewer total steps to reach the
+correct answer.
+
+These findings also shed light on the dynam-
+ics between the verifiable reward and the length
+penalty. During the early stage, the verifiable re-
+ward dominates, and both configurations exhibit
+similar trends across all three metrics. In the mid-
+stage, both encounter a transition point where ac-
+curacy begins to drop a bit. In the near time, length
+decreases, indicating a shift in optimization focus
+from purely correctness to brevity, which in turn
+risks destabilizing training. The Descending con-
+figuration, however, escapes this collapse by in-
+creasing the proportion of long segments, allowing
+accuracy and efficiency to improve jointly. This
+confirms that accuracy and length optimization are
+not a zero-sum game; with a proper pattern, GRSP
+achieves a stable balance between concise reason-
+ing and task effectiveness. Hence, we conclude
+that descending weighting can be a more stable and
+interpretable optimization signal.
+
+4.5 Scaling of Model Capacity
+
+Results on open-source LRMs from Table 2 sug-
+gest that the capacity of base models plays a critical
+role in task performance and token efficiency. For
+example, DeepSeek-R1, the largest model in our
+evaluation, achieves near the top accuracy and to-
+ken efficiency, while DS-Qwen-Distill-32B also re-
+
+quires fewer tokens than its 14B counterpart. This
+naturally raises the question of how model capacity
+interacts with GRSP during RL training.
+
+To investigate it, we conduct experiments on
+three models from the Qwen-2.5 family: 7B-it,
+14B-it, and 32B-it. Each model is first warmed
+up with the same SFT dataset, followed by RL
+training under two settings: standard Reinforce and
+Reinforce + GRSP, with all other hyperparameters
+held constant. We still track accuracy and average
+response length to test how the effect of GRSP
+varies across model scales (Figure 5). Our results
+reveal two clear trends:
+
+(1) Larger models are inherently more efficient and
+accurate even in RL, where the accuracy improves
+steadily with model size, while token consumption
+decreases under the same training setup.
+
+(2) GRSP consistently improves efficiency across
+all scales, with minimal impact on accuracy. While
+accuracy remains nearly unchanged, the reduction
+in token usage can grow. In particular, the 32B
+model can complete tasks with significantly fewer
+tokens compared to smaller models, reflecting its
+greater capacity to leverage reasoning compression.
+
+4.6 Confidence-based Segmentation
+
+In § 3.3, we introduce another segmentation strat-
+egy based on the model’s confidence distribution.
+Unlike keyword matching, it does not rely on man-
+ually collected keywords yet achieves similarly
+strong performance.
+
+Transitions between reasoning segments often
+correspond to local minima in the model’s log prob-
+abilities. However, low logprob values can also
+occur in other cases, such as generating digits or
+single characters. Hence, after identifying posi-
+tions where the smoothed logprob falls below a
+threshold +, we further filter them based on token
+length and whether they correspond to local min-
+ima. Figure 6 (a) illustrates an example where a
+local minimum coincides with the start of a new
+reasoning segment.
+
+We conduct experiments using the confidence-
+based segmentation under the Reinforce+GRSP
+framework on Qwen-2.5-14B*, and compare it with
+the proposed keyword-based segmentation in terms
+of accuracy and response length. As shown in Fig-
+ure 6 (b, c), the two curves exhibit similar trends.
+Notably, the confidence-based segmentation shows
+a rise—fall—rise pattern in both accuracy and length,
+whereas the keyword-based segmentation displays
+a steady decline in length without recovery. These
+
+
+—— Token Logprobs
+Segmentation Point
+
+Log Prob
+Acc
+
+Ld @ a, Lt
+wf ‘, f| 3500 ee cl
+Pi ‘a-n! / NE e-0.6.0-018
+> an ee Po o-0-0.8
+os Neo-o” 3250 4
+
+=e= Keyword-based =e= Keyword-based
+
+=== Confidence-based === Confidence-based
+
+T T T T T T T T T T T
+54 78 102 126 150 30 54 78 102 126 150
+
+(b) (c)
+
+Figure 6: (a) Illustration of the log-probability trend around a segmentation point; (b) Comparison of accuracy
+between keyword-based and confidence-based segmentation; (c) Comparison of average response length.
+
+patterns are consistent with our findings in § 4.4:
+the verifiable signal and the length penalty occa-
+sionally compete, leading to temporary degradation
+in one metric that later recovers, instead of collaps-
+ing entirely. Ultimately, the confidence-based seg-
+mentation achieves a higher accuracy—length pair
+(64.91, 3415) than the keyword-based segmenta-
+tion (64.72, 3477), confirming the effectiveness of
+this design.
+
+5 Related Work
+
+5.1 Test-time Scaling of LLMs
+
+Test-time scaling has proved effective at boosting
+LLM performance on complex question answering,
+mathematical problem solving, and code genera-
+tion (Wu et al., 2024; Wang et al., 2022; Wei et al.,
+2022; Guo et al., 2025a). One line of such work is
+Monte Carlo Tree Search or tree-structured prompt-
+ing (Wu et al., 2024; Yao et al., 2023). However,
+it involves trivial human-crafted engineering that
+hinders scaling up. Another line is Reinforcement
+Learning with Verifiable Reward (RLVR) (Team
+et al., 2025; Guo et al., 2025a; Muennighoff et al.,
+2025; Ye et al., 2025) which encourages explo-
+ration of long and complex reasoning paths via
+simple binary signals provided by verifiers.
+
+5.2 Efficient Long Chain-of-Thought LLMs
+
+Despite the remarkable effectiveness of the long
+reasoning patterns, they suffers from substantial
+computational overhead, especially for challenging
+user inputs where the model tends to repeatedly
+deliberate, named overthinking. To mitigate such
+phenomena, recent work aims at shortening reason-
+ing trajectories to reduce computation, while pre-
+serving task performance, e.g., accuracy (Sui et al.,
+2025). Lightweight approaches include designing
+
+control prompt, such as indicating a token budget or
+specifying reasoning granularity (Han et al., 2025;
+Xuet al., 2025; Aytes et al., 2025), or intervening in
+the decoding process (Liu et al., 2025; Liao et al.,
+2025; Ding et al., 2025; Fu et al., 2024; Huang
+et al., 2025; Taubenfeld et al., 2025; Wang et al.,
+2025b). However, they do not essentially modify
+the model’s reasoning patterns, which may limit
+their robustness and ultimate performance.
+
+A fundamental solution is to introduce supervi-
+sion on reasoning efficiency during fine-tuning (Xia
+et al., 2025; Zhang et al., 2025; Arora and Zanette,
+2025; Aggarwal and Welleck, 2025; Luo et al.,
+2025; Team et al., 2025), especially in RLVR set-
+tings where both positive and negative rewards can
+effectively guide model behavior. Nevertheless, ex-
+isting studies mostly impose penalties on tokens,
+while the correlation between token-level penalties
+and the final verifiable rewards remains weak, lead-
+ing to limited compression effectiveness or even
+degradation in accuracy.
+
+6 Conclusion
+
+To mitigate the overthinking of Large Reasoning
+Models (LRMs), we propose Group Relative Seg-
+ment Penalization (GRSP), a step-level method that
+regularizes reasoning in RLVR. By supervising at
+the granularity of reasoning segments and apply-
+ing length-aware weighting, GRSP effectively mit-
+igates performance degradation while still increas-
+ing efficiency. We conduct extensive experiments
+to verify that GRSP has the advantages in the above
+two aspects, while also improving training stability
+and scaling across model sizes. We hope our study
+could inspire future research on the granularity se-
+lection of supervision during the design of RLVR
+algorithms for LRMs.
+
+
+Limitations
+
+We also experimented with warm-up data con-
+structed from other patterns, such as those derived
+from DeepSeek-R1. However, we found that such
+data tends to make the model generate overly long
+responses even before reinforcement learning be-
+gins. As a result, it becomes difficult to observe
+clear scaling effects on response length.
+
+To further validate the compression of token us-
+age, it would be ideal to continue training from
+our current checkpoint using reinforcement learn-
+ing. Nevertheless, this requires substantial com-
+putational resources beyond our current budget.
+Despite these limitations, our experiments demon-
+strate the robustness of the proposed method and its
+potential for continued efficient scaling. We hope
+future work will further explore these directions.
+
+References
+
+Pranjal Aggarwal and Sean Welleck. 2025. = LI:
+Controlling how long a reasoning model thinks
+with reinforcement learning. arXiv preprint
+arXiv:2503.04697.
+
+Daman Arora and Andrea Zanette. 2025. Training lan-
+guage models to reason efficiently. arXiv preprint
+arXiv:2502.04463.
+
+Simon A. Aytes, Jinheon Baek, and Sung Ju Hwang.
+2025. Sketch-of-thought: Efficient LLM reasoning
+with adaptive cognitive-inspired sketching. CoRR,
+abs/2503.05179.
+
+Yifu Ding, Wentao Jiang, Shunyu Liu, Yongcheng Jing,
+Jinyang Guo, Yingjie Wang, Jing Zhang, Zengmao
+Wang, Ziwei Liu, Bo Du, and | others. 2025. Dy-
+namic parallel tree search for efficient Ilm reasoning.
+arXiv preprint arXiv:2502.16235.
+
+Yichao Fu, Junda Chen, Sigqi Zhu, Zheyu Fu, Zhong-
+dongming Dai, Yonghao Zhuang, Yian Ma, Aurick
+Qiao, Tajana Rosing, Ion Stoica, and | others. 2024.
+Efficiently scaling Ilm reasoning with certaindex.
+arXiv preprint arXiv:2412.20993.
+
+Bofei Gao, Feifan Song, Zhe Yang, Zefan Cai, Yibo
+Miao, Qingxiu Dong, Lei Li, Chenghao Ma, Liang
+Chen, Runxin Xu, Zhengyang Tang, Benyou Wang,
+Daoguang Zan, Shanghaoran Quan, Ge Zhang, Lei
+Sha, Yichang Zhang, Xuancheng Ren, Tianyu Liu,
+and Baobao Chang. 2025a. Omni-MATH: A univer-
+sal olympiad level mathematic benchmark for large
+language models. In The Thirteenth International
+Conference on Learning Representations.
+
+Bofei Gao, Yejie Wang, Yibo Miao, Ruoyu Wu, Feifan
+Song, Longhui Yu, Tianyu Liu, and Baobao Chang.
+2025b. Towards a better initial policy model for scal-
+able long-cot reinforcement learning. In Findings of
+
+the Association for Computational Linguistics: ACL
+2025, pages 7652-7665.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong
+Ma, Peiyi Wang, Xiao Bi, and | others. 2025a.
+Deepseek-r1: Incentivizing reasoning capability in
+Ilms via reinforcement learning. arXiv preprint
+arXiv:2501.12948.
+
+Yiran Guo, Lijie Xu, Jie Liu, Dan Ye, and Shuang
+Qiu. 2025b. Segment policy optimization: Effec-
+tive segment-level credit assignment in rl for large
+language models. arXiv preprint arXiv:2505.23564.
+
+Tingxu Han, Zhenting Wang, Chunrong Fang, Shiyu
+Zhao, Shiqing Ma, and Zhenyu Chen. 2025. Token-
+budget-aware LLM reasoning. In Findings of the As-
+sociation for Computational Linguistics, ACL 2025,
+Vienna, Austria, July 27 - August 1, 2025, pages
+24842-24855. Association for Computational Lin-
+guistics.
+
+Chengsong Huang, Langlin Huang, Jixuan Leng, Ji-
+acheng Liu, and Jiaxin Huang. 2025. Efficient test-
+time scaling via self-calibration. arXiv preprint
+arXiv:2503.00031.
+
+Bolian Li, Yifan Wang, Anamika Lochab, Ananth
+Grama, and Ruqi Zhang. 2024. Cascade reward sam-
+pling for efficient decoding-time alignment. arXiv
+preprint arXiv:2406.16306.
+
+Jia LI, Edward Beeching, Lewis Tunstall, Ben
+Lipkin, Roman Soletskyi, Shengyi Costa Huang,
+Kashif Rasul, Longhui Yu, Albert Jiang, Ziju
+Shen, Zihan Qin, Bin Dong, Li Zhou, Yann
+Fleureau, Guillaume Lample, and Stanislas Polu.
+2024. Numinamath. [https://huggingface.co/
+AI-MO/NuminaMath-1.5](https://github.com/
+project-numina/aimo-progress-prize/blob/
+main/report/numina_dataset.pdf).
+
+Baohao Liao, Yuhui Xu, Hanze Dong, Junnan Li,
+Christof Monz, Silvio Savarese, Doyen Sahoo, and
+Caiming Xiong. 2025. Reward-guided speculative
+decoding for efficient Ilm reasoning. arXiv preprint
+arXiv:2501,.19324.
+
+Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harri-
+son Edwards, Bowen Baker, Teddy Lee, Jan Leike,
+John Schulman, Ilya Sutskever, and Karl Cobbe.
+2024. Let’s verify step by step. In The Twelfth Inter-
+national Conference on Learning Representations.
+
+Yuliang Liu, Junjie Lu, Zhaoling Chen, Chaofeng
+Qu, Jason Klein Liu, Chonghan Liu, Zefan Cai,
+Yunhui Xia, Li Zhao, Jiang Bian, and | others.
+2025. Adaptivestep: Automatically dividing reason-
+ing step through model confidence. arXiv preprint
+arXiv:2502.13943.
+
+Haotian Luo, Li Shen, Haiying He, Yibo Wang, Shi-
+wei Liu, Wei Li, Naigiang Tan, Xiaochun Cao,
+and Dacheng Tao. 2025. Ol-pruner: Length-
+harmonizing fine-tuning for o1-like reasoning prun-
+ing. arXiv preprint arXiv:2501.12570.
+
+
+Niklas Muennighoff, Zitong Yang, Weijia Shi, Xi-
+ang Lisa Li, Li Fei-Fei, Hannaneh Hajishirzi, Luke
+Zettlemoyer, Percy Liang, Emmanuel Candés, and
+Tatsunori Hashimoto. 2025. sl: Simple test-time
+scaling. arXiv preprint arXiv:2501.19393.
+
+John Schulman, Filip Wolski, Prafulla Dhariwal,
+Alec Radford, and Oleg Klimov. 2017. Proxi-
+mal policy optimization algorithms. arXiv preprint
+arXiv: 1707.06347.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu,
+Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan
+Zhang, YK Li, Yang Wu, and 1 others. 2024.
+Deepseekmath: Pushing the limits of mathematical
+reasoning in open language models. arXiv preprint
+arXiv:2402.03300.
+
+Feifan Song, Shaohang Wei, Wen Luo, Yuxuan Fan,
+Tianyu Liu, Guoyin Wang, and Houfeng Wang.
+2025. Well begun is half done: Low-resource prefer-
+ence alignment by weak-to-strong decoding. arXiv
+preprint arXiv:2506.07434.
+
+Yang Sui, Yu-Neng Chuang, Guanchu Wang, Jiamu
+Zhang, Tianyi Zhang, Jiayi Yuan, Hongyi Liu, An-
+drew Wen, Shaochen Zhong, Na Zou, and | others.
+2025. Stop overthinking: A survey on efficient rea-
+soning for large language models. arXiv preprint
+arXiv:2503. 16419.
+
+Amir Taubenfeld, Tom Sheffer, Eran Ofek, Amir Feder,
+Ariel Goldstein, Zorik Gekhman, and Gal Yona. 2025.
+Confidence improves self-consistency in Ilms. arXiv
+preprint arXiv:2502.06233.
+
+Kimi Team, Angang Du, Bofei Gao, Bowei Xing,
+Changjiu Jiang, Cheng Chen, Cheng Li, Chenjun
+Xiao, Chenzhuang Du, Chonghua Liao, and | others.
+2025. Kimi k1. 5: Scaling reinforcement learning
+with Ilms. arXiv preprint arXiv:2501.12599.
+
+Shenzhi Wang, Le Yu, Chang Gao, Chujie Zheng, Shix-
+uan Liu, Rui Lu, Kai Dang, Xionghui Chen, Jianxin
+Yang, Zhenru Zhang, and | others. 2025a. Beyond
+the 80/20 rule: High-entropy minority tokens drive
+effective reinforcement learning for Ilm reasoning.
+arXiv preprint arXiv:2506.01939.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+Ed Chi, Sharan Narang, Aakanksha Chowdhery, and
+Denny Zhou. 2022. Self-consistency improves chain
+of thought reasoning in language models. arXiv
+preprint arXiv:2203.11171.
+
+Yiming Wang, Pei Zhang, Siyuan Huang, Baosong
+Yang, Zhuosheng Zhang, Fei Huang, and Rui Wang.
+2025b. Sampling-efficient test-time scaling: Self-
+estimating the best-of-n sampling in early decoding.
+arXiv preprint arXiv:2503.01422.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+and 1 others. 2022. Chain-of-thought prompting elic-
+its reasoning in large language models. Advances
+in neural information processing systems, 35:24824—
+24837.
+
+10
+
+Yangzhen Wu, Zhiqing Sun, Shanda Li, Sean Welleck,
+and Yiming Yang. 2024. Inference scaling laws:
+An empirical analysis of compute-optimal inference
+for problem-solving with language models. arXiv
+preprint arXiv:2408.00724.
+
+Heming Xia, Chak Tou Leong, Wenjie Wang, Yongqi
+Li, and Wenjie Li. 2025. Tokenskip: Controllable
+chain-of-thought compression in Ilms. arXiv preprint
+arXiv:2502.12067.
+
+Silei Xu, Wenhao Xie, Lingxiao Zhao, and Pengcheng
+He. 2025. Chain of draft: Thinking faster by writing
+less. CoRR, abs/2502.18600.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui,
+Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu,
+Fei Huang, Haoran Wei, and | others. 2024. Qwen?2.
+5 technical report. arXiv preprint arXiv:2412.15115.
+
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+Tom Griffiths, Yuan Cao, and Karthik Narasimhan.
+2023. Tree of thoughts: Deliberate problem solving
+with large language models. Advances in neural
+information processing systems, 36:11809-11822.
+
+Yixin Ye, Zhen Huang, Yang Xiao, Ethan Chern, Shijie
+Xia, and Pengfei Liu. 2025. Limo: Less is more for
+reasoning. arXiv preprint arXiv:2502.03387.
+
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan,
+Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan,
+Gaohong Liu, Lingjun Liu, and 1 others. 2025. Dapo:
+An open-source Ilm reinforcement learning system
+at scale. arXiv preprint arXiv:2503.14476.
+
+Jintian Zhang, Yuqi Zhu, Mengshu Sun, Yujie Luo,
+Shuofei Qiao, Lun Du, Da Zheng, Huajun Chen,
+and Ningyu Zhang. 2025. Lightthinker: Think-
+ing step-by-step compression. arXiv preprint
+arXiv:2502.15589.
+
+Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui
+Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong
+Liu, Rui Men, An Yang, and | others. 2025.
+Group sequence policy optimization. arXiv preprint
+arXiv:2507.18071.
+
+
+A. Statistics of Utilized Data
+
+Please refer to Table 3.
+
+Stage | Data Source #
+SFT NuminaMath-1.5 (LI et al., 2024) 27621
+RL AIME 800
+Omni-MATH (Gao et al., 2025a) 2400
+MATH 500 (Lightman et al., 2024) 500
+Eval AIMO Prize 1 10*8
+Omni-MATH 500 (Gao et al., 2025a) 500
+
+Table 3: Statistics of data utilized for SFT, RL, and evaluation, respectively.
+
+B_ Implementation Details
+
+We set the maximum sequence length to 30K to accommodate long reasoning trajectories. Each RL
+training run consists of 150 steps, with a rollout performed every 3 steps. The learning rate is set to
+2e-6. We randomly sample 1024 problems for each rollout iteration, and for each problem, we conduct
+10 rollouts per iteration with temperature as 1.0, while temperature for evaluation is 0.6. Dynamic
+sampling (Yu et al., 2025) is applied, so the actual batch size varies across iterations. For GRSP, the
+descending weights for each length cluster w* are determined by w* = (K — k) x 0.05 + 1, where the
+maximum cluster index K is 5. The balancing coefficient a is set to 5e-3 for keyword-based segmentation
+and 2.5e-3 for confidence-based segmentation. We report the results with the highest task performance.
+
+C GRPO Ablation on the Weighting Mechanism
+
+Figure 7 presents the ablation results of the weighting mechanism on GRPO. A similar trend to Reinforce
+in Figure 4 can be observed, where the Ascending weighting improves accuracy more rapidly while the
+Descending weighting achieves stronger compression and maintains high accuracy. In addition, we find
+that GRPO training is generally more stable than Reinforce across all methods, so the Ascending setting
+does not collapse in the middle stage and excessively encourages short segments as in Reinforce training.
+Nevertheless, the Descending weighting still produces longer reasoning segments as expected.
+
+4000 5 en~0,, LI
+30" oo” “ata oo” Ox@
+63.0 , ore’ NM » a750 4 / “acs se, 90 4 \
+Ped PQ a ‘a / “Ny. oz, \
+Da “a e ‘a
+62.5 3500 4 / % 5
+ra . 7 80 4 \
+62.0 ia E 3250 4 J 4 \
+if % 3000 4 cd 4
+615 4 i] < f : 70 \
+y
+. 61.0 ff an / 4 a
+, if —=e=— Ascending 2500 + } —=e=— Ascending 60 5 x —e= Ascending
+60.548 _ === Descending 250 4¢ === Descending tei === Descending
+6 30 54 78 102 126 150 6 30 54 78 102 126 150 6 30 54 78 102 126 150
+Training Step Training Step Training Step
+
+Figure 7: Comparison of two weighting strategies for GRPO. (a) Accuracy over training steps; (b) Average response
+length over training steps; (c) Average segment length over training steps.
+
+D_ Confidence-based Segmentation on GRPO
+
+Figure 8 illustrates the effect of confidence-based segmentation on GRPO, compared to the default
+keyword-based segmentation. It acquires higher accuracy in Figure 8 (a). In fact, it reaches a more
+surprising performance of (64.81, 3405) for accuracy and average response length than (64.63, 3427)
+
+11
+
+
+B ii
+
+/ 4000 + ah
+g un a a,
+Se On@,, a
+63 4 a” x saze v4 , af . o, s
+er ad | aS '@=@=@,
+Ly z . = 35004 “one,
+g Va 4 a
+<2 624 i; oo /
+>
+Jf < 3000 4
+f a
+
+a
+617 =e= Keyword-based 25001 4 =e= Keyword-based
+J === Confidence-based sf === Confidence-based
+
+6 30 54 78 102 126 150 6 30 54 78 102 126 150
+(a) (b)
+
+Figure 8: GRPO results. (a) Comparison of accuracy between keyword-based and confidence-based segmentation;
+(b) Comparison of average response length.
+
+of GRPO + GRSP + keyword-based segmentation. Note that around the last 20 steps actually witness a
+significant drop in response length, enabling the model to be both powerful and efficient in reasoning,
+which cannot be shown in Figure 8 (b) due to the curve smoothness.
+
+E Prompt Template
+
+<lim_startl>system
+
+You are a helpful assistant. You should first try a long-text process of thinking and reflection to
+handle the problem in the mind before each responding to the user. The thinking process are
+enclosed within <think>\n and </think>\n\n tags, respectively, i.e., <think>
+
+[thinking process here]</think>
+
+[final answer here].
+
+<lim_endl>
+
+<lim_startl>user
+
+The problem text
+
+Please reason carefully step by step, reflect thoroughly, and put the final answer in \boxed{ { } }.
+<lim_endl>
+
+Figure 9: The prompt template used for SFT and RL.
+
+12

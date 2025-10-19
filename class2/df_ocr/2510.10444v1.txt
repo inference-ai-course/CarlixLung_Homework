@@ -1,0 +1,2386 @@
+arX1iv:2510.10444v1 [cs.CL] 12 Oct 2025
+
+Do Audio LLMs Really LISTEN, or Just Transcribe?
+Measuring Lexical vs. Acoustic Emotion Cues Reliance
+
+Jingyi Chen!”, Zhimeng Guo’, Jiyun Chun’, Pichao Wang*, Andrew Perrault”, Micha Elsner!
+
+‘Department of Linguistics, The Ohio State University, USA
+?Department of Computer Science and Engineering, The Ohio State University, USA
+3Department of Information Sciences and Technology, Penn State University, USA
+4Amazon, USA
+
+chen.9220, chun.203, elsner.14, perrault.17 @osu.edu, zzg5107 @psu.edu, pichaowang @ gmail.com
+
+Abstract
+
+Understanding emotion from speech requires
+sensitivity to both lexical and acoustic cues.
+However, it remains unclear whether large au-
+dio language models (LALMs) genuinely pro-
+cess acoustic information or rely primarily on
+lexical contents. We present LISTEN (Lexical
+vs. Acoustic Speech Test for Emotion in Nar-
+ratives), a controlled benchmark designed to
+disentangle lexical reliance from acoustic sensi-
+tivity in emotion understanding. Across evalua-
+tions of six state-of-the-art LALMs, we observe
+a consistent lexical dominance. Models predict
+“neutral” when lexical cues are neutral or ab-
+sent, show limited gains under cue alignment,
+and fail to classify distinct emotions under cue
+conflict. In paralinguistic settings, performance
+approaches chance. These results indicate that
+current LALMs largely “transcribe” rather than
+“listen”, relying heavily on lexical semantics
+while underutilizing acoustic cues. LISTEN of-
+fers a principled framework for assessing emo-
+tion understanding in multimodal models.
+
+1 Introduction
+
+Large audio language models (LALMs) have re-
+cently demonstrated impressive capabilities in mul-
+timodal reasoning, enabling systems to process
+spoken input and generate naturalistic responses.
+These advances hold particular promise for appli-
+cations requiring social and emotional intelligence,
+where successful interaction depends not only on
+lexical content but also on acoustic cues such as
+pitch, intonation, and rhythm (OpenAT et al., 2024;
+Comanici et al., 2025; Xu et al., 2025b). However,
+an open question remains: to what extent do these
+models actually make use of the speech signal it-
+self, rather than relying on lexical cues alone?
+This uncertainty arises in part from how LALMs
+are constructed. Most contemporary models are
+adapted from large text-only LLMs through mul-
+timodal fine-tuning with paired speech-text data.
+While this process transfers strong linguistic and
+
+reasoning abilities, it also raises the possibility of a
+structural bias: models may inherit a preference for
+lexical cues, while treating acoustic information as
+secondary. Such a bias is particularly problematic
+because speech is not merely text presented in an al-
+ternative modality. Beyond lexical content, spoken
+communication carries acoustic and paralinguis-
+tic signals, including intonation, pitch, intensity,
+rhythm, and voice quality, that are central to how
+meaning is conveyed (Scherer, 2003; Banse and
+Scherer, 1996). These cues frequently interact with,
+and in some cases override, the lexical channel. A
+salient example is sarcasm, where the intended
+emotional stance directly contradicts the literal
+words; listeners correctly interpret the speaker’s
+intent by relying primarily on acoustic cues rather
+than lexical semantics (Bryant and Fox Tree, 2005).
+
+However, current benchmarks provide limited di-
+agnostic insight into this issue. Many datasets con-
+tain emotionally explicit words (e.g., furious, de-
+lighted), which enable models to achieve high accu-
+racy by exploiting transcript-based shortcuts. Con-
+sequently, strong performance on standard emotion
+recognition tasks may overestimate a model’s abil-
+ity to process acoustic and paralinguistic informa-
+tion, leaving open the question of whether these
+systems are genuinely listening to speech.
+
+To address this gap, we introduce LISTEN: Lex-
+ical vs. Acoustic Speech Test for Emotion in Nar-
+ratives, a new benchmark explicitly designed to
+disentangle lexical reliance from acoustic sensi-
+tivity in emotion understanding. Our evaluation
+framework spans four controlled conditions that
+manipulate the relationship between lexical cues
+and acoustic cues: (i) Neutral-Text, where lexical
+contents are emotionally neutral but acoustic cue
+varies, isolating the contribution of acoustic cues;
+(ii) Emotion-Matched, where lexical and acous-
+tic cues are aligned; (iii) Emotion-Mismatched,
+where lexical and acoustic cues conflict, as in
+sarcasm; and (iv) Paralinguistic, where affect is
+
+
+conveyed without lexical content (e.g., laughter,
+sighs). Within Neutral-Text, Emotion-Matched,
+and Emotion-Mismatched conditions, we system-
+atically compare performance across Text-only,
+Audio-only, and Text+Audio modalities. This de-
+sign enables us to probe whether LALMs succeed
+by genuinely processing acoustic information or by
+defaulting to transcript-based shortcuts.
+
+Our contributions (1) We introduce LISTEN,
+the first diagnostic benchmark explicitly con-
+structed to separate lexical and acoustic effects
+in emotion understanding through controlled cue
+manipulation and multimodal evaluation. (2)
+We systematically evaluate six state-of-the-art
+open- and closed-weight LALMs across all con-
+ditions and modalities, revealing a consistent lex-
+ical dominance that limits true listening abil-
+ity. (3) We analyze how cue alignment, con-
+flict, and absence each shape model behavior, of-
+fering new insight into why current audio lan-
+guage models “transcribe” emotion more than
+they “listen” to it. LISTEN benchmark is avail-
+able at: https://huggingface.co/datasets/
+VibeCheck1/LISTEN_full. Code is available at
+https: //github.com/DeliJingyiC/LISTEN.
+
+2 Related work
+
+Audio Benchmarks Recent benchmarks have
+broadened LALM evaluation across diverse audio
+domains. MMAU (Sakshi et al., 2024) introduced
+10k QA pairs over 27 skills for speech, sound,
+and music, while MMAU-Pro (Kumar et al., 2025)
+extended it to long-form, multi-source, and cul-
+turally diverse audio. MMAR (Ma et al., 2025)
+added 1k real-world QA triplets with hierarchical
+reasoning, though limited in scale. AudioBench
+(Wang et al., 2025a) unified 26 datasets in eight task
+types, and MuChoMusic (Weck et al., 2024) tested
+1.1k MCQs highlighting textual bias. MMSU
+(Wang et al., 2025b) evaluated 5k spoken QA pairs
+across 47 skills, and Dynamic-SUPERB Phase-2
+(yu Huang et al., 2025) covered 180 instruction-
+tuned speech, music, and sound tasks. AHELM
+(Lee et al., 2025) offered a holistic benchmark span-
+ning perception, reasoning, emotion, bias, and mul-
+tilingual safety. Although several of these bench-
+marks include emotion or sarcasm tasks, none di-
+rectly probe how models use the speech signal
+itself—whether predictions arise from prosodic
+and paralinguistic cues or from lexical shortcuts
+in transcripts. Current evaluations therefore leave
+
+open a central question: to what extent do LALMs
+genuinely listen rather than read? Addressing
+this gap, LISTEN systematically manipulates lexi-
+cal—acoustic alignment to disentangle transcript re-
+liance from acoustic sensitivity, offering the first di-
+agnostic framework for assessing whether LALMs
+truly process emotional information from speech.
+
+Large Audio Language Models Recent ad-
+vances in large audio language models (LALMs)
+such as GPT-40 (OpenAI et al., 2024), Gemini
+2.5 (Comanici et al., 2025), Qwen 2.5-Omni (Xu
+et al., 2025a), Qwen 3-Omni (Xu et al., 2025b), and
+Baichuan-Omni (Li et al., 2025) have demonstrated
+strong capabilities in processing spoken input and
+generating naturalistic responses. Baichuan-Omni
+and the Qwen Omni series are explicitly reported
+to derive from text-based LLM backbones later
+adapted to audio through multimodal training.
+While this design transfers rich linguistic knowl-
+edge from text, it also risks introducing a transcript-
+dominant bias in which lexical information over-
+rides acoustic evidence. Gemini 2.5, though highly
+multimodal, has not disclosed its training specifics,
+leaving similar concerns unresolved.
+
+Speech Emotion Recognition Recent advances
+in deep learning have markedly improved
+Speech Emotion Recognition (SER). End-to-end
+CNN-RNN architectures can learn hierarchical
+acoustic representations from waveforms or spec-
+trograms, achieving high accuracy and robust-
+ness across speakers and recording conditions
+(Barhoumi and BenAyed, 2024). More recent
+transformer and attention-based systems further
+enhance performance through intra-speech feature
+fusion, and graph-based modeling (Singh et al.,
+2023; Chowdhury et al., 2025). These approaches
+show that explicitly modeling prosodic, spectral,
+and temporal features yields strong emotion recog-
+nition accuracy from speech alone. Nevertheless,
+most SER systems remain confined to the acoustic
+modality and do not assess how lexical and acoustic
+cues jointly contribute to emotion understanding.
+
+3 The LISTEN Framework
+
+LISTEN is an evaluation framework designed to
+assess how large audio language models balance
+reliance on lexical cues versus acoustic cues in
+speech emotion understanding. The primary goal
+of LISTEN is not simply to measure classifica-
+tion accuracy, but to provide a controlled setting
+
+
+Neutral-Text
+
+Text Only
+
+Question: Read the transcription and
+classify the emotion. Transcription: "He
+showed no signs of age." What
+emotion is suggested by the meaning
+of these words?
+
+A. angry
+
+B. sad
+
+C. neutral
+
+D. happy
+
+E. surprise
+
+Emotion-Matched
+
+Text Only
+
+Question: Read the transcription and
+classify the emotion. Transcription:
+"Mind your own business." What.
+feeling is suggested by the meaning of
+these words?
+
+Emotion-Mismatched Paralinguistic
+
+Text Only
+
+Question: Read the transcription and
+classify the emotion. Transcription:
+"Yeah, that's working out great for me."
+What feeling is suggested by the
+meaning of these words?
+
+Audio Only
+
+Question: Listen to the audio and
+classify the emotion. What emotional
+state is reflected in the speaker's
+
+A. neutral F. frustration
+B. angry G. surprise
+C. sadness H. fear
+
+D. excitement
+
+E. happiness O. disgust
+Audio Only
+
+Question: Listen to the audio and
+classify the emotion. What emotion is
+expressed in the speaker's voice?
+
+voice?
+
+} j
+A. sad 4 a A. neutral F. frustration 4 4
+B. neutral B. angry G. surprise
+C. angry C. sadness H. fear
+D. happy D. excitement...
+E. surprise E. happiness O. disgust
+Text + Audio Text + Audio
+
+Question: Listen to the audio and read
+the transcription, then classify the
+emotion. Transcription: "Mind your own
+business." Based on the vocal
+expression, what emotion is the speaker
+
+Question: Listen to the audio and read
+the transcription, then classify the
+emotion. Transcription: "He showed no
+signs of age." How would you describe
+the emotional tone of the speaker?
+
+feeling?
+A. sad a) A. neutral F. frustration 4@ Wy)
+B. happy B. angry G. surprise
+C. neutral C. sadness H. fear
+D. surprise D. excitement
+E. angry E. happiness O. disgust
+
+A. disgust F. fear
+
+B. anger G. frustration
+
+C. surprise H. neutral
+
+D. happiness |. sadness
+
+E. excitement J. ridicule
+
+Audio Only Audio Only
+
+Question: Listen to the audio and
+classify the emotion. What emotion is
+expressed in the speaker's voice?
+
+)
+F. excitement
+
+Question: Listen to the audio and
+classify the emotion. What emotion is
+expressed in the speaker's voice?
+
+A. disgust F. fear A. Fear
+
+B. anger G. frustration B. anger G. frustration
+C. surprise H. neutral C. surprise H. neutral
+
+D. happiness I. sadness E. happiness I. sadness
+E. excitement J. ridicule
+
+Text + Audio
+
+Question: Listen to the audio and read
+the transcription, then classify the
+emotion. Transcription: "Yeah, that's
+working out great for me." Listening to
+the voice, what emotion is being
+
+expressed?
+
+A. Fear F. disgust a“)
+B. anger G. frustration
+
+C. surprise H. neutral
+
+F. happiness I. sadness
+
+E. excitement J. ridicule
+
+Figure 1. Examples from the LISTEN benchmark.
+
+that disentangles lexical dependence from acous-
+tic sensitivity, thereby enabling deeper insight into
+whether models are genuinely listening to speech.
+
+The benchmark is organized into four carefully
+designed conditions that manipulate the alignment
+between lexical cues and acoustic cues: (i) Neutral-
+Text, where lexical contents are emotionally neu-
+tral but acoustic cues vary, isolating the contri-
+bution of acoustic cues; (ii) Emotion-Matched,
+where lexical and acoustic cues are aligned to rein-
+force the same affect; (ii) Emotion-Mismatched,
+where lexical and acoustic cues conflict, as in sar-
+casm; and (iv) Paralinguistic, where affect is con-
+veyed without lexical content (e.g., laugh, sighs,
+breathing). Within the first three conditions, LIS-
+TEN further compares performance across Text-
+only (lexical cues only), Audio-only (acoustic and
+implicit lexical cues), and Text+Audio (both modal-
+ities with explicit lexical reinforcement) modalities
+to probe modality-specific reliance.
+
+This design is grounded in psycholinguistic find-
+ings that lexical and acoustic channels do not con-
+tribute equally in all contexts: when the two align,
+both provide useful evidence, but when they con-
+flict, as in sarcasm, acoustic cue carries the deci-
+sive signal (Bryant and Fox Tree, 2005; Attardo
+et al., 2003). Our goal is not to require LALMs to
+mimic human processing, but to test whether they
+can adaptively exploit the information present in
+speech, identifying which cues are informative and
+
+when they should be weighted more heavily. In
+emotion-matched situations, lexical meaning may
+be useful, but in mismatched or paralinguistic set-
+tings, models must rely on acoustic and nonverbal
+signals to reach the correct interpretation. LISTEN
+makes these trade-offs explicit: by manipulating
+lexical—acoustic alignment, it forces models to re-
+veal whether they are genuinely leveraging speech
+audio or defaulting to transcript shortcuts.
+
+3.1 Data Construction
+
+Selected samples from the LISTEN benchmark are
+shown in Figure 1. Our benchmark construction fol-
+lows a three-stage procedure to ensure theoretical
+grounding, dataset diversity, and quality control.
+
+Stage 1: Condition Design. Building on the
+four experimental conditions, we formalize oper-
+ational definitions and modality-specific ground-
+truth mapping to guide dataset selection and anno-
+tation. Neutral-Text: lexically neutral sentences
+with varied emotional acoustic cues; the text-only
+ground truth is fixed to neutral, while audio-only
+and text+audio use the sample’s true emotion label.
+Emotion-Matched: lexical meaning and acoustic
+cues are aligned; all three modalities use the true
+emotion label. Emotion-Mismatched: controlled
+conflicts between lexical polarity and prosodic
+tone; text-only uses the dataset’s explicit emotion
+label, whereas audio-only and text+audio use the
+
+
+dataset’s implicit emotion label. Paralinguistic: no
+lexical content; use the true emotion label. Repre-
+sentative examples appear in the Appendix A.7.
+
+Stage 2: Dataset Mapping. Each condition is
+instantiated using established emotional speech
+corpora spanning monologue and dialogue, acted
+and spontaneous data. Neutral-Text includes
+acted corpora such as CREMA-D (Cao et al.,
+2014), Emotion Speech Dataset (Zhou et al., 2022),
+TESS (Schuller et al., 2010), SAVEE (King and
+Narayanan, 2011), and RAVDESS (Livingstone
+and Brown, 2018), which are specifically designed
+with fixed, semantically neutral sentences (e.g.,
+“It’s eleven o’clock”) spoken with varied emo-
+tional prosody, ensuring affect is conveyed solely
+through acoustic cues. Emotion-Matched covers
+both acted and spontaneous corpora, including
+IEMOCAP (Busso et al., 2008), CMU-MOSEI
+(Zadeh et al., 2018), OMGEmotionCh (Liu et al.,
+2021), MSP-PODCAST (Gladstone et al., 2020),
+and MELD (Chen et al., 2020), where lexical se-
+mantics and prosody are broadly aligned; Cue
+alignment for this group was verified through
+corpus-level metadata. Emotion-Mismatched lever-
+ages MUSTARD++ (Ray et al., 2022), which con-
+tains sarcastic and ironic speech where lexical sen-
+timent and prosodic emotion deliberately conflict;
+to verify this divergence, we manually examined
+the explicit emotion conveyed by lexical sentiment
+and the implicit emotion expressed through acous-
+tic delivery in the corpus metadata. Finally, par-
+alinguistic samples are extracted from IEMOCAP
+using annotated transcripts. Additional information
+on each dataset can be found in Appendix A.1.
+
+Stage 3: Question Generation. For each
+condition and modality (Text-only, Audio-only,
+Text+Audio), standardized multiple-choice emo-
+tion recognition prompts were generated using
+GPT-5 (OpenAI, 2025). Parallel templates targeted
+the same judgment, identifying the speaker’s emo-
+tion, while differing in focus on lexical meaning,
+vocal prosody, or both. To minimize inference-time
+bias, one paraphrased question form was randomly
+selected per item from a small pool of semanti-
+cally equivalent variants, and answer options were
+shuffled to prevent positional bias. All prompt tem-
+plates were manually reviewed to ensure semantic
+equivalence and modality relevance. Representa-
+tive examples are provided in Appendix A.2.
+
+3.2 LISTEN Statistics
+
+Table 1 summarizes the core statistics of the LIS-
+TEN benchmark, which consists of 7,939 evalu-
+ation questions spanning four experimental con-
+ditions and three modality partitions. Among
+the four conditions, Neutral-Text constitutes the
+largest portion with 3,428 questions, followed by
+Emotion-Matched (3,155), Paralinguistic (975),
+and Emotion-Mismatched (381). On average, each
+question contains 14.7 words, while answer options
+average 8.3 words. The associated audio clips are
+short and focused, averaging 3.5 seconds, ensur-
+ing that emotional cues remain perceptually salient
+without introducing long-context confounds. De-
+tailed distributions for each dataset and condition
+are provided in the Appendix A.3.
+
+Table 1. Key statistics of the LISTEN benchmark.
+
+Statistic Value
+Total questions 7,939
+Task count 4
+Modality count 3
+Neutral-Text 3,428
+Emotion-Matched 3,155
+Emotion-Mismatched 381
+Paralinguistic 975
+Average question length 14.7 words
+Average option length 8.3 words
+Average audio length 3.5 seconds
+
+4 Experiments
+
+Models We evaluate state-of-the-art large audio
+language models including closed-weight models,
+Gemini 2.5 Flash and Gemini 2.5 Pro (Comanici
+et al., 2025); open-weight models: Qwen2.5-Omni-
+7B (Xu et al., 2025a), Qwen3-Omni-30B (Xu et al.,
+2025b), Baichuan-Omni-1.5 (Li et al., 2025), and
+Qwen3-Instruct (Xu et al., 2025b). The hyperpa-
+rameters and configurations used during the evalu-
+ation process are consistent with their official set-
+tings. Details appear in Appendix A.4.
+
+Evaluation Protocol For each sample, we
+present the model with a multiple-choice question
+containing 5-10 emotion options (happiness, sad-
+ness, anger, fear, surprise, disgust, neutral, frus-
+tration, excitement, ridicule). To prevent position
+bias, we randomize the order of choices for each
+query. Models receive only the audio, text, or both
+
+
+depending on the condition, with sample identifiers
+anonymized to prevent information leakage.
+
+We employ zero-shot evaluation with carefully
+designed prompts that instruct models to classify
+emotions based solely on the provided input. For
+text-only conditions, models receive transcriptions
+without timing or acoustic annotations. For audio-
+only conditions, models process raw audio without
+text transcripts. For multimodal conditions, both
+audio and text transcripts are provided simultane-
+ously. Examples are provided in Appendix A.7.
+
+4.1 Metrics
+
+We evaluate model performance using overall ac-
+curacy, the proportion of correctly classified sam-
+ples across emotion categories. Since each sample
+is assigned a single ground-truth label, accuracy
+reflects the correctness and equals micro-F1 in this
+single-label multi-class setting. To interpret model
+performance relative to chance, we report three
+reference baselines for each experiment:
+
+¢ Uniform Guess: assumes a random classifier
+that predicts each emotion class with equal
+probability. This baseline represents the accu-
+racy expected from purely random guessing
+with no prior information about the dataset.
+
+¢ Majority Guess: always predicts the most fre-
+quent emotion in the dataset. This provides an
+upper bound for trivial label-frequency heuris-
+tics and reflects dataset imbalance.
+
+¢ Prediction-Marginal Distribution Baseline:
+estimates the expected accuracy of a random
+classifier that samples predictions according
+to the model’s own empirical prediction dis-
+tribution rather than uniformly. This captures
+how much of a model’s performance can be
+attributed to its output bias rather than mean-
+ingful input sensitivity.
+
+Formally, let p; denote the probability the model
+predicts class 2, and q; the empirical frequency of
+class 7 in the ground-truth labels. The expected
+prediction-marginal accuracy is computed as:
+
+E[Acc] = S > pidi- (1)
+
+This expectation accounts for both dataset imbal-
+ance (q;) and model prediction bias (p;), yielding a
+more informative lower bound than uniform guess-
+ing. When p; = qi, the expected value corresponds
+
+to the Bayes-optimal random baseline given the
+dataset label prior. We report all accuracies in
+Table 2, with each model’s prediction-marginal
+baseline shown in parentheses for direct compari-
+son. The gaps between the accuracy reported and
+the prediction marginal distribution baseline reveal
+how much performance comes from the interpre-
+tation of input cues rather than from model’s own
+prediction bias. Larger gaps indicate stronger use
+of real lexical or acoustic information.
+
+5 Results and Analysis
+
+Overall Performance ‘Table 2 and Figure 2 sum-
+marizes results across all experimental conditions.
+Overall, models still rely more on text than on
+acoustic cues, but their behavior shifts depending
+on how speech and lexical cues align.
+
+Neutral-Text condition the transcripts are de-
+liberately emotionless while the audio expresses a
+range of emotions, allowing us to isolate the role
+of acoustic cues. In the text-only setting, where all
+transcripts are neutral and the ground-truth label
+is neutral for every sample, LALMs reach near-
+perfect accuracy (e.g., 96.6% for Gemini2.5-Pro,
+85.4% for the Qwen Omnis). In contrast, in audio-
+only setting, models must infer emotion directly
+from acoustic cues. It shows much lower scores
+(25-35%), revealing the difficulty of recognizing
+emotional tone from acoustic cues. Qwen?.5-
+Omni-7B and Gemini 2.5-Pro has 34.0% and 34.9%
+accuracy relatively. Other models’ accuracy are
+all below 30.0% When text and audio are com-
+bined, the closed-weight Gemini2.5-Pro shows a
+modest gain (41.7%), suggesting partial use of
+acoustic cues even when lexical content is neutral,
+whereas open-weight models (e.g., Qwen2.5-Omni-
+7B, Baichuan-Omni-1.5) and Gemini2.5-Flash of-
+ten perform worse than their audio-only baselines.
+Qwen2.5-Omni-7B has a large accuracy drop from
+audio only to textt+audio (34.0% — 19.8%)
+Further evidence of this pattern is shown in the
+confusion matrices in Figure 3, which visualizes
+Gemini 2.5-Pro’s emotion-recognition behavior
+across the three LISTEN conditions—(1) Neutral-
+Text, (2) Emotion-Matched, and (3) Emotion-
+Mismatched—each tested with text-only, audio-
+only, and audio + text inputs. The top row three
+heat maps corresponds to the Neutral-Text condi-
+tion. In the text-only setting, the confusion ma-
+trix shows a single dominant bar in the neutral
+column, indicating that the model predicts “‘neu-
+
+
+Table 2. Accuracy (with prediction marginal distribution baseline in parenthesis—see subsection 4.1) are reported. Bold values
+highlight the highest value and underlined values highlight the second-highest value in each experiment. For each condition,
+the Average column represents the mean of the audio and text+audio settings. The Overall Average is computed as the mean
+accuracy across all audio and text+audio results from the four experimental conditions (seven modalities in total).
+
+Neutral-Text
+
+Emotion-Matched
+
+Emotion-Mismatched
+
+Paralinguistic Overall
+
+Model Text Audio Text+Audio Average Text Audio Text+Audio Average Text Audio Text+Audio Average Audio Average
+Uniform Guess 12.5 12.5 12.5 12.5 6.7 6.7 6.7 6.7 10.0 10.0 10.0 10.0 12.5 10.1
+Majority Guess 100 16.9 16.9 16.9 26.5 26.5 26.5 26.5 39.0 39.0 39.0 39.0 32.6 28.2
+Open- Weight Model
+Qwen3-instruct 66.6 (65.0) - - - 33.5 (12.4) - - - 38.0 (29.8) - - - - -
+Qwen2.5-Omni-7B 85.4 (84.1) 34.0(10.9) 19.8 (11.8) 26.9 36.4(15.7) 36.6(14.1) 38.6 (15.7) 37.6  34.0(13.5) 38.5 (29.5) 39.1 (23.6) 38.8 22.7 (11.4) 32.8
+Qwen3-Omni-30B 85.4 (84.0) 29.3(11.3) 25.3 (11.8) 27.3 38.7(11.7) 42.4(15.8) 43.1 (15.5) 42.8  34.6(12.2) 37.4(26.7) 39.1 (25.2) 38.3 21.0 (12.6) 33.9
+Baichuan-Omni-1.5 81.2 (79.6) 16.5(11.5) 15.2 (12.1) 15.9 31.0(15.9) 36.0(15.6) 36.0 (17.8) 36.0 31.0 (27.5) 36.0 (31.0) 36.0 (32.0) 36.0 22.7 (11.5) 28.3
+Closed-Weight Model
+Gemini2.5-Flash 82.5 (81.5) 25.6(10.7) 24.6 (11.0) 25.1 36.6 (14.3) 30.7(12.3) 38.9 (14.1) 34.8 33.1(10.1) 35.8 (15.5) 38.0 (18.5) 36.9 18.0 (12.0) 30.2
+Gemini2.5-Pro 96.6 (96.6) 34.9(12.8) 41.7 (12.9) 38.3 38.8(15.7) 37.6(16.9) 40.2 (14.3) 38.9 31.8 (10.0) 36.9 (22.5) 42.6 (23.3) 39.8 15.7 (9.3) 35.7
+Text lm Audio mmm TexttAudio --- Prediction-Marginal Baseline
+Neutral-Text Emotion-Matched Emotion-Mismatched
+100 &
+y
+80 F - Fr
+id
+
+S &
+
+> co} ||
+
+8 s ee Ne o 2 old et wy ¥
+
+? ° ° > ° 29 ra: ° 9
+© . 2 ’ see eis ost oe #08 = oe oe oe 38 #
+e ©
+aw We + F
+20 ae
+°
+ce | 30% a on Ro a 430% a on RO cs | eS) sy: on gro
+a eer ow’ 3008? * on a8 A as” a ae on 300? 3 on a8 ae eat? ox? ee on 308 , oe ° gt?
+
+ow wes one™ or oo fey aw wes on™ soo oo fey an’ wert’? yer’ oo’ sco fey
+
+Figure 2. Model accuracy across three LISTEN conditions (Neutral-Text, Emotion-Matched, Emotion-Mismatched) under
+text-only, audio-only, and text+audio modalities. Dashed lines indicate prediction-marginal baselines.
+
+tral” for nearly all samples. In both the audio-only
+and audio + text settings, a faint diagonal emerges,
+showing that the model can identify a subset of
+emotional classes from acoustic cues. However,
+the same vertical concentration in the neutral col-
+umn persists, showing that the neutral lexical con-
+tent biases the model’s interpretation even when
+the speech conveys clear emotional tone. Overall,
+this pattern indicates that LALMs over-emphasize
+lexical cues, leading to interference rather than ef-
+fective identify emotion based on acoustic cues.
+More details are shown in Figure 8.
+
+Emotion-Matched condition. In this setting, the
+speech and transcripts express the same emotion,
+allowing us to evaluate how LALMs process con-
+sistent lexical—acoustic alignment. Performance
+across models is relatively balanced between text
+and audio inputs, with modest multimodal gains
+suggesting limited but consistent cue integration.
+Among open-weight systems, Qwen3-Omni-30B
+achieves the highest scores: 38. 7% (text only), 42.
+4% (audio only) and 43. 1% (text + audio), show-
+ing that it effectively leverages both lexical and
+acoustic cues when they match. Qwen2.5-Omni-
+7B follows a similar pattern (36.4-38.6%), while
+Baichuan-Omni-1.5 performs consistently lower
+
+(31-36%), suggesting a more limited capacity for
+recognizing emotions from speech.
+
+For closed-weight models, Gemini 2.5-Pro per-
+forms strongly and consistently across modalities:
+38.8% (text-only), 37. 6% (audio-only) and 40.2%
+(text + audio) demonstrating stable use of lexical
+and acoustic cues. In contrast, Gemini 2.5-Flash
+performs worse when using only audio: its accu-
+racy drops from 36.6% with text to 30.7% with
+audio, showing that it struggles to capture emo-
+tional tone even when acoustic cues and lexical
+cues have matched emotion in the audio. When
+both inputs are combined, its score rises again to
+38.9%, suggesting that adding text helps the model
+recover accuracy by providing a more stable signal.
+
+These trends are illustrated in Figure 3, where
+the three matrices in the second row (Emotion-
+Matched condition) for Gemini 2.5 Pro display
+a faint diagonal.In the text-only and audio-only
+settings, a visible neutral column remains, indi-
+cating some bias toward neutral predictions. In
+text+audio setting, the diagonal becomes slightly
+clearer and the neutral column weakens, indicating
+that emphasizing lexical content enhances discrim-
+inability across emotion categories when textual
+and acoustic signals are aligned. Overall, although
+most LALMs can recognize emotion better when
+
+
+Neutral Text - Text-only
+amusement -
+anger -
+annoyance -
+calm -
+concern -
+confusion -
+contempt -
+depression -
+disappointment -
+disgust -
+excitement -
+fear -
+frustration -
+happiness -
+neutral -
+
+Ground Truth
+
+ridicule -
+sadness -
+surprise -
+
+Emotion Matched - Text-only
+amusement -
+anger -
+annoyance -
+calm -
+concern -
+confusion - [
+contempt -
+depression -
+disappointment -
+disgust -
+excitement -
+
+Ground Truth
+
+frustration -
+happiness -
+neutral -
+ridicule -
+sadness -
+surprise -
+Emotion Mismatched - Text-only
+amusement -
+anger - |
+annoyance -
+calm -
+concern -
+confusion -
+contempt -
+depression -
+disappointment -
+isgust -
+excitement -
+
+Ground Truth
+
+frustration -
+happiness -
+neutral -
+ridicule -
+sadness -
+surprise -
+
+calm-
+concern-
+
+fear-
+confusion -
+
+calm-
+concern-
+
+confusion -
+surprise)
+
+anger-
+annoyance-
+contempt-
+depression -
+isappointment-
+disgust -
+excitement-
+ridicule-
+sadness -
+anger-
+annoyance-
+
+amusement -
+amusement-
+
+so
+Predicted
+
+Neutral Text - Audio-only
+
+Emotion Matched - Audio-only
+
+Emotion Mismatched - Audio-only
+
+Neutral Text - Audio+Text
+
+Emotion Matched - Audio+Text
+
+Emotion Mismatched - Audio+Text
+
+fear-
+calm-
+concern-
+confusion -
+fear-
+
+contempt-
+depression -
+isappointment-
+disgust -
+excitement-
+frustration -
+neutral-
+tidicule-
+sadness -
+surprise-
+anger-
+annoyance-
+contempt-
+depression -
+isappointment-
+disgust -
+excitement-
+ridcule- i 8 8
+sadness -
+surprise-
+
+happiness -
+amusement-
+
+> >
+Predicted Predicted
+
+Figure 3. Confusion matrices showing Gemini 2.5 Pro’s emotion recognition performance across three experimental conditions
+in the LISTEN benchmark. Row-normalized matrices display prediction distributions for each true emotion class across: (1)
+Neutral Text, (2) Emotion Matched, and (3) Emotion Mismatched conditions, each tested with text-only, audio-only, and
+
+audio+text modalities.
+
+Gemini-2.5-Pro - Paralinguistic - Audio-only 10
+
+-0.4
+-0.2
+
+-0.0
+
+anger -
+
+disgust -
+
+excitement -
+
+fear-
+
+frustration -
+
+Ground Truth
+
+happiness -
+
+neutral -
+
+sadness -
+
+surprise -
+
+anger-
+disgust-
+excitement-
+fear-
+frustration -
+happiness
+neutral-
+sadness-
+surprise
+
+Predicted
+
+Figure 4. Confusion matrices showing Gemini 2.5 Pro’s
+emotion recognition performance in paralinguistic condition
+
+lexical and acoustic cues point to the same label,
+compared to neutral-text, lexical emotion recogni-
+tion (text-only) is still weak, and combining lexical
+and acoustic acoustic emotion recognition (audio-
+only, text+audio) yields little improvement. Some
+architectures (like Gemini 2.5-Flash) still struggle
+to exploit acoustic information effectively. Confu-
+sion matrices for all models are shown in Figure 9.
+
+Emotion-Mismatched condition. In this condi-
+tion, the speech and text express opposing emo-
+tions, testing how LALMs weight lexical vs. acous-
+tic cues when they conflict. The results suggest that
+LALMs can detect sarcasm when lexical and acous-
+tic cues disagree but struggle to identify the specific
+sarcastic emotion underlying that mismatch.
+
+Among open-weight models, both Qwen2.5-
+Omni-7B (34.0% — 38.5% — 39.1%) and Qwen3-
+Omni-30B (34.6% — 37.4% — 39.1%) gain mod-
+est improvements from audio. Baichuan-Omni-
+1.5 (31.0% — 36.0% — 36.0%) has lower accu-
+racy across all three settings, and the difference be-
+tween these accuracy and the prediction marginal
+distribution baseline is small, suggesting limited
+discriminative use of input signals. For closed-
+weight models, both Gemini2.5-Flash (33.1% —
+35.8% — 38.0%) and Gemini2.5-Pro (31.8% —
+36.9% — 42.6%) show clearer acoustic utilization.
+Gemini2.5-Pro achieves 42.6% in the textt+audio
+setting versus a 23.3% prediction-marginal base-
+line, demonstrating better sensitivity to acoustic
+cues under cue conflict.
+
+However, the overall gaps between reported ac-
+curacies and prediction marginal distribution base-
+line are smaller here than in the Neutral-Text or
+
+
+Emotion-Matched conditions, implying that much
+of the observed performance may come from pre-
+diction biases toward a few dominant emotional
+categories rather than fine-grained emotion recogni-
+tion in lexical and acoustic cues. The heat maps in
+Figure 3 support this interpretation: in the Emotion-
+Mismatched condition (bottom row), the text-only
+setting shows weak diagonals concentrated around
+a few emotions, mainly happiness, neutral, sur-
+prise, and sadness. However, both the audio-only
+and text+audio settings show strong vertical bars
+on ridicule and, to a lesser extent, frustration, indi-
+cating that models classify a large portion of con-
+flicting samples into these categories. This pattern
+suggests that LALMs recognize the presence of
+emotional conflict in lexical and acoustic cues but
+resolve it by collapsing diverse sarcastic emotions
+(anger, disgust, frustration, ridicule, sadness) into
+only two classes: ridicule and frustration, revealing
+a key limitation in current LALM understanding
+of complex sarcastic emotions. We observe simi-
+lar performance in Qwen2.5-omni, Qwen3-omni,
+Baichuan-omni, and Gemini2.5-Flash. More de-
+tails are shown in Figure 10.
+
+Paralinguistic condition. This condition isolates
+nonlexical affective cues, such as laughter, sighs,
+gasps, or other vocalizations, by removing linguis-
+tic content entirely. Performance across models are
+just above uniform guess baseline and prediction
+marginal distribution baseline, showing that current
+LALMs have limited ability to interpret emotion
+from nonverbal sounds alone. Among open-weight
+systems, Qwen2.5-Omni-7B and Baichuan-Omni-
+1.5 reach the highest accuracy (22.7%), followed
+by Qwen3-Omni-30B (21.0%), while the closed-
+weight Gemini2.5-Flash (18.0%) and Gemini2.5-
+Pro (15.7%) perform slightly lower. The confusion
+matrix for Gemini2.5-Pro in Figure 3 illustrates
+this limitation. A faint diagonal suggests partial
+recognition of emotions like surprise and sadness,
+while the dominant neutral column reveals a strong
+bias toward predicting “neutral” for nearly all cate-
+gories except "surprise". This bias shows limited
+ability to distinguish nonverbal emotions and re-
+liance on lexical cues for emotion identification.
+See Appendix A.5, for detailed model results.
+
+6 Discussion and Conclusion
+
+Where Do Models Succeed and Fail? Lexical
+Dominance and the Limits of Listening. LIS-
+TEN reveals a mixed and fragile affective skill
+
+profile in current LALMs. In the Neutral-Text,
+Audio-only, and Text+Audio conditions, models
+remain strongly biased toward predicting “neutral,”
+reflecting an overreliance on lexical cues and a
+tendency to default to neutral interpretations re-
+gardless of acoustic cues. In the Paralinguistic
+condition, where no lexical content is available at
+all, models still default to “neutral,” not because of
+lexical interference, but because of the absence of
+lexical grounding. This pattern suggests that cur-
+rent LALMs depend on textual information both
+as an interpretive anchor and as a confidence cue:
+when lexical guidance is strong, they ignore acous-
+tic variation, and when it is missing, they revert to
+neutral as the safest default.
+
+When lexical and acoustic cues align, as in the
+Emotion-Matched condition, models can recognize
+a wider range of emotions, but overall accuracy
+remains low and the neutral bias persists. This sug-
+gests that their emotion recognition benefits only
+marginally from cue consistency and that effective
+multimodal integration is still limited in LALMs.
+
+When lexical and acoustic cues conflict, as in
+the Emotion-Mismatched condition, LALMs can
+detect that an emotional discrepancy exists but fail
+to interpret it precisely. They can identify such
+conflicts as sarcasm, collapsing diverse sarcastic
+emotional states (e.g., anger, disgust, or ridicule)
+into a narrow set of categories. This indicates that
+while models sense the presence of incongruity
+between modalities, they still lack the ability to
+reason about the nuanced emotional or pragmatic
+meaning behind that conflict.
+
+Implications and Future Directions. In general,
+LISTEN highlights a central finding behind our
+question: Audio LLMs often transcribe more than
+they truly listen. While they can detect emotional
+variation in speech, their interpretations remain
+shallow and heavily guided by lexical informa-
+tion. Even when provided with rich acoustic cues,
+models tend to default to “neutral” predictions, re-
+vealing limited prosodic sensitivity and weak in-
+tegration between text and audio streams. Future
+progress in “listening” models may benefit from
+the advances achieved in corporate and state-of-
+the-art speech emotion recognition (SER) systems,
+which attain strong accuracy by explicitly modeling
+prosodic, spectral, and temporal features of speech.
+Techniques on emotional speech could be adapted
+to improve prosodic grounding and acoustic sensi-
+tivity in LALMs. Building on these insights, next-
+
+
+generation audio language models should not only
+perceive acoustic variation but also infer its emo-
+tional and communicative intent.
+
+Limitations
+
+While LISTEN prioritizes controlled and inter-
+pretable evaluation of lexical—acoustic cue reliance
+in LALMs, several scope boundaries are worth
+noting. First, each utterance is presented inde-
+pendently rather than in a full conversational con-
+text, allowing precise manipulation of the lexical-
+acoustic alignment but limiting access to broader
+pragmatic cues. This design isolates local emo-
+tional expression, though future extensions may
+reintroduce discourse-level context to examine con-
+textual modulation of affect. Second, the bench-
+mark centers on emotion understanding, a core
+yet specific aspect of social reasoning, which can
+be expanded to other pragmatic and interactive di-
+mensions. These choices reflect intentional sim-
+plifications to enable diagnostic clarity, forming a
+controlled basis for future, context-rich multimodal
+benchmarks.
+
+Ethical Considerations
+
+All datasets used in this work are publicly avail-
+able and were originally collected under ethical or
+open-use guidelines. LISTEN is designed solely
+for research evaluation and does not involve new
+human data collection. We acknowledge that emo-
+tion recognition technologies carry potential pri-
+vacy and misuse risks, and encourage future work
+to prioritize transparency, fairness, and responsible
+deployment.
+
+We are thankful for the generous support of com-
+putational resources provided by the Ohio Super-
+computer Center.
+
+References
+
+Salvatore Attardo, Jodi Eisterhold, Jennifery Hay, and
+Isabella Poggi. 2003. Multimodal markers of irony
+and sarcasm. Humor: International Journal of Hu-
+mor Research, 16(2).
+
+Rainer Banse and Klaus R Scherer. 1996. Acoustic
+profiles in vocal emotion expression. Journal of per-
+sonality and social psychology, 70(3):614.
+
+Chawki Barhoumi and Yassine BenAyed. 2024. Real-
+time speech emotion recognition using deep learning
+and data augmentation. Artificial Intelligence Review,
+58(2):49.
+
+Gregory A Bryant and Jean E Fox Tree. 2005. Is there
+an ironic tone of voice? Language and speech,
+48(3):257-277.
+
+Carlos Busso, Murtaza Bulut, Chin-Hui Lee, and
+Shrikanth Narayanan. 2008. Iemocap: Interactive
+emotional dyadic motion capture database. Lan-
+guage Resources and Evaluation, 42(4):335-359.
+
+Huan Cao, Carlos Busso, and Chin-Hui Lee. 2014.
+Crema-d: A corpus of realistic emotional speech.
+IEEE Transactions on Affective Computing, 5(4):441-
+454.
+
+Ming Chen and 1 others. 2020. Mels: A multimodal
+emotional speech dataset. [EEE Transactions on
+Affective Computing.
+
+Jaher Hassan Chowdhury, Sheela Ramanna, and Ketan
+Kotecha. 2025. Speech emotion recognition with
+light weight deep neural ensemble model using hand
+crafted features. Scientific Reports, 15(1):11824.
+
+Gheorghe Comanici, Eric Bieber, Mike Schaekermann,
+Ice Pasupat, Noveen Sachdeva, Inderjit Dhillon, Mar-
+cel Blistein, Ori Ram, Dan Zhang, Evan Rosen, Luke
+Marris, Sam Petulla, Colin Gaffney, Asaf Aharoni,
+Nathan Lintz, Tiago Cardal Pais, Henrik Jacobs-
+son, Idan Szpektor, Nan-Jiang Jiang, and 3290 oth-
+ers. 2025. Gemini 2.5: Pushing the frontier with
+advanced reasoning, multimodality, long context,
+and next generation agentic capabilities. Preprint,
+arXiv:2507.06261.
+
+Brittany Gladstone and | others. 2020. Msu-podcast: A
+large-scale naturalistic podcast dataset for emotion
+recognition. [EEE Transactions on Affective Comput-
+
+ing.
+
+Seung-Goo King and Shrikanth Narayanan. 2011. The
+savee database of emotional speech. Proceedings of
+Interspeech.
+
+Sonal Kumar, Simon Sedlacéek, Vaibhavi Lokegaonkar,
+Fernando Lopez, Wenyi Yu, Nishit Anand, Hyeong-
+gon Ryu, Lichang Chen, Maxim Pli¢ka, Miroslav
+Hlavaéek, William Fineas Ellingwood, Sathvik
+Udupa, Siyuan Hou, Allison Ferner, Sara Barahona,
+Cecilia Bolafios, Satish Rahi, Laura Herrera-Alarcon,
+Satvik Dixit, and 15 others. 2025. Mmau-pro: A
+challenging and comprehensive benchmark for holis-
+tic evaluation of audio general intelligence. Preprint,
+arXiv:2508.13992.
+
+Tony Lee, Haoqin Tu, Chi Heem Wong, Zijun Wang,
+Siwei Yang, Yifan Mai, Yuyin Zhou, Cihang Xie,
+and Percy Liang. 2025. Ahelm: A holistic eval-
+uation of audio-language models. arXiv preprint
+arXiv:2508.21376.
+
+Yadong Li, Jun Liu, Tao Zhang, Tao Zhang, Song Chen,
+Tianpeng Li, Zehuan Li, Lijun Liu, Lingfeng Ming,
+Guosheng Dong, Da Pan, Chong Li, Yuanbo Fang,
+Dongdong Kuang, Mingrui Wang, Chenglin Zhu,
+Youwei Zhang, Hongyu Guo, Fengyu Zhang, and
+74 others. 2025. Baichuan-omni-1.5 technical report.
+Preprint, arXiv:2501.15368.
+
+
+Guolei Liu and 1 others. 2021. Omgemotionchallenge:
+A challenge dataset for emotion recognition in videos.
+IEEE Transactions on Affective Computing.
+
+Stephen Livingstone and Mark Brown. 2018. The
+ravdess emotional speech and song dataset. In Pro-
+ceedings of the 9th International Conference on Af-
+fective Computing and Intelligent Interaction.
+
+Ziyang Ma, Yinghao Ma, Yanqiao Zhu, Chen Yang,
+Yi-Wen Chao, Ruiyang Xu, Wenxi Chen, Yuanzhe
+Chen, Zhuo Chen, Jian Cong, Kai Li, Keliang Li,
+Siyou Li, Xinfeng Li, Xiquan Li, Zheng Lian, Yuzhe
+Liang, Minghao Liu, Zhikang Niu, and 15 others.
+2025. Mmar: A challenging benchmark for deep
+reasoning in speech, audio, music, and their mix.
+Preprint, arXiv:2505.13032.
+
+OpenAI, :, Aaron Hurst, Adam Lerer, Adam P. Goucher,
+Adam Perelman, Aditya Ramesh, Aidan Clark,
+AJ Ostrow, Akila Welihinda, Alan Hayes, Alec
+Radford, Aleksander Madry, Alex Baker-Whitcomb,
+Alex Beutel, Alex Borzunov, Alex Carney, Alex
+Chow, Alex Kirillov, and 401 others. 2024. Gpt-4o
+system card. Preprint, arXiv:2410.21276.
+
+OpenAL. 2025. Gpt-5 system card.
+
+Amit Ray and | others. 2022. Mustard++: Multimodal
+sarcasm detection with extended emotion labels. In
+Proceedings of the International Conference on Mul-
+timodal Interaction.
+
+S Sakshi, Utkarsh Tyagi, Sonal Kumar, Ashish Seth,
+Ramaneswaran Selvakumar, Oriol Nieto, Ramani
+Duraiswami, Sreyan Ghosh, and Dinesh Manocha.
+2024. Mmau: A massive multi-task audio un-
+derstanding and reasoning benchmark. Preprint,
+arXiv:2410.19168.
+
+Klaus R Scherer. 2003. Vocal communication of emo-
+tion: A review of research paradigms. Speech com-
+munication, 40(1-2):227—256.
+
+Bjérn Schuller, Stephan Steidl, Anton Batliner, Dietrich
+Seppi, Klaus Kroschel, and Gerhard Rigoll. 2010.
+The tess corpus of emotional speech. Proceedings of
+LREC, 1:3123-3127.
+
+Jagjeet Singh, Lakshmi Babu Saheer, and Oliver Faust.
+2023. Speech emotion recognition using attention
+model. International Journal of Environmental Re-
+search and Public Health, 20(6):5140.
+
+Bin Wang, Xunlong Zou, Geyu Lin, Shuo Sun, Zhuo-
+han Liu, Wenyu Zhang, Zhengyuan Liu, AiTi Aw,
+and Nancy F. Chen. 2025a. AudioBench: A uni-
+versal benchmark for audio large language models.
+In Proceedings of the 2025 Conference of the Na-
+tions of the Americas Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies (Volume 1: Long Papers), pages 4297-43 16,
+Albuquerque, New Mexico. Association for Compu-
+tational Linguistics.
+
+Dingdong Wang, Jincenzi Wu, Junan Li, Dongchao
+Yang, Xueyuan Chen, Tianhua Zhang, and Helen
+Meng. 2025b. Mmsu: A massive multi-task spoken
+language understanding and reasoning benchmark.
+arXiv preprint arXiv:2506.04779.
+
+Benno Weck, Ilaria Manco, Emmanouil Benetos, Elio
+Quinton, George Fazekas, and Dmitry Bogdanov.
+2024. Muchomusic: Evaluating music understand-
+ing in multimodal audio-language models. Preprint,
+arXiv:2408.01337.
+
+Jin Xu, Zhifang Guo, Jinzheng He, Hangrui Hu, Ting
+He, Shuai Bai, Keqin Chen, Jialin Wang, Yang Fan,
+Kai Dang, Bin Zhang, Xiong Wang, Yunfei Chu, and
+Junyang Lin. 2025a. Qwen2.5-omni technical report.
+Preprint, arXiv:2503.20215.
+
+Jin Xu, Zhifang Guo, Hangrui Hu, Yunfei Chu, Xiong
+Wang, Jinzheng He, Yuxuan Wang, Xian Shi, Ting
+He, Xinfa Zhu, Yuanjun Lv, Yongqi Wang, Dake
+Guo, He Wang, Linhan Ma, Pei Zhang, Xinyu
+Zhang, Hongkun Hao, Zishan Guo, and 19 others.
+2025b. Quwen3-omni technical report. Preprint,
+arXiv:2509.17765.
+
+Chien yu Huang, Wei-Chih Chen, Shu wen Yang,
+Andy T. Liu, Chen-An Li, Yu-Xiang Lin, Wei-
+Cheng Tseng, Anuj Diwan, Yi-Jen Shih, Jiatong Shi,
+William Chen, Chih-Kai Yang, Wenze Ren, Xuan-
+jun Chen, Chi- Yuan Hsiao, Puyuan Peng, Shih-Heng
+Wang, Chun-Yi Kuan, Ke-Han Lu, and 61 others.
+2025. Dynamic-superb phase-2: A collaboratively
+expanding benchmark for measuring the capabilities
+of spoken language models with 180 tasks. Preprint,
+arXiv:2411.05361.
+
+Amir H. Zadeh, Ming Chen, Soujanya Poria, and Louis-
+Philippe Morency. 2018. Cmu-mosei: A multimodal
+sequence-to-sequence dataset for emotion recogni-
+tion. In Proceedings of the 27th International Con-
+ference on Computational Linguistics.
+
+Kun Zhou, Berrak Sisman, Rui Liu, and Haizhou
+Li. 2022. Emotional voice conversion: Theory,
+databases and esd. Speech Communication, 137:\1-
+18.
+
+
+A Appendix
+
+A.1 Source Datasets Used During Data
+Construction
+
+Each experimental condition in our benchmark is
+instantiated using established emotional speech cor-
+pora spanning acted and spontaneous data, mono-
+logue and dialogue, and both congruent and incon-
+gruent emotion-text alignments.
+
+CREMA-D (Cao et al., 2014): The Crowd-
+Sourced Emotional Multimodal Actors Dataset con-
+sists of 7,442 clips from 91 actors (48 male, 43
+female) portraying six emotions—anger, disgust,
+fear, happy, neutral, and sad—across 12 fixed sen-
+tences. Acted speech. The CREMA-D dataset is
+licensed under the Open Database License (ODbL
+v1.0) (Open Data Commons). This license permits
+sharing, use, and adaptation, but requires attribu-
+tion and that derivative databases remain under the
+same license.
+
+Emotion Speech Dataset (Zhou et al., 2022):
+This dataset contains 350 parallel utterances spoken
+by 10 native Mandarin speakers, and 10 English
+speakers with 5 emotional states (neutral, happy,
+angry, sad and surprise) We only use English data.
+It provides consistent lexical content for analyz-
+ing prosodic variations in acted emotional speech.
+The RAVDESS is released under a Creative Com-
+mons Attribution-NonCommercial-ShareAlike 4.0
+International License, CC BY-NC-SA 4.0
+
+TESS (Schuller et al., 2010): The Toronto Emo-
+tional Speech Set contains 2,800 recordings of two
+female actors simulating seven emotions—anger,
+disgust, fear, happiness, pleasant surprise, sad-
+ness, and neutral—based on the same lexical tem-
+plate “Say the word ___.” It is designed for per-
+ceptual studies of emotional prosody. Attribution-
+NonCommercial-NoDerivatives 4.0 International
+(CC BY-NC-ND 4.0)
+
+SAVEE (King and Narayanan, 2011): The Surrey
+Audio-Visual Expressed Emotion dataset features
+480 utterances from four male native English speak-
+ers—DC, JE, JK, and KL—who were postgraduate
+students at the University of Surrey, aged between
+27 and 31. The dataset encompasses seven emo-
+tional classes: anger, disgust, fear, happiness, sad-
+ness, surprise, and neutrality, as commonly defined
+in psychological studies. Each speaker articulated
+15 sentences per emotion, selected from the TIMIT
+corpus. This set included three sentences shared
+
+across all emotions, two that were emotion-specific,
+and ten general utterances tailored to each emotion,
+arranged in alphabetical order. License: Data files
+@ Original Authors
+
+RAVDESS = (Livingstone and Brown, 2018): The
+Ryerson Audio-Visual Database of Emotional
+Speech and Song includes 7,356 audio and video
+clips from 24 professional actors expressing emo-
+tions through both speech and song. It encom-
+passes calm, happy, sad, angry, fearful, surprise,
+and disgust, supporting multimodal emotion recog-
+nition. Licensed under CC BY-NA-SC 4.0.
+
+IEMOCAP  (Busso et al., 2008): The Interac-
+tive Emotional Dyadic Motion Capture Database
+comprises approximately 12 hours of audiovisual
+recordings from ten actors performing scripted
+and improvised dialogues. It is annotated for
+categorical emotions (anger, happiness, sadness,
+neutral, excitement) and dimensional affect rat-
+ings (valence, arousal, dominance), enabling anal-
+ysis of spontaneous emotional dynamics. —Li-
+cense: https://sail.usc.edu/iemocap/Data_
+Release_Form_IEMOCAP. pdf
+
+CMU-MOSEI (Zadeh et al., 2018): The Multi-
+modal Opinion Sentiment and Emotion Intensity
+dataset contains 23,454 sentence-level video seg-
+ments from online monologues annotated for both
+sentiment and emotion. It provides large-scale mul-
+timodal coverage of spontaneous speech in natural
+contexts. License: CC BY-SA 4.0 All data copy-
+right: Carnegie Mellon University & authors
+
+OMG-Emotion Challenge Dataset (Liu et al.,
+2021): This dataset includes monologue videos
+annotated for continuous emotion dimensions (va-
+lence and arousal), focusing on gradual emotion
+evolution within a single speaker. It emphasizes
+contextual and temporal modeling of affective ex-
+pression. License: Apache License 2.0
+
+MSP-Podcast (Gladstone et al., 2020): A large-
+scale corpus of natural English speech extracted
+from public podcasts, containing over 100,000 seg-
+ments annotated for categorical emotions and con-
+tinuous dimensions. It captures rich acoustic vari-
+ability and spontaneous emotional speech. This
+dataset has Common Licenses that permit the dis-
+tribution of the corpus.
+
+MELD (Chen et al., 2020): The Multimodal
+EmotionLines Dataset extends the EmotionLines
+
+
+corpus with audio and visual modalities from the
+TV series Friends. It includes 13,000 utterances
+from 1,433 dialogues annotated with seven emo-
+tions: anger, disgust, sadness, joy, neutral, surprise,
+and fear. GNU General Public License v3.0
+
+MUSTARD++ (Ray et al., 2022): The Multi-
+modal Sarcasm Detection dataset extends the origi-
+nal MUSTARD with additional sarcastic and non-
+sarcastic clips from TV shows. It contains audio,
+visual, and textual modalities annotated for sar-
+casm, where lexical and prosodic cues intentionally
+conflict, making it ideal for evaluating multimodal
+incongruence. The data provides both explicit emo-
+tion annotation, aligned with lexical content, and
+implicit emotion annotation aligned with speech.
+License. CCO: Public Domain.
+
+A.2 Question Prompts
+
+To ensure consistent evaluation across modalities,
+we design parallel sets of natural-language prompts
+for Text-only, Audio-only, and Text+Audio condi-
+tions. Below are representative examples for each
+modality.
+
+Text-only
+
+¢ Based on the content of this text, what emo-
+tion would the person likely be feeling?
+
+¢ What emotion is conveyed by the words in
+this statement?
+
+¢ Reading this text, what emotional state does
+the speaker appear to be in?
+
+¢ From the semantic content alone, what emo-
+tion is being expressed?
+
+¢ What feeling is suggested by the meaning of
+these words?
+
+¢ Based solely on the text content, what emotion
+would you identify?
+
+¢ What emotional tone is conveyed by the literal
+meaning of this statement?
+
+Audio-only
+
+¢ What emotion is expressed in the speaker’s
+voice?
+
+e What emotion does the speaker convey
+through their tone?
+
+¢ Based on the vocal expression, what emotion
+is the speaker feeling?
+
+¢ What emotional state is reflected in the
+speaker’s voice?
+
+¢ How would you describe the emotional tone
+of the speaker?
+
+¢ What emotion is communicated through the
+speaker’s vocal prosody?
+
+¢ Listening to the voice, what emotion is being
+expressed?
+
+Text + Audio
+
+¢ Considering both the words and how they are
+spoken, what is the speaker’s true emotional
+state?
+
+¢ What emotion is conveyed when you combine
+the text content with the vocal expression?
+
+¢ Based on both the semantic meaning and
+prosodic cues, what emotion is the speaker
+feeling?
+
+¢ How do the words and vocal tone together
+reveal the speaker’s emotional state?
+
+¢ What emotion emerges when you integrate the
+textual and acoustic information?
+
+¢ Taking into account both content and delivery,
+what emotion is being expressed?
+
+¢ What is the complete emotional picture when
+combining words and voice?
+
+A.3 LISTEN Emotion Distribution across
+experimental conditions
+
+We visualize the distribution of ground-truth emo-
+tion labels for each experimental condition.
+
+Neutral-Text, Emotion-Matched, and Paralin-
+guistic Figure 5 aggregates three subplots, each
+showing per-dataset label counts using that
+dataset’s own taxonomy (after consistent normal-
+ization). X-axes list only the emotions present in
+each dataset; the shared Y-axis facilitates cross-
+condition comparison of prevalence.
+
+Emotion-Mismatched (explicit) and Emotion-
+Mismatched (implicit) Figure 6 isolates the two
+mismatched conditions, highlighting how label
+prevalence differs between explicit and implicit
+mismatches.
+
+
+Neutral-Text
+
+Emotion-Matched
+
+Paralinguistic
+
+Emotion
+
+Emotion
+
+Figure 5. Ground-truth label distributions for Neutral-Text, Emotion-Matched, and Paralinguistic conditions. Each subplot
+
+shows counts for the labels present in that dataset.
+
+Emotion-Mismatched (explicit)
+
+Emotion-Mismatched (implicit)
+
+160 4
+
+140 5
+
+120 5
+
+100
+
+Count
+
+140
+
+805
+60 4
+40 5
+0) —_ ———
+. SS
+
+> @ 5G x
+Se S € # S SS SF
+& a.) "9 eS e S ss
+é * R 2) i) ~S
+” I x LS
+Emotion Emotion
+
+Figure 6. Ground-truth label distributions for Emotion-Mismatched (explicit) and Emotion-Mismatched (implicit).
+
+A.4 Large Audio Language Models Evaluated
+in LISTEN
+
+We evaluate six recent large audio—language mod-
+els (LALMs) spanning both open-weight and
+proprietary systems, as summarized in Table 3.
+The open-weight group includes the Qwen and
+Baichuan series, which represent the strongest pub-
+licly released multilingual models with unified
+speech-text understanding capabilities. All models
+are evaluated in zero-shot settings without fine-
+tuning to ensure comparability across conditions.
+
+A.5 Detailed Cross-Modality Performance
+Analysis
+
+Figure 7 compares detailed model performance
+across all modality—condition pairs in the LISTEN
+benchmark. Each axis represents a distinct eval-
+uation setting, spanning Neutral-Text, Emotion-
+Matched, Emotion-Mismatched, and Paralinguis-
+tic conditions in both text and audio modalities.
+Across models, accuracy peaks in the Neutral-Text
+condition, where lexical content alone provides
+strong cues for emotion inference. Performance de-
+clines sharply in Audio-only and Paralinguistic set-
+tings, confirming that current large audio—language
+models (LALMs) struggle to extract affective mean-
+ing from acoustic cues. Even in Emotion-Matched
+
+
+Table 3. Large audio-language models evaluated in the LISTEN benchmark. “*?” indicates unspecified public information.
+
+Model Identifier Creator Access Type Release Date Params
+Open-weight Audio—Language Models
+
+Qwen3-Instruct Qwen3-4B-Instruct-2507 Alibaba Cloud Open-weight 2025-08-06 4.02B
+Qwen2.5-Omni (7B) — qwen2.5-omni-7b Alibaba Cloud Open-weight 2025-05-13 10.7B
+Qwen3-Omni (30B) qwen3-omni-30b Alibaba Cloud Open-weight 2025-09-026  35.3B
+
+Baichuan-Omni (1.5) — baichuan-omni-1.5
+
+Baichuan Inc.
+
+Open-weight 2025-01-26 11B
+
+Closed-weight Audio—Language Models
+
+Gemini 2.5 Flash
+Gemini 2.5 Pro
+
+gemini-2.5-flash
+gemini-2.5-pro
+
+scenarios, where lexical and prosodic signals align,
+the gains remain modest, suggesting limited multi-
+modal integration. Among the evaluated systems,
+Gemini 2.5 Pro achieves the highest overall per-
+formance, followed by Qwen3-Omni-30B, yet all
+models display the same qualitative trend of lexical
+dominance.
+
+Google DeepMind API
+Google DeepMind API
+
+2025-06 ?
+2025-06 ?
+
+A.6 Confusion Matrices For All Models
+
+This presents the complete set of confusion ma-
+trices for all evaluated models across the three
+experimental conditions (Neutral-Text, Emotion-
+Matched, and Emotion-Mismatched) and three in-
+put modalities (Text, Audio, and Text+Audio). (see
+Figure 8, Figure 9, Figure 10, Figure 11) These
+figures provide a detailed view of each model’s
+prediction distribution across emotion categories,
+complementing the main results discussed in sec-
+tion 5.
+
+
+Detailed Model Performance Across Modalities
+
+Emotion-Matched
+Text
+
+—®— Qwen2.5-Omni-7B
+=—® Qwen3-Omni-30B
+=—®— Baichuan-Omni-1.5
+®- Gemini2.5-Flash
+Gemini2.5-Pro
+
+Emotion-Mat¢hed
+Audio
+
+Newtral-Text
+Text
+
+Emotion-Misryatched
+
+Emotion-Mismatche
+Audio
+
+Figure 7. Radar plot comparing detailed model performance across all modality—condition pairs in the LISTEN benchmark.
+Each axis represents a specific evaluation setting (e.g., Neutral-Text, Emotion-Matched, Emotion-Mismatched, Paralinguistic)
+under text-only, audio-only, and texttaudio modalities.
+
+A.7 Condition Examples
+
+We provides representative examples for each con-
+dition. (see Figure 14, Figure 15, Figure 16, Fig-
+ure 17, Figure 18, Figure 19, Figure 20, and Fig-
+ure 21 Figure 12 and Figure 13)
+
+
+Gemini-2.5-Flash - Text-only Gemini-2.5-Flash - Audio-only Gemini-2.5-Flash - Audio+Text
+
+anger- 0.05 0.00 0.01 0.00 0.06 0.80 0.04 0.04 0.31 0.01 0.02 0.14 0.05 0.32 0.07 0.09 0.26 0.01 0.02 0.03 0.09 0.06 0.08 =
+calm- 0.00 0.00 0.00 0,00 0.00 1.00 0.00 0.00 0,02 0,03 0.00 0.05 0.00 0.25 0.06 0.01 017 0.00 0.00 0.01 fiewemy 0.10 0.00 0.8
+disgust - 0.03 0.00 0.02 0.01 0.03 0.88 0.01 0.02 0.22 0.00 0.05 0.17 0.05 0.11 0.09 0.18 0.01 0.04 0.02 0.05 [iiiea) 0.07 0.07
+FS
+Z fear- 0.02 0.00 0.01 0.01 0.03 0.89 0.01 0.03 0.15 0.00 0.04 0.26 0.04 0.26 0.17 0.09 011 0.00 0.02 0.11 0.05 (ise) 0.08 0.08 O16
+é happiness - 0.05 0.00 0.02 0.00 0.06 0.79 0.05 0.03 0.17 0.00 0.02 0.08 0.12 0.08 0.13 0.10 0.01 0.02 0.02 0.16 Biya 0.05 0.07 O14
+° neutral- 0.04 0.00 0.00 0,00 0.05 0.83 0.04 0.03 0.07 0,00 0.01 0.10 0.01 0.11 0.06 0.05 0.01 0.00 0.02 0.03 JReRMy 0.07 0.02
+sadness - 0.04 0.00 0.02 0.01 0.05 0.03 0.04 0.06 0.01 0.02 0.12 0.02 0.27 0.07 0.07 0.01 0.02 0.02 0.04 SReRyae 0.17 0.05 70.2
+surprise - 0.10 0.00 0.02 0.01 0.12 0.06 0.06 0.19 0.00 0.03 0.09 0.20 0.20 0.07 0.21 011 0.00 0.03 0.03 0.24 033 0.06 021
+-0.0
+Gemini-2.5-Pro - Text-only Gemini-2.5-Pro - Audio-only Gemini-2.5-Pro - Audio+Text 10
+anger- 0.02 0.00 0.01 0.00 0.01 0.02 0.00 0.00 0.00 0.09 0.05 0.00 0.00 0.01 0.10 0.02 0.29 0.02 0.01
+calm- 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.30 0.00 0.00 0.00 0.00 0.00 0.28 0.00 0.04 0.02 032 0.34 0.00 08
+disgust - 0.00 0.00 0.01 0.00 0.01 0.01 0.00 0.12 0.00 0.06 0.05 0.04 0.02 0.18 0.00 0.09 0.07 0.09 .37 0.17 0.02
+5
+2 fear- 0.00 0.00 0.00 0.00 0.01 0.01 0.00 0.05 0.00 0.01 0.30 0.09 0.01 0.04 0.00 0.00 O31 0.14 0.32 0.18 0.02 a8
+g happiness - 0.01 0.00 0.01 0.00 0.00 0.00 0.00 0.07 0.01 0.00 0.06 0.28 0.03 0.06 0.01 0.00 0.05 0.02 0.05 aa
+° neutral- 0.00 0.00 0.00 0.00 0.00 0.01 0.01 0.00 0.01 0.00 0.00 0.00 0.00 0.00 0.02 0.01 0.00 0.08 0.00
+sadness- 0.00 0.00 0.01 0.00 0.00 0.00 0.00 0.00 0.01 0.00 0.05 0.00 0.00 0.01 0.00 0.00 0.08 0.00 70.2
+surprise - 0.05 0.00 0.03 0.00 0.02 0.03 0.02 0.08 0,00 0.02 0.02 0.44 0.33 0.04 0.08 0.04 0.00 0.02 0.02 0.21
+- 0.0
+Qwen2.5-Omni - Text-only Qwen2.5-Omni - Audio-only Qwen2.5-Omni - Audio+Text <6
+anger- 0.04 0.00 0.01 0.01 0.04 0.03 0.03 0.38 0.01 0.01 0.01 0.05 0.02 0.04 011 O01 0.01 0.01 0.05 0.03 0.04
+calm- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.22 0.00 0.00 0.00 0.78 0.00 0.00 0.00 0.05 0.00 0.00 0.00 0.00 0.00 0.8
+disgust - 0.03 0.00 0.04 0.00 0.02 0.00 0.02 0.09 0.05 0.13 0.07 0.03 0.54 0.03 0.05 0.03 0.03 0.04 0.01 0.03 0.00 0.04
+s
+e fear- 0,02 0.00 0.02 0.01 0.01 0.02 0.01 0.03 0.03 0.03 | 0.46 0.02 0.31 0.06 0.06 0.01 0.04 0.02 0.14 0.01 0.04 0.04 06
+5 happiness - 0.04 0.00 0.01 0,00 0.05 0.05 0.03 0.07 0.02 0.01 0.02 0.18 0,02 0.09 0.03 0.01 0.02 0.01 0.09 0.03 0.05 ow
+8 neutral - 0.04 0.00 0.00 0.00 0.04 0.05 0.03 0.05 0.01 0.00 0.00 0.05 0.05 0.02 0.03 0.00 0.00 0.00 0.04 0.03 0.02
+sadness- 0.05 0.00 0.03 0.00 0.02 0.04 0.03 0.04 0.03 0.03 0.08 0.03 0.21 0.03 0.03 0.02 0.03 0.02 0.03 0.10 0.03 70.2
+surprise - 0.09 0.00 0.02 0.01 0.08 0.06 0.05 0.12 0.00 0.03 0.01 0.12 0.03 0.29 0.05 0.00 0.02 0.01 0.10 0.04 0.14
+-0.0
+Qwen3-Omni - Text-only Qwen3-Omni - Audio-only Qwen3-Omni - Audio+Text Lo
+anger- 0.05 0.00 0.01 0,00 0.05 0.05 0.02 0.31 0.00 0.01 0.02 0.04 0.06 0.05 0.25 0.00 0.01 0.01 0.04 0.05 0.04
+calm- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.13 0.00 0.00 0.00 0.02 0.00 0.00 013 0.00 0.00 0.00 0.01 0.00 0.8
+disgust - 0.02 0.00 0.03 0.00 0.01 0.03 0.00 0.09 0.00 0.04 0.04 0.01 0.10 0.03 0.05 0.00 0.03 0.03 0.01 0.06 0.02
+s
+e fear- 0.01 0.00 0.01 0.01 0.01 0.03 0.02 0.03 0.00 0.01 0.22 0.01 0.24 0.03 0.03 0.00 0.01 0.18 0.01 0.11 0.02 O86.
+g happiness - 0.04 0.00 0.01 0,00 0.04 0.06 0.03 0.09 0,00 0.01 0.03 0.12 0.07 0.06 0.06 0.00 0.01 0.02 0.09 0.05 0.06 Loa
+° neutral - 0,04 0.00 0.00 0.00 0.04 0.06 0.04 0.03 0.00 0.00 0.00 0.02 0.07 0.01 0.03 0.00 0.00 0.00 0.02 0.05 0.02
+sadness - 0.03 0.00 0.02 0.00 0.02 0.06 0.03 0.02 0.00 0.02 0.01 0.02 0.27 0.01 0.03 0.01 0.02 0.01 0.02 0.17 0.02 -0.2
+surprise - 0.06 0.00 0.02 0.01 0.07 0.08 0.05 0.08 0.00 0.03 0.02 0.21 0.33 0.05 0.28 0.07 0.00 0.03 0.02 0.12 0.05 0.23
+-0.0
+Baichuan-Omni - Text-only Baichuan-Omni - Audio-only Baichuan-Omni - Audio+Text 10
+anger- 0.05 0.00 0.01 0.00 0.08 0.79 0.05 0.03 0.07 0.01 0.01 0.01 0.12 0.02 0.08 0.05 0.02 0.00 0.00 0.06 0.02 0.02
+calm- 0.00 0.01 0.00 0.00 0.02 0.98 0,00 0.00 0.00 0.07 0.00 0.00 0.01 0.00 0.01 0.00 0.06 0.00 0.00 0.01 0.00 0.01 0.8
+disgust - 0.03 0.01 0.02 0.00 0.07 0.84 0.02 0.00 0.01 0.01 0.02 0.00 0.09 0.00 0.04 0.01 0.01 0.02 0.00 0.06 0.01 0.03
+2 fear- 0.01 0.02 0.01 0.01 0.06 0.86 0.01 0.01 0.03 0.00 0.01 0.01 0.09 0.01 0.06 0.00 0.01 0.01 0.01 0.05 0.01 0.02 oe
+E happiness - 0.05 0.00 0.00 0.00 0.09 0.79 0.04 0.03 0.06 0.01 0.01 0.00 0.14 0.03 0.06 0.03 0.01 0.00 0.00 0.09 0.03 0.02 Lea
+2 neutral - 0,04 0.00 0.00 0.00 0.06 0.80 0.06 0.03 0.05 0.02 0.00 0.00 0.07 0.04 0.01 0.03 0.01 0.00 0.00 0.04 0.03 0.01
+sadness - 0,04 0.01 0.01 0,01 0.06 0.78 0.06 0.04 0.04 0,02 0.01 0.00 0.10 0.04 0.04 0.03 0.02 0.01 0.00 0.03 0.04 0,02 - 0.2
+surprise - 0.09 0.00 0.00 0,00 0.16 0.63 0.07 0.05 0.12 0.00 0.01 0.00 0.20 0,04 0.15 0.06 0.00 0.01 0.00 0.12 0.03 0.03
+8 5 a 8 5 a 8 Es FA
+£ £ £
+Predicted Predicted Predicted
+
+Figure 8. Confusion matrices showing all models’ emotion recognition performance for Neutral-Text condition in the LISTEN
+benchmark. Row-normalized matrices display prediction distributions for each tested with text-only, audio-only, and audio+text
+modalities.
+
+
+Gemini-2.5-Flash - Text-only Gemini-2.5-Flash - Audio-only Gemini-2.5-Flash - Audio+Text
+amusement -0.090.00 0.18 0.00 0.00 0.09 0.00 0,000.09 0.270.000.180.000.000.000.09 0.290.000.00 0.06 0.00 0.06 0.00 0.18 0.000.06 0.000.180.000.120.000.06 0.210.0M.0M.00.00.00.00.14.14.00.00.14.00.14.00.14
+anger -0.000.300.010.010.010.05 0.00 0.010.07 0.020.040.120.050.160.040.09 0.000,300.010.02 0.00 0.02 0.000.000.050.02 0.080.16 0.07 0.090.100.08 0.00.30. 0D.0D.0.04.00.0M.09.00.010.14.00.1D.00.07
+annoyance -0.030.17 0.07 0.09 0.02 0.140.00 0.030.05 0.070.000.210.00 0.03 0.02 0.07 0.00 0.200.15 0.07 0.04.0.07 0.00 0.04 0.000.07 0.040.220.020.040.020.04 0.08.14.1.08.00.10.00.04.04.00.00.29.00.04.00.02
+concern -0,030.05 0.05 0.16 0.11 0.05 0.00 0,050.05 0.140.080.190.000.030.000.00 0,000.060.110.290.00 0.06 0.00 0.06 0.000.14.0.000.060.000.200.000.03 0.02.00.0@.20.00.0.00.00.0@.10.0M.10.09.20.00.03 08
+confusion -0,000.00 0.000. 00 ETO. 00 0.00 0.000.00 0.000.00 0.00 0.00 0.000. (10:50) 0.00 0.000.17 0.00 0.17 0.00 0.00 0.00 0.000.00 0.000.000.000.170.330.17 0.0.00.0@.00.29.00.14.00.00.14.00.0M.00.1.00.29
+contempt -0.140.00 0.00 0.29 0.00 0.21 0.00 0.000.07 0.000.00 0.07 0.000.140.00 0.07 0.12 0,190.00 0.12 0.00 0.06 0.00 0.00 0.060.310.000.120.000.000.000.00 0.12.19.00.10.00.0@.0@.00.0@.10.00.1.00.1D.00.00
+
+1.0
+
+Fs
+= depression -0.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000.000.000.000.000.00 0.000.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000. 00 0.00 0.00 0.00 fA) 0.00.00 .00.00.0.00.00.00.00.0M.00.00.00.00.00.00 0.6
+E disappointment -0.200.20 0.00 0.00 0.00 0.00 0.00 0,200.00 0.000.000.000.000.200.200.00 0.000.000.170.17 0.00 0.00 0.00 0.00 0.000.00 0.000.000.170.170.330.00 0.00.00.00.29.0.00.00.0M.0.00.00.2M. ociEo. 000.00
+S disgust -0,070.18 0.03 0.03 0.01 0.02 0.00 0,000.10 0.000.03 0.03 0.090.200.140.05 0.02 0.230.02 0.02 0.00 0.04.0.00 0.010.110.010.030.050.110.080.170.09 0.0@.19.00.010.00.10.00.0M.14.00.00.00.10.10.10.08
+2 excitement -0.000.040.01 0.00 0.01 0.01 0.00 0.000.010.230.010.190.170.210.040.08 0.01 0,010.00 0.00 0,00 0.00 0.00 0.00 0.010.200.040.210.100.210.070.12 0.00.00.0D.00.00.00.0D.0M.0D.20.00.10.10.29.00.09 0.4
+°o fear -0.000.13 0.00 0.00 0.00 0.00 0.00 0.000.00 0.020.200.030.100.260.070.20 0.000.090.00 0.00 0.00 0.00 0.00 0.00 0.040.000.280.080.090.150.190.08 0.00.09.00.0M.0®.00.00.00.00.0M.2.0D.00.30.19.13
+frustration -0.000.10 0.01 0.02 0.01 0.01 0.00 0.010.02 0.040. 03 0143'0.03 0.22 0.02 0. 06 0.010.100. 01 0.01 0,00 0.01 0.00 0.01 0.020.05 0.040/43'0.03 0.13 0.100.07 0.00.09.0D.00.00.00.00 00.0D.01.02,39.00.20. 00.07
+happiness -0.010.07 0.010.010.010.00 0.00 0.000.010.040. 05 0.02 0,400.22 0.060. 10 0.02 0.090.00 0.00 0.01 0.00 0.00 0.00 0.020.04.0.060.020.330.150.120.15 0.02.0@.00.0M.00.00.00.00.0D.04.00.019 ). 1.08.07 -0.2
+neutral -0.010.08 0.00 0.01 0.01 0.00 0.00 0,010.03 0.030. 03 0.04 0.16 0470. 05 0.07 0.01 0.090.01 0.01 0,01 0.00 0,00 0.01 0,020.01 0.090.030.160.280.140.12 0.00.01.0M.00.0D.0M,00.00.0D.00.00.00.1: 0.10 °
+sadness -0.000.13 0.00 0.01 0.00 0.00 0.00 0.010.02 0.020.050.100.140.220.270.06 0.000.080.000.000.000.000.00 0.010.010. 010.110.070.060.130.410.11 0.00.0M.00.00.00.00.00.00.00. 00.0@.00.09.1D.4D. 08
+surprise -0.000.13 0.00 0.01 0.01 0.00 0.00 0.010.03 0.010.040. 03 0.110.04 0.02 Eq 0.000.140.01 0.01 0.01 0.00 0.00 0.00 0.030.020.120.010.200.050.060.35 0.02.11.00.00.09.00.00.0M.0D.00.00.0.19.00. 070.55 -0.0
+Gemini-2.5-Pro - Text-only Gemini-2.5-Pro - Audio-only Gemini-2.5-Pro - Audio+Text
+amusement -0.270.00 0.18 0.00 0.09 0.00 0.00 0.090.09 0.090.00 0.00 0.00 0.09 0.000.09 0.58 (9 000.08 0.00 0.00 0.00 0.00 0.00 0.000.000.000.080.170.080.000.00 0.0.0.0 .00.00.0M.00.00.0@.00.00.0M.00.00.00.00 10,
+anger -0.010.240.01 0.04 0.00 0.04 0.00 0.010.06 0.010.03 0.14 0.06 0.210.06 0.08 0.00 0.300.00 0.02 0.00 0.05 0.00 0.00 0.050.00 0.040.080.070.130.160.07 0.00.39 .00.0M.0.00.00.0M.0D.04.00.3M.0@.1D.0.06
+annoyance -0.040.100.040.10 0.06 0,200.00 0.060.02 0.020.02 0.240.000.100.000.02 0.05 0,250.07 0.02 0.00 0.23 0.00 0.02 0.000.02 0.000.230.000.110.000.00 0.0.0.0 .00.00.0M.00.00.00.00.00.0M.00.00.00.00
+concern -0,030.03 0.00 0.28 0.03 0.03 0.00 0,030.00 0.030.090.090.030.310.000.00 0.000.090.00 0.24 0.00 0.06 0.00 0.00 0.030.09 0.000.090. 000.3900. 000.00 0.00.00 .0.00.00.00.00.0M.00.00.00.00.0M.00.00.00 08
+confusion -0,000,00 0.00 0.00 0.20 0.00 0.00 0,000.00 0.000.00 0.00 0.00 0.4¢ 0.00 0:40, 0.290.000.000. 000,430 00 0.00 0.00 0.000.00 0.000.000.000.140.000.14 0.0M.00.0.00.00.0M.00.00.00.00.00.0M.0M.0@.00.00
+£ contempt -0.000.000. 00 0.27 0.09 014500. 00 0.000.00 0.090.000.090.000.000.000.00 0.290.210.07 0.07 0.00 0.21 0.00 0.00 0.000.000.000.000.000.140.000.00 0.00.00.00.0M.00.00.00.00.00.0M.0M.0M.00.0.00.00
+3 depression -0.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000.000.000.000.000.00 0.00.0.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000.000.000.000.00 0.00.00.00.0M.0®.00.00.0M.0.00.00.0M.0M.0.00.00 0.6
+B disappointment -0.200.00 0.00 0.20 0.00 0.00 0.00 0.000.000.000.000.200.000.200,.200.00 0.000.000.00 0.33 0.00 0.00 0.00 0.00 0.000.00 0.000.000. 00 0.00 JO. 00 0.00.00 .00 .00.0.00.00.0M.00.00.00.00.00.00.00.00
+= disgust -0,030.13 0.00 0.08 0.01 0.10 0.00 0.000.13 0.000.010.010.100.240.130.03 0.03 0.120.00 0.01 0.00 0.06 0.00 0.01 0.140.000.010.060.090.170.250.04 0.0M.10.00.00.00.00.00.0M.2@.00.00.00.09.1@.00.32
+2 excitement -0,000.03 0.00 0.02 0.00 0,00 0.00 0.000.01 0,100.02 0.16 0.230.35 0,03 0.05 0.25 0.000.00 0.00 0.00 0.00 0,00 0.08 0.000.17 0.000.000. (T}0,50} 000.00 0,0M.01.0.00.00.0M.00.00.00.10.00.10.20.20.00.06 0.4
+oO
+
+fear -0.000.09 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.28 0.02 0.030.330.120.14 0.00 0.060.00 0.03 0.03 0.00 0.00 0.00 0,000.00 0.130.00 0.03 0.26 0145|0.00 0.00.00.0.00.00.00.00.00.00.0.30.00.00.29.10.21
+frustration -0.000.04 0.01 0.02 0.00 0,02 0.00 0.010.02 0.030.03 0146 0.030.250.040.05 — 0.030,340.03 0.06 0.00 0.11 0.00 0.00 0,000.06 0.000.260.000.110.000.00 0.00.04).0.00.00.0.00.00.0D.04).09]4®.0H.2D.10.04
+happiness -0.010.06 0.00 0.00 0.00 0.01 0.00 0,000.02 0.020.06 0.010/390.280.070.06 0.05 0.060.00 0.00 0.00 0.00 0.00 0.00 0.010.02 0.030.000. 230,160.05 0.00.0 .0W.00.00.00,00.00.0D.04.00.02RH.1D.00.08
+
+70.2
+neutral -0.010.05 0.00 0.01 0.01 0.00 0.00 0.010.03 0.010.04 0.02 0.12 SE¥J0.06 0.05 0.01 0.070.00 0.00 0.01 0.00 0.00 0.01 0.010.000.010. 00 0.1301470.23 0.05 0.00.04.00.00.00.00.00. 00.0D,010.00.00.30.4D. 09.07
+sadness -0,000.09 0.00 0.00 0.00 0,00 0.00 0.000.01 0,010.06 0.07 0.130.300,290.04 0,00 0.060.00 0,000.00 0.00 0.00 0.00 0.020,00 0.050. 00 0.10 0.16 WEI0. 05 0.00.00.00.00.00.00.00.00.00.00.09. 07.10. 1 EP. 02
+surprise -0.000.08 0.00 0.02 0.00 0.01 0.00 0.010.02 0.000. 03 0.02 0.10 0.11 0.03 EE) 0.03 0,170.00 0.03 0.03 0.00 0.03 0.00 0.030.00 0.070.000.070.200.120.23 0.0M.04.00.00.00.00.00. 00).0D.000.000.00,24.04.0105E -0.0
+Qwen2.5-Omni - Text-only Qwen2.5-Omni - Audio-only Qwen2.5-Omni - Audio+Text 26
+
+amusement -0,000.00 0.18 0.09 0.09 0,00 0.00 0,090.09 0,180.00 0.18.0.090.000.000.00 0.27 0.000,18 0,00 0.18 0.00 0.00 0.00 0.000,09:0.000.090.090.000.000,09  0.110.000.29.0.08.00.0 00.00 .00.00.0.08.29.00,08
+anger -0.000.21 0.01 0.02 0.01 0.04 0.00 0,010.10 0.010.030.120.050,220.080.07 0.00 0.31:0.01 0.03 0.01 0.03 0,000.00 0.090.010.020.180.050.140.070.08 0.00.2.0D.00.0D.00.00.0.08.010.010.10.00.24.00.06
+annoyance -0.070.05 0.12 0.10 0.07 0.19 0.00 0.020.00 0.000.020.24.0.020.070.000.02 — 0.000.150,28 0.17 0.03 0.07 0.00 0.03 0.000.000.000.200.000.050.000.03 0.00.10 .1D.10.0@.00.00.00.00.00.00.210.09.1D.00.03
+concern -0,000.06 0.03 0.19 0.22 0.09 0.00 0.000.00 0.030.060.190.060.060.000.00 —0.04.0.040.04.0.29 0.07 0.07 0.00 0.00 0.000.07 0.040.250.040.040.000.04 0.00,000.04).29.1D.01.00.04).00.00.04.14.04).18.00.04 0.8
+confusion -0.000.00 0.00 0.00 Qf 0.00 0.00 0.000.00 0.000.000.000.000.000.000.20 0.00 0.000.00 0.25 {¥EJO.00 0.00 0.00 0,000.00 0.000.000.000,000.000.00 0.00.00 .00. OCF .00.00.00.00.0W.00.00.00.29.000.00
+contempt -0,120.00 0.00 0,25 0.12 0,25 0.00 0.000.12.0.000.120.000.000.000,000.00 0,05 0.110.210.05 0.00 0.11 0.00 0,00 0,050.00 0.050.260.000.110.000,00 0,.0@.0@.19.0@.00,10.00.00.1D.00.00.2.00.19.0.00
+
+Fs
+3 depression -0.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000.000.000.000.000.00 0.000.000.00 0.00 0.00 0.00 0.00 0.00 0.01 [0.000.000.000.000.000.00 0.00.0M.00.00.00.00.00. 000. OGRD.00.00.00.0@. 000.00 0.6
+E disappointment -0.250.00 0.25 0.00 0.00 0.00 0.000.250.00 0.000.000.000.000.000.250.00 0.000.000.25 0.000.000. 00 0.00 (EI90.250 00 0.000.000.000.000.000.00 0.0M.00.29.00.0.00.29.29.29.0M.00.00.00.00.0M.00
+= disgust -0,000.11 0.04 0.09 0.04 0,02 0.00 0.000.15 0,000.01 0.00 0.090.280.130.04 0,000.100.04.0.02 0.00 0.06 0.00 0.010.270.00 0.040.040.150.150.040.07 0.0M.1M.0.00.00.00.00.00.29.0M.0@.04.0@.21.00.04
+2 excitement -0.000.03 0.01 0.01 0.02 0.01 0.00 0.000.04.0,150.010.160.190.330.040.04 0.000.030.00 0.00 0.00 0.00 0.00 0.00 0.040.16 0.000.210.230.220.030.07 0.00.00.0W.0M.00.00.0®.00.00.1. 00.10.20.39.00.06 0.4
+9° fear -0.000.14 0.00 0.00 0.00 0.00 0.00 0.000.03 0.000.210.070.030.220.190.10 0.000.120.02 0.02 0.02 0.00 0.00 0.00 0.020.00 0.110.070.040.230.210.14 0.0M.09.0.020.0D.0M.0.00.00.0M.19.0.00.34.10.11
+frustration -0.000.07 0.01 0.01 0.01 0.01 0.00 0,000.02 0.020.020.350.030.360.050.04 0.000.080.010.010.010.010.000.010.030. 03 0.00 G)47/0. 040,200.070.03 0.0M.0@.0.00.0D.00.0.00.00.00.00.30.04.3D.00.04
+happiness -0.010.040.01 0,010.02 0.00 0.00 0.000.03 0.020. 03 0.010.370.31 0,080.06 0.010.060.01 0.00 0.01 0.00 0.00 0.00 0.050.03 0.020. 02 014210.210.060.09 0.00.0D.0D.0M.0D.00.0@.00.0D. 0D.02.010,40.30.0@. 06 -0.2
+neutral -0.010.05 0.01 0.01 0.03 0.00 0.000.010. 05 0,010.02 0.03 0.100 ¥) 050.06 0.000.080.010.02 0,02 0.00 0.00 0.00 0.060.02 0.020. 05 0.15 0,420. 070.08 0.0M.01.00.00.0D.0M.00.0M.00.00.00.0H.1€ 1.07 °
+sadness -0.000.08 0.00 0.01 0.00 0.00 0.00 0.000.03 0.010.03 0.08 0.110.310.290.05 0.00 0.08 0.00 0.00 0.01 0.00 0.00 0.00 0.050.000.050.110.100.200.350.05 0.00.0@.00.0M.0.00.00.0M.04.00.01.08.09.30.30.04
+surprise -0.000.10 0.00 0.01 0.02 0.00 0.00 0.010.06 0.000. 05 0.02 0.07 0.13 0.03) 0.00.0.170.00 0.02 0.01 0.01 0.00 0.00 0.080.010.020.010.150.090.050.38 0.00.10.0W.00.0D.00.0@.0M.0D.00.0.00. 09.10.0443 -0.0
+Qwen3-Omni - Text-only Qwen3-Omni - Audio-only Qwen3-Omni - Audio+Text
+amusement -0.080.00 0.08 0.00 0.08 0.00 0.00 0.080.08 0,080.00 0.17 0.08 0.17 0.000.08 (0.64) 000.09 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.09 0.09 0.09 0.00 0.00 0.00 00 .00.00.10.00.10.00.0M.00.10.00.10.00.00 a
+anger -0.010.29 0.00 0.04 0.00 0.01 0.00 0.000.07 0.030.040.09 0.05 0.19 0.06 0.12 0,00 0,400. 00 0.01 0.00 0.00 0.00 0.00 0.050,010.020.130.060.140.120.05 0.0 00.01.00 .00.00.0M.09.00.00.10.00.19.10.06
+annoyance -0.050.18 0.05 0.18 0.00 0.03 0.00 0.030.00 0.000.03 0.23 0.03 0.18 0.00 0.03 0.00 0,380.08 0.05 0.030.000. 00 0.00 0.030.08 0.030.210.030.100.000.00 oa 0©.10.0D.00.00.0M.00.09.00.1.00.1D.0M.00
+concern -0.000.12 0.04 0.28 0.00 0.04 0.00 0.000.00 0.000.080.200.040.200.000.00 0.000.040.00 0.33 0.00 0.00 0.00 0.00 0.000.08 0.000.170.000.330.040.00 0.04.09.00.2@.00.00.00.0M.0@.10.0M.1H.00.39.00.00 08
+confusion -0,000.17 0.00 0.00 0.33 0.00 0.00 0.000.00 0,000.00 0.000.000.170.000.33 0.000.000.200. (T}0.60/9 00 0.00 0,00 0.000.00 0.000.000.000.200.000.00 0.00.00 .0.00.30.0M.00.00.00.00.00.3H0.00.30.00.00
+7 contempt -0,000.100.100.200.100.200.00 0.000.100.000.000.000.000.200.000.00 0.300.300.000.00 0,00 0.10 0.00 0.00 0.000.200.000.100.000.000.000.00 950.10. 0©.00.11D.00.00.00.00.00.00.00.00.1D.0M.00
+3 depression -0.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000.000.000.000.000.00 = 0.000.000.00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000. tele) 1.0010 000.00 0.00.00 .00.00.00.0M.00.00.0@.00.0M.00.01 000.00 0.6
+Le disappointment -0.000.00 0.00 0.00 0.00 0.00 0.000.330.00 0.000.000.330.000.000.000.33 0.000.000. 00 GET. 00 0.00 0.00 0.00 0.000.25 0.000.000.000.250.000.00 0.0M.0M.00.30.00.0M.00.0M.00.00.00.00.0« p.00
+= disgust -0.020.17 0.01 0.05 0,000.01 0.00 0.000.15 0.000.02 0.00 0.070.290.15 0.05 0.01 0.220.00 0.01 0.00 0.01 0.00 0.000.200.000.010.070.110.160.130.07 0.00.19.0D.00.0M.00.00.0M.19.00.00.00.00.19.10.06
+2 excitement -0.010.03 0.00 0.01 0.00 0.00 0.00 0.000.02 0.160.030.110.180.300.060.10 0.01 0.010.000.00 0.00 0.00 0.00 0.00 0.050.180.000.100.180.320.080.06 0.010.02.0M.00.0D.0M.0.00.04.19.00.09.10.30.00.08 0.4
+o fear -0,000.13 0.00 0.00 0.00 0,00 0.00 0.000.03 0,000.25 0.02 0.02 0.230.180.13 0.00 0,100.00 0.00 0.00 0.00 0.00 0.00 0.000.000,350.000.020.180.270.08 0.00.0 .00.0M.0.00.00.0M.00.00.29.0M.00.29.20.12
+
+frustration -0.010.09 0.00 0.02 0.00 0.00 0.00 0.000.03 0.040.03 0.33 0.02 0.300.060.07 0.00 0.130.00 0.01 0.00 0.00 0.00 0.01 0.020.02 0.030:38.0.010.240.110.05 0.00.1M.00.00.00.00.00.00.0D.00.00.34.00.30.110.05
+happiness -0.010.06 0.00 0.00 0.00 0.00 0.00 0.000.02 0.030.05 0.02 0:350.280.090.09 — 0.04.0.050.00 0.00 0.00 0.00 0.00 0.00 0.020.02 0.040.00 0,01.00.00.000.0D.00.00.00.0D.04.04).00/40.20.09.07 -02
+neutral -0.000,05 0.00 0.01 0.00 0.00 0.00 0.000.03 0.010.05 0.02 0.09 (j 0.00 0.07 0.00 0.01 0,00 0.00 0.00 0.00 0.030.01 0.030.02 0.14{9940.130.05 —0,00.00.0@.0M.00.00.00.0M.0D.00.0D.00. 10 f0.10.06
+sadness -0.000.08 0.00 0.00 0.00 0,00 0.00 0,000.03 0.010.05 0.080.100.28 0,00 0.030.00 0.00 0,00 0.00 0.00 0.00 0.040.00 0.030,04 0.07 0.199 YJ0.03 — 0,00.0@.00.00.00.00.00.00.0D.00.0@.09.00.159
+surprise -0.000.12 0.00 0.02 0.00 0,00 0.00 0.000.01 0.000.06 0.03 0.05 0.04 0.0435] 0.00 0.16 0.00 0.01 0.00 0.00 0.00 0.00 0.010.02 0.020.010.100.150.05048 0.0M.11.00.0M.00.00.00.00.0D.00.0.00.19.0D
+
+- 0.0
+
+Baichuan-Omni - Text-only Baichuan-Omni - Audio-only Baichuan-Omni - Audio+Text
+amusement -0.000.00 0.09 0.09 0.09 0.00 0.00 0.090.09 0.270.00 0.00 0.09 0.09 0.000.09 0,08 0.000,08 0.00 0.15 0.08 0.00 0.08 0.000.23 0.000.150.080,080.000.00 0.01.00.00.00.14.00.00.00.0D.10.00.1.00.3@.00.00
+anger -0.000.23 0.02 0.02 0.010.01 0.00 0.010.05 0.030.050.130.130.170.090.06 0.010.270.03 0,010.00 0.00 0.00 0.00 0.050.02 0.010.130.160.160.090.06 0.00.29.0D.0D.0.00.00.00.00.00.010.1.09.29.00.04
+annoyance -0.070.09 0.17 0.11 0.07 0.02 0.00 0.020.00 0.040.040.240.04.0.04 0.02 0.02 0.110.130.24 0.00 0.00 0.00 0.00 0.02 0.020.07 0.000.260.040.110.000.00 0.04).10.1D.19.0D.0M.00.00.00.02.00.20.00.1D.00.00
+concern -0,030.06 0.03 0.06 0.13 0.00 0.00 0.000.00 0.160.06 0.10 0.06 0.26 0.00 0.03 0.03 0.000.10 0.10 0.07 0.00 0.00 0.00 0.000.07 0.030.240.000.340.000.00 0.0M.00.00.20.0D.0M.00.0M.00.00.00.12. O24D. 00.00 08
+confusion -0,000.00 0.200. 00 0.4000. 00 0.00 0.000.00 0,000.00 0.000.000.200.000.20 0.000.000.000. CoMEMo. 00 0.00 0.00 0.000.330.000.000.000.170.000.00 0.00.00.0@. OCoEED 00.0@.00.00.0M.00.00.00.1D.0M.00
+contempt -0,110.00 0.00 0.11 0.00 0,00 0.00 0.000.110,110,220.000.000.330,000.00 0,130.200.270.00 0.00 0.00 0.00 0.07 0.070,13 0.000.070.000,070.000.00 0.10,1D.0@.00.00.0M,0.00.0@.0@.0M.1.00.39.00,00
+
+1.0
+
+g depression -0.000,00 0.00 0.00 0.00 0.00 0.00 0.000.00 0.000.000.000.000.000,000.00 — 0.000.000.000.00 0,00 0.00 0.00 0.00 0.01 0.000.00.0.000.000.000.00 0.00.00.00.00.00.00.00, 00. 00GYH.0W.00.000.00.00.00 06
+5 disappointment -0.000.00 0.33 0.00 0.33 0.00 0.00 0,330.00 0.000.00.0.000.000.000.000.00 — 0.00.0.000.00 0.25 0.00 0.00 0.25 0.00 0.000.000.000.250.250.000.000.00 0.00).000.0W.25.0@.00.29.00.0@.0.0.000.25.29.000.00
+S disgust -0.000.18 0.04 0.06 0.03 0.00 0.00 0.000.08 0.010.010.030.160.250.110.03 0.00 0.130.01 0,010.01 0.01 0.00 0.00 0.180.010.010.090.280.130.090.03  0.00.1.0D.0W.0D.00.00.00.1D.00.00.09.10.3.00.04
+e excitement -0.000.01 0.00 0.00 0.01 0.00 0.00 0.00.01 0,190.01 0.170,300.240.040.03 0.00 0.000.00 0.00 0.01 0.00 0.00 0.00 0,000.11 0.000.080.360.290.110.02 0.0M.00.0W.00.00.0M.00.00.00.10.00.08.2! 050.01 0.4
+9 fear -0.000.12 0.00 0.00 0.00 0,00 0.00 0.000.02 0.020.140.020.190.200.200.10 — 0,000.110,00 0.00 0.02 0.00 0,00 0,00 0,020.02 0.110.040.270.220.150.05 0.00.00.0@.00.00.00,00.00.0D.0.00.00.1 10.07
+
+frustration -0.000.05 0.03 0.01 0.00 0.00 0.00 0.010.01 0.030.03 0.33 0.07 0.340.060.03 0.00 0.180.02 0,000.01 0.00 0.00 0.01 0,000.01 0.010.210.090,300.160.00 0.00.10.0D.00.0D.00.00.00.00.00.00.20.
+
+.3D.10.01
+
+happiness -0.010,04 0.01 0.00 0.00 0.00 0.00 0.000.01 0.03 0,03 0.01/(9%1]0.26 0.07 0.03 0.01 0.05 0.00 0.00 0.01 0.00 0.00 0.00 0.020.04.0.010.00) 0.180.080.04 0.010.04.00.0M.0D.0M.00.00.0D.00.00.0: 04.04 -0.2
+neutral -0.000,04 0.00 0.00 0.01 0,00 0.00 0,000.02 0,030.02 0.02 0.22 HI 0.07 0.04 0.01 0.060.01 0.00 0.01 0.00 0.00 0.00 0.020.02 0.010.01 70.340.090.04 0.00.04.0M.00.0D.0M.00.00.0D.00.00.00.17 030.04 °
+sadness -0.000.09 0.00 0.00 0.00 0.00 0.00 0.000.00 0.030.030.070.190.240.310.03 0.000.070.00 0.00 0.00 0.00 0.00 0.00 0.020.000.020.02 0.23 0,18 0.420. 03 0.00.01.00.00.0.00.00.0M.00.00.04.04. 30.03
+surprise -0.010.09 0.01 0.01 0.01 0.00 0.00 0.000.03 0.000.05 0.02 0.25 0.10.05 a 0.01 0.16 0.00 0.00 0.00 0.00 0.00 0.01 0.010.02 0.010.010.360.220.050.16 0.00.11.0W.0M.0.00.0@.00.0D.00.00.00.20.20.00.3 0.0
+oe G toe a ee aye st J og a eS ae wp Cee hee ee oe hoe ef
+sR EES REEEEE SESE EE 2 GREECE ESE REESE ERE EREGEESEEE ESE EE 2
+ge 3 F g ees & s 2 3 8 g “8 ¢ 8 SESERER ET BE &
+g° $5 ete e285 Ea 2eF ge Sete Eee Ete FtSeeEeEeE EREgS
+2 2€° 8 $8 $°o S83 ° 8 * S$ Fe eseE Ee SET RR FS Fe SseS Ss SERS
+5 s oe fy e+ E i es 8 Ff ee E 5 38 x ge 2
+Predicted Predicted Predicted
+
+Figure 9. Confusion matrices showing all models’ emotion recognition performance for Emotion-Matched condition in the
+LISTEN benchmark. Row-normalized matrices display prediction distributions for each tested with text-only, audio-only, and
+audiot+text modalities.
+
+
+Gemini-2.5-Flash - Text-only Gemini-2.5-Flash - Audio-only Gemini-2.5-Flash - Audio+Text
+anger- 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.03 0.00 0.10 0.02 0.24 0.10 0.07 0.31 0.02 0.12 0.04 0.06 0.14 0.00 0.20 0.08 0.08 0.26 0.04 0.10
+disgust - 0.00 0,00 0.00 0.00 0.00 0,00 0.00 0.00 0,00 0.00 0.00 0.01 0.13 0.01 0.12 0,28 0.03 0.36 0.00 0,07 0.03 0.05 0.08 0.01 0.21 0.14 0.04 0,04
+
+1.0
+
+0.8
+
+excitement - 0.02 0.07 0.16 0.00 0.11 0.16 0.09 0.25 0.02 0.11 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+
+fear- 0.00 0.00 0,00 0.00 0.00 0.00 0.00
+
+0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+06
+frustration- 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.01 0.01 0.08 0.00 0.21 0.28 0.01 0.29 0.03 0.07 0.03 0.03 0.11 0.01 0.29 0.12 0.07 0.25 0.03 0.07
+
+happiness - 0.04 0.01 0.22 0,00 0.21 0.14 0.05 0.22 0.00 0.12 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00
+
+0.4
+
+Ground Truth
+
+neutral- 0.03 0.02 0.10 0.03 0.22 0.07 0.17 0.26 0.02 0.07 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00
+ridicule- 0.00 0.00 0.00 0,00 0.00 0,00 0.00 0.00 0,00 0,00 0.03 0.02 0.08 0.01 0.13 0.24 0.06 0.31 0.02 0.10 0,05 0.00 0.09 0.02 0.07 0,12 0.04 [14a 0.03 0.12
+
+-0.2
+sadness - 0.03 0.00 0.00 0.03 |0.31 0.05 0.13 0.26 0.13 0.08 0.00 0.00 0.21 0.07 0.29 0.07 0.07 0.07 0.07 0.14 0.07 0.00 0.00 0.07 0.29 0.14 0.00 0.29 0.07 0.07
+Surprise - 0.08 0.00 0.00 0.00 0.16 0.05 0.05 0.19 0.00 [/@IMB)) 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+-0.0
+Gemini-2.5-Pro - Text-only Gemini-2.5-Pro - Audio-only Gemini-2.5-Pro - Audio+Text
+Lo
+anger- 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.04 0.00 0.07 0.02 0.19 0.05 0.07 [RYH 0.00 0.02 0.06 0.00 0.06 0.02 0.13 0.06 0.04 [tel 0.00 0.02
+disgust - 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.07 0.04 0.01 0.07 0.12 0.08 |=!) 0.04 0,05 0.01 0.04 0.04 0.00 0.16 0.16 0.04 0,03 0.03
+
+= 0.8
+excitement- 0.05 0.00 0.07 0.00 0.17 0.10 0.19 0.33 0.05 0.05 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+
+fear- 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0,00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00
+0.04 0.01 0.00 0.04 0.05 0.00 0.18 0.11 0.09 [6148] 0.01 0.06
+
+happiness - 0.01 0.05 0.08 0.01 031 0.17 0.08 0.21 0.00 0.09 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+
+06
+
+frustration- 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.05 0.01 0.05 0.00 0.18 016 0.05
+
+0.4
+
+Ground Truth
+
+neutral- 0.01 0.02 0.03 0.01 018 0.06 0.22 (0.41 0.01 0.04 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00
+ridicule- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.02 0.03 0.01 0.06 0.10 0.11 EEN) 0.03 0.06 0.00 0.00 0.07 0.00 0.08 0.10 0.10 [EE 0.02 0.05
+
+-0.2
+
+sadness- 0.05 0.00 0.03 0.00 0.24 0.05 0.05 0.16 0.05 0.08 0.00 0.00 0.00 0.23 0.08 0.23 0.31 0.08 0.00 0.00 0.00 0.00 0.08 0.23 0.08 0.08 0.08 0.00
+
+0.00 (041 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 0.00
+
+surprise- 0.05 0.03 0.03 0,00 0.08 0.03 0.08
+- 0.0
+
+Qwen2.5-Omni - Text-only Qwen2.5-Omni - Audio-only Qwen2.5-Omni —- Audio+Text
+0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.02 0.02 0.04 0.00 0.09 0.11 0.00 Mii 0.02 0.00 0.02 0.00 0.06 0.00 0.13 0.07 0.09 [iiey 0.02 0.04
+disgust- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.01 0.04 0.00 0.00 0.09 0.12 0.00 Siem 0.01 0.03 0.00 0.03 0.00 0.00 0.12 0.19 0.09 [iiey) 0.04 0.01
+
+1.0
+anger - 0.00
+
+0.8
+excitement - 0.02 0.02 015 0.00 0.10 0.15 0.24 0.20 0.05 0.07 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+
+fear- 0.00 0.00 0,00 0.00 0.00 0,00 0.00 0,00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0,00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+
+2 frustration- 0.00 0.00 0,00 0.00 0.00 0.00 0.00 Eg 0.00 0.00 0.03 0.03 0.00 0.15 0.01 0.06 0.00 0.04 0.00 0.04 0.07 0.00 0.17 0.09 0.11 0.43 0.01 0.08 os
+E happiness - 0.07 0.02 0.12 0.00 0.15 0.25 0.19 014 0.01 0.05 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 bd
+
+oO neutral- 0.02 0.04 0.06 0.02 014 0.03 032 029 0.04 0.04 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+
+ridicule- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.02 0.01 0.02 0.00 0.02 0.00 0.03 0.01 0.03 0.02 0.01 0.03 0.00 0.08 0.02 0.14 [XR 0.02 0.05
+sadness- 0.05 0.03 0.00 0.05 (0.47 0.00 0.10 O20 0.05 0.05 0.00 0.09 0.00 0.09 0.09 018 0.09 0.00 0.00 0.00 0.08 0.00 0.08 0.08 0.15 0.00 [etsy 0.00 0.00 po?
+surprise- 0.07 0.00 0,00 0.00 017 0.05 0.20 015 0.00 0.35, 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 we
+Qwen3-Omni - Text-only Qwen3-Omni - Audio-only Qwen3-Omni - Audio+Text ate
+
+anger- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.05 0.00 0.05 0.00 0.11 0.09 0.00 0.00 0.04 0.04 0.00 0.04 0.00 0.12 0.02 0.08 [ise 0.02 0.06 °
+
+disgust- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.03 0.02 0.00 0.00 0.03 017 0.03 0.03 0.05 0.03 0.01 0.01 0.00 0.09 0.13 0.09 [etsy 0.03 0.04
+excitement - 0.00 0.05 0.20 0.05 0.07 0.05 0.24 0.24 0.05 0.05 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 °8
+
+s fear- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+e frustration- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.03 0.03 0.04 0.00 0.19 0.07 0.08 0.00 0.00 0.01 0.01 0.07 0.00 0.14 0.07 0.04 =) 0.03 0.07 o6
+
+E happiness- 0.10 0.02 0.16 0.00 0.08 0.22 0.13 0.22 0.02 0.06 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+& neutral- 0.02 0.02 0.04 0.01 0.10 0.02 0,29 (0.40 0.03 0.06 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 o4
+
+ridicule- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.02 0.02 0.04 0.00 0.04 0.02 0.07 Bityemy 0.02 0.04 0.02 0.00 0.04 0.00 0.03 0.03 0.08 0.03 0.07
+sadness - 0.03 0.00 0,03 0.03 35 0.05 0.12 0.20 0.12 0.07 0.00 0.00 0.00 0.08 0.23 015 0.00 La 0.00 0.08 0.00 0.08 0.08 0.08 0.25 0.08 0.00 0.25 0.00 0.17 ‘ie
+surprise- 0.08 0.00 0.00 0.03 0.10 0.03 0.05 0.26 0.00 (0.46 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00 ae
+Baichuan-Omni - Text-only Baichuan-Omni - Audio-only Baichuan-Omni - Audio+Text 10
+
+anger- 0.04 0.06 0.00 0.00 0.00 0.00 0.06 0.00 0.02 0.02 0.00 0.00 0.30 0.00 0.00 MUR) 0.07 0.00 0.00 0.00 0.00 0.00 ¢ 2| 0.00 0.00 [iii 0.07 0.00
+
+disgust- 0.07 0.03 0.00 0,00 0.00 0.00 0.09 0,00 0.01 0.01 0.00 0.00 0.19 0.00 0.00 Mieyemy 0.04 0.00 0.00 0.04 0.00 0.00 0.17 0.00 0.00 [eye 0.06 0.00
+excitement - 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 a8
+
+s fear- 0.00 0.00 0.00 0,00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0,00 0.00 0.00
+& frustration- 0.06 0.02 0.00 0.00 0.00 0.00 (0.41 0.14 0.00 0.04 0.06 0.00 0.00 0.33 0.00 0.00 0.06 0.00 0.04 0.01 0.00 0.00 0.00 0.00 =) 0.05 0.00 oS
+
+E happiness - 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+[o) neutral- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 ed
+
+ridicule- 0.04 0.01 0,00 0.00 0,00 0.00 | 0.49 | 0.09 0.00 0.04 0.01 0.00 0.00 0.18 0.00 0.00 Mis 0.06 0.00 0.01 0.01 0.00 0.00 0.24 0.00 0.00 [es 0.05 0.00
+sadness- 0.14 0.00 0.00 0.00 0.00 0.00 O21 0.07 0.00 0.00 0.15 0.00 0.00 (0.46 0.00 0.00 031 0.08 0.00 0.00 0.08 0.00 0.00 (042, 0,00 0.00 (ss 0.00 0.00 ro?
+surprise- 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 a
+
+ss 2 8 ¢€ 2 8 3 7 8 8 g es <¢ € 8 3 cs 3 8 # 8 @€ 2 8 6
+Predicted Predicted Predicted
+
+Figure 10. Confusion matrices showing all models’ emotion recognition performance for Emotion-Mismatched condition in the
+LISTEN benchmark. Row-normalized matrices display prediction distributions for each tested with text-only, audio-only, and
+audiot+text modalities.
+
+Gemini-2.5-Pro Gemini-2.5-Flash Qwen2.5-Omni Qwen3-Omni Baichuan-Omni
+to
+a
+2
+© happiness- 00 0.0 0.0 00 00 01 02 - 00 00 009 o1 02 01 08 00 03 - 00 00 01 009 01 03 03 09 O02 - 00 00 00 00 00 o2 00 600-00 00 0.0 00 00 03 oa 02 o4
+
+neutral- 0.0 0.0 0.0 09 00
+
+-0.2
+
+sadness- 00 0.0 0.0 00 01 02 00 - 00 00 00 00 02 00 02
+
+surprise- 09 0.0 0.0 00 00
+
+-0.0
+
+am | "i
+5
+g
+
+ae ‘Bj
+2
+
+Poe € 23 2 2 2 #8 € £ # € 3 ¢& $e € * #@ € 3 ¢& § # § S @ ee & seb * ef ge
+8 —e & i —e & 8 — & i —& & i e 2
+predicted predicted predicted predicted predicted
+
+Figure 11. Confusion matrices showing all models’ emotion recognition performance for Paralinguistic condition in the LISTEN
+benchmark. Row-normalized matrices display prediction distributions for each tested with audio-only modality.
+
+
+Modality: Text-only
+Sample ID: SAMPLE_7c8b53fb
+Transcription: "Kids are talking by the door."
+
+Prompt: Read the transcription and classify the emotion. Based on the content of this text, what
+emotion would the person likely be feeling?
+
+A. anger
+
+B. fear
+
+C. disgust
+
+D. neutral
+
+E. sadness
+
+F. surprise
+
+G. calm
+
+H. happiness
+
+Expected Response: D (neutral)
+Model Prediction: D (neutral)
+Ground Truth: neutral
+
+Evaluation: Correct
+
+Figure 12. Example of a Neutral-Text text only entry in the LISTEN benchmark. The model correctly identifies the statement’s
+emotion (neutral) when both lexical cues is available.
+
+
+Modality: Audio-only
+Sample ID: SAMPLE_7c8b53fb
+Audio: RAVDESS_train_0333
+
+Prompt: Listen to the audio and classify the emotion. What emotion does the speaker convey
+through their tone?
+
+A. surprise
+B. sadness
+C. fear
+
+D. anger
+
+E. calm
+
+F. happiness
+G. neutral
+H. disgust
+
+Expected Response: D (anger)
+Model Prediction: D (anger)
+Ground Truth: anger
+
+Evaluation: Correct
+
+Figure 13. Example of a Neutral-Text audio-only entry in the LISTEN benchmark. The model correctly infers the intended
+emotion (anger) based on vocal prosody alone.
+
+
+Modality: Text+Audio
+
+Sample ID: SAMPLE_7c8b53fb
+Transcription: "Kids are talking by the door."
+Audio: RAVDESS_train_0333
+
+Prompt: Listen to the audio and read the transcription, then classify the emotion. What emotion
+does the speaker convey through their tone?
+
+A. surprise
+
+B. sadness
+
+C. fear
+
+D. anger
+
+E. calm
+
+F. happiness
+
+G. neutral
+
+H. disgust
+
+Expected Response: D (anger)
+Model Prediction: D (anger)
+Ground Truth: anger
+
+Evaluation: Correct
+
+Figure 14. Example of a Neutral-Text text+audio entry in the LISTEN benchmark. The model correctly identifies the speaker’s
+emotion (anger) when both lexical and prosodic cues are available.
+
+
+Modality: Text-only
+Sample ID: SAMPLE_9b76ea7d
+Transcription: "What the hell is this?"
+
+Prompt: Read the transcription and classify the emotion. From the semantic content alone, what
+emotion is being expressed?
+
+A. neutral
+
+B. sadness
+
+C. excitement
+D. frustration
+E. fear
+
+F. disgust
+
+G. happiness
+
+H. anger
+
+I. surprise
+
+Expected Response: H (frustration)
+Model Prediction:
+Ground Truth: frustration
+Evaluation:
+Figure 15. Example of an Emotion-Matched text-only entry from the LISTEN benchmark. The model misclassified an explicitly
+
+frustration utterance ("What the hell is this ?") as neutral, illustrating overgeneralization across semantically related negative
+emotions.
+
+
+Modality: Audio-only
+
+Sample ID: SAMPLE_dd@f6e9d
+
+Audio: IEMOCAP_Session5_Ses05M_script01_1b_F030
+
+Prompt: Listen to the audio and classify the emotion. Based on the vocal expression, what
+emotion is the speaker feeling?
+
+A. frustration
+B. anger
+
+C. neutral
+
+D. excitement
+E. happiness
+F. surprise
+
+G. disgust
+
+H. fear
+
+I. sadness
+
+Expected Response: A (frustration)
+Model Prediction: A (frustration)
+Ground Truth: frustration
+
+Evaluation: Correct
+
+Figure 16. Example of an Emotion-Matched audio-only entry from the LISTEN benchmark. The model correctly interprets
+prosodic cues to identify the emotion as frustration, showing sensitivity to vocal intensity and tone even without textual input.
+
+
+Modality: Text+Audio
+
+Sample ID: SAMPLE_dd@f6e9d
+
+Audio: IEMOCAP_Session5_Ses05M_script01_1b_F030
+Transcription: "What the hell is this?"
+
+Prompt: Listen to the audio and read the transcription, then classify the emotion. Based on the
+vocal expression, what emotion is the speaker feeling?
+
+A. frustration
+B. anger
+
+C. neutral
+
+D. excitement
+E. happiness
+F. surprise
+
+G. disgust
+
+H. fear
+
+I. sadness
+
+Expected Response: A (frustration)
+Model Prediction: A (frustration)
+Ground Truth: frustration
+Evaluation: Correct
+Figure 17. Example of an Emotion-Matched text+audio entry from the LISTEN benchmark. The model correctly identifies
+
+jrustration when integrating both lexical and prosodic cues, demonstrating effective multimodal fusion under congruent emotional
+alignment.
+
+
+Modality: Text-only
+Sample ID: SAMPLE_955399e0
+
+Transcription: "You’re right, the party’s fantastic. Please, tell me more. I haven’t heard enough
+about it all week because hearing about that never gets old!"
+
+Prompt: Read the transcription and classify the emotion. What emotion is conveyed by the words
+in this statement?
+A. surprise
+B. excitement
+C. sadness
+D. disgust
+E. fear
+F. neutral
+G. anger
+H. happiness
+I. frustration
+J. ridicule
+
+Expected Response: B (excitement)
+Model Prediction: B (excitement)
+Ground Truth: excitement (explicit emotion label)
+Evaluation: Correct
+Figure 18. Example of an Emotion-Mismatched text-only entry from the LISTEN benchmark. Although the lexical content
+
+expresses excitement, the corresponding audio (not shown) conveys ridicule, highlighting the designed lexical—prosodic conflict
+characteristic of this condition.
+
+
+Modality: Audio-only
+Sample ID: SAMPLE_c52e71d0
+Audio: MUStARD_PRO_1_7575_u_3B
+
+Prompt: Listen to the audio and classify the emotion. What emotion is communicated through
+the speaker’s vocal prosody?
+
+A. disgust
+
+B. neutral
+
+C. ridicule
+
+D. frustration
+E. sadness
+
+F. anger
+
+G. excitement
+H. fear
+
+I. surprise
+
+J. happiness
+
+Expected Response: F (anger)
+Model Prediction:
+Ground Truth: anger (implicit emotion label)
+Evaluation:
+Figure 19. Example of an Emotion-Mismatched audio-only entry from the LISTEN benchmark. The lexical content is
+
+superficially positive (“You’re right, the party’s fantastic”), but the prosody expresses irritation and anger. The model incorrectly
+predicts excitement, indicating difficulty in resolving sarcastic or contrastive vocal tone.
+
+
+Modality: Text+Audio
+Sample ID: SAMPLE_c52e71d0
+Audio: MUStARD_PRO_1_7575_u_3B
+
+Transcription: "You’re right, the party’s fantastic. Please, tell me more. I haven’t heard enough
+about it all week because hearing about that never gets old!"
+
+Prompt: Listen to the audio and read the transcription, then classify the emotion. What emotion
+is communicated through the speaker’s vocal prosody?
+
+A. neutral
+
+B. disgust
+
+C. anger
+
+D. sadness
+
+E. excitement
+
+F. fear
+
+G. ridicule
+
+H. frustration
+
+I. happiness
+
+J. surprise
+
+Expected Response: C (anger)
+Model Prediction:
+Ground Truth: anger (implicit emotion label)
+Evaluation:
+Figure 20. Example of an Emotion-Mismatched text+audio entry from the LISTEN benchmark. Despite access to both
+
+modalities, the model incorrectly predicts excitement instead of the intended anger, suggesting overreliance on lexical positivity
+rather than prosodic dissonance—a hallmark challenge in sarcasm and irony understanding.
+
+
+Modality: Audio-only
+Sample ID: SAMPLE_54df39ff
+Audio: IEMOCAP_Session5_Ses@5F_impro@3_FQQ6
+
+Prompt: Listen to the audio and classify the emotion. What emotional tone is conveyed by the
+literal meaning of this statement?
+
+A. anger
+
+B. happiness
+C. fear
+
+D. sadness
+
+E. surprise
+
+F. frustration
+G. excitement
+H. disgust
+
+I. neutral
+
+Expected Response: G (excitement)
+Model Prediction:
+Ground Truth: excitement
+Evaluation:
+Figure 21. Example of a Paralinguistic audio-only entry from the LISTEN benchmark. The utterance contains only nonverbal
+
+laughter, labeled as excitement. The model incorrectly classifies it as happiness, revealing challenges in distinguishing subtle
+affective intent from nonverbal vocalizations.

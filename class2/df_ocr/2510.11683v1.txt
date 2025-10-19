@@ -1,0 +1,1196 @@
+arX1v:2510.11683v1 [cs.LG] 13 Oct 2025
+
+Boundary-Guided Policy Optimization for Memory-efficient RL of
+Diffusion Large Language Models
+
+Nianyi Lin*, Jiajie Zhang*, Lei Hou, Juanzi Li
+Tsinghua University
+
+Abstract
+
+A key challenge in applying reinforcement
+learning (RL) to diffusion large language mod-
+els (ALLMs) lies in the intractability of their
+likelihood functions, which are essential for
+the RL objective, necessitating corresponding
+approximation in each training step. While ex-
+isting methods approximate the log-likelihoods
+by their evidence lower bounds (ELBOs) via
+customized Monte Carlo (MC) sampling, the
+forward computational graphs of all MC sam-
+ples need to be retained for the gradient com-
+putation of non-linear terms in the RL ob-
+jective, resulting in significant memory over-
+head. This constraint restricts feasible sam-
+ple sizes, leading to imprecise likelihood ap-
+proximations and ultimately distorting the RL
+objective. To overcome this limitation, we
+propose Boundary-Guided Policy Optimization
+(BGPO), a memory-efficient RL algorithm that
+maximizes a specially constructed lower bound
+of the ELBO-based objective. This lower
+bound is carefully designed to satisfy two key
+properties: (1) Linearity: it is formulated in a
+linear sum where each term depends only on
+a single MC sample, thereby enabling gradi-
+ent accumulation across samples and ensuring
+constant memory usage; (2) Equivalence: Both
+the value and gradient of this lower bound are
+equal to those of the ELBO-based objective in
+on-policy training, making it also an effective
+approximation for the original RL objective.
+These properties allow BGPO to adopt a large
+MC sample size, resulting in more accurate
+likelihood approximations and improved RL
+objective estimation, which in turn leads to en-
+hanced performance. Experiments show that
+BGPO significantly outperforms previous RL
+algorithms for dLLMs in math problem solving,
+code generation, and planning tasks.
+
+1 Introduction
+
+Recently, diffusion large language models (dLLMs)
+have emerged as promising alternatives to conven-
+
+“Equal contribution. Work done when JZ interned at Zhipu.
+
+tional autoregressive models (ARMs), demonstrat-
+ing competitive performance across various lan-
+guage modeling tasks (Nie et al., 2025b; Ye et al.,
+2025; Gong et al., 2025b; Cheng et al., 2025). Un-
+like ARMs, which generate sequences in a left-to-
+right, token-by-token manner, dLLMs iteratively
+unmask tokens in parallel, offering the potential
+for significant inference acceleration (DeepMind,
+2025; Inception Labs et al., 2025; Song et al., 2025;
+Wu et al., 2025). Despite these advancements, ex-
+isting works primarily focus on pre-training and
+supervised fine-tuning of dLLMs, while leverag-
+ing reinforcement learning (RL) to further en-
+hance dLLMs remains a challenging problem, even
+though RL has demonstrated significant efficacy in
+improving various capabilities of LLMs (OpenAI,
+2024; DeepSeek-AlI et al., 2025).
+
+A key challenge in applying RL to dLLMs lies in
+the intractability of their likelihood functions (Zhu
+et al., 2025; Zhao et al., 2025a; Tang et al., 2025).
+Specifically, the iterative, non-sequential gener-
+ation process precludes exact calculation of the
+log-likelihoods for generated responses (Zhu et al.,
+2025; Zhao et al., 2025a; Tang et al., 2025), which
+are essential for different RL algorithms (Schul-
+man et al., 2017; Shao et al., 2024). In light of
+this, recent works have explored approximating
+the log-likelihoods by their evidence lower bounds
+(ELBOs) via customized Monte Carlo (MC) sam-
+pling (Zhu et al., 2025). While increasing the MC
+sample size can yield highly accurate approxima-
+tions (Ho et al., 2020; Song et al., 2021), this ap-
+proach incurs substantial memory overhead during
+RL training. In particular, computing the gradi-
+ent of the non-linear functions in the RL objec-
+tive necessitates storing the forward computational
+graphs for all MC samples, dramatically increasing
+memory consumption. As a result, practical imple-
+mentations can only adopt relatively small sample
+sizes (e.g., ny = 4 as illustrated in the left of Fig-
+ure 1) due to hardware constraints, which directly
+
+
+oo
+So
+id
+>
+wn
+Oo
+
+a
+So
+x
+
+@ = diffu-GRPO
+=i VRPO-OL
+=—@- BGPO (ours)
+
+Memory (GB)
+lon
+o
+
+wn
+oO
+Accuracy (%)
+-
+Oo
+
+iN
+S
+
+w
+So
+
+MATHS500
+
+45.7
+43.1 44.1
+39.6
+30
+
+LLaDA
+
+GSM8K
+
+90
+
+82.1
+0 79.3
+
+oo
+
+~
+oO
+
+Ml diffu-GRPO (/ VRPO-OL (5 BGPO (ours)
+
+Figure |: Left: Comparison of memory usage of previous ELBO-based RL method (VRPO-OL) and our BGPO
+using different Monte Carlo sample size n; for the RL objective approximation. The max response length is set to
+512. Middle and right: Performance of LLaDAs with different RL algorithms on mathematical tasks.
+
+amplifies errors in log-likelihood approximation
+and introduces substantial bias and variance for the
+estimated objective and its gradients, ultimately
+degrading performance.
+
+To address this limitation, we propose Boundary-
+Guided Policy Optimization (BGPO), a memory-
+efficient RL algorithm for dLLMs that supports
+large MC sample sizes for log-likelihood and RL
+objective approximation. Specifically, BGPO max-
+imizes a constructed lower bound of the ELBO-
+based objective. This lower bound is carefully de-
+signed to satisfy two critical properties: (1) Lin-
+earity: it is formulated in a linear sum where each
+term associates with a single MC sample, thereby
+enabling gradient accumulation across samples and
+ensuring constant memory usage irrespective of
+sample size; (2) Equivalence: Both the value and
+gradient of the lower bound are equal to those of
+the ELBO-based objective in on-policy training,
+ensuring that the lower bound can also effectively
+approximate the original RL objective. These prop-
+erties allow BGPO to adopt a large MC sample size
+to obtain a more accurate approximation for the RL
+objective, thereby achieving better performance.
+
+To validate the effectiveness of BGPO, we con-
+duct RL experiments with LLaDA-8B-Instruct on
+math problem solving, code generation, and plan-
+ning tasks. The results show that BGPO signifi-
+cantly improves the performance of LLaDA-8B-
+Instruct across all tasks, and also outperforms pre-
+vious RL algorithms for dLLMs. Further analysis
+demonstrates that increasing the MC sample size ef-
+fectively reduces the bias and variance of gradients
+and improves model performance. Notably, BGPO
+achieves these improvements with only marginal
+increases in average training step time, despite its
+larger sample size.
+
+In summary, our main contributions include: (1)
+
+We propose BGPO, a memory-efficient RL algo-
+rithm for dLLMs that supports large MC sample
+sizes in the approximation of log-likelihoods and
+the RL objective; (2) We theoretically prove the
+equivalence of the BGPO objective and the ELBO-
+based objective in on-policy training, demonstrat-
+ing that BGPO also provides an effective approxi-
+mation of the original RL objective; (3) Through
+comprehensive experiments, we validate the effi-
+cacy of BGPO and demonstrate the value of larger
+MC sample sizes in boosting model performance.
+We hope our work establishes a firm foundation for
+future research on RL for dLLMs.
+
+2 Preliminary
+
+2.1 Masked Diffusion Language Models
+
+Masked dLLMs employ a non-autoregressive gen-
+eration paradigm, generating text through progres-
+sive denoising. At their core lies a mask predictor
+po (Austin et al., 2021a; Ou et al., 2025), which
+learns the data distribution through a forward-
+reverse framework. Starting from the original text
+at t = 0, the forward process gradually masks the
+input tokens until the sequence is fully masked
+at t = 1. Following LLaDA (Nie et al., 2025b),
+at time ¢ € (0,1), each token is replaced by the
+mask token M with probability ¢ and remaining
+unmasked with probability 1 — ¢. Conversely, the
+reverse process employs the mask predictor to re-
+cover this sequence by iteratively predicting the
+masked tokens as time reverses from 1 to 0. In
+conditional generation scenarios, the prompt z al-
+ways remains unmasked, and the forward-reverse
+process is only applied to the response y.
+
+2.2 Challenges of Applying RL to d(LLMs.
+
+Reinforcement learning (RL) has proved effective
+for improving language models, and the basic ob-
+
+
+jective is to maximize:
+
+J (9) =EyrD yrro(-|x) A(2, Y)
+ELA D,y~r94(-l2) acres A(a,y),
+=E,wD ywrg,4 (a) R(®, ¥); (1)
+where 79, 79,,,, and A(a, y) denote the current pol-
+
+icy, old policy, and sequence-level advantage, re-
+spectively, and
+
+R(x,y) = clos ta (ule) log moy4 (Yl) A (xr, y). (2)
+However, applying RL to dLLMs is nontrivial,
+since the iterative denoising generation makes the
+exact computation of log 79(y|) intractable.
+
+To address this, recent works have devel-
+oped several methods to approximate log 79(y|).
+diffu-GRPO (Zhao et al., 2025a) adopts single-
+pass estimation, simply making log z9(y|x) =
+ye dog po(y'|x’), where 7 is the i-th token of y
+and x’ is randomly masked prompt. Though effi-
+cient, it introduces notable bias relative to the exact
+policy. Alternatively, VRPO (Zhu et al., 2025)
+proposes to approximate log 7(y|) by using its
+evidence lower bound (ELBO):
+
+EA U[0,1],ye~g(-lt,y,0) m0 (ue, t, yl),
+
+(3)
+where q(-|t, y, x) denotes the forward masking pro-
+cess for the response y at time ¢, and
+
+Bro (yla) =
+
+=M] log po(y'|yz, 2).
+
+(4)
+Specifically, they estimate B,(y|x) via customized
+Monte Carlo sampling:
+
+no (y |e) = na Lol Yes t
+
+where t() ‘AS U0, 1] and y,(5) ike q(-|t, y, x)
+
+are sampled timestamp and corresponding partially
+masked responses. Substituting B,,(y|2) into
+Eq. | yields an approximated RL objective:
+
+J (0) =
+
+1
+
+t) ylx), (5)
+
+Baw Dymo, (le) (2s Y)s (6)
+
+where
+R(z,y) = ePro(le)—ProuVl®) Aa, y). (7)
+
+Notably, previous works have shown that when the
+sample size n; is large enough, the bias of B,(y|)
+
+for a well-trained model relative to log 79(y|x) will
+become negligible (Ho et al., 2020; Song et al.,
+2021). However, using a large mn; in training re-
+quires a huge amount of GPU memory: Each time
+R(x, y) is computed, n; forward passes of pg need
+to be executed (i.e., Eq. 4 and 5), and all the n; com-
+putational graphs must be retained in the memory
+for calculating the gradient of the exponential func-
+tion in Eq. 7. Therefore, in practice, the sample size
+can only remain small (e.g., n¢ = 4), which results
+in inaccurate approximations for the likelihoods as
+well as the final objective, seriously affecting the
+final performance.
+
+To break through this limitation, we propose
+Boundary-Guided Policy Optimization (BGPO), a
+memory-efficient RL algorithm for dLLMs that
+supports a large Monte Carlo sample size, thereby
+enabling more accurate approximations and achiev-
+ing better performance. A detailed introduction is
+provided in the following sections.
+
+3 BGPO
+
+Following Zhu et al. (2025), our BGPO algorithm
+also uses the estimated ELBO B,,, (y|) to approx-
+imate log z@(y|x). The main difference is that
+instead of directly maximizing the approximated
+objective .7(8), BGPO turns to maximize a con-
+structed tight lower bound of 7 (0):
+
+Tiv(8) =
+
+Ean Diy, (le) Rib (2; y), (8)
+
+where Rip (x,y) <R(ax, y). Specifically, Ry (x, y)
+
+is carefully designed so that it satisfies the follow-
+
+ing two properties!:
+
+¢ Linearity: Ryp(x,y) is formulated as et Gis
+where g; is a function about the partially masked
+sample y,,;) at time t@), Therefore, we can back-
+propagate the gradient of g; separately for each
+Y,@) and update the policy after all backpropaga-
+tions, so that the memory usage becomes irrele-
+vant to the MC sample size n:.
+
+Equivalence: In on-policy training (i.e., 79, =
+m9), the value and gradient of Ryp(x, y) are al-
+ways equal to those of R(2,y), making Jp(0)
+be equivalent to .7(@) and also an effective ap-
+proximation for the original RL objective 7 (0).
+
+These two properties allow BGPO to use a larger
+MC sample size in the likelihood approximation,
+'For simplicity, we mainly discuss Ri and F in this sec-
+
+tion, while all their properties can be directly applied to Tv
+and 7, without influence by the expectation function.
+
+
+which effectively reduces the bias and variance of
+Jw(0) and its gradient, leading to better perfor-
+mance. In the following, we will introduce the
+construction of Ry (x, y) in detail.
+
+3.1 Linear Lower Bound Construction
+
+The construction of Ry (x, y) is different based on
+
+the sign of the advantage A(z, y):
+
+* For A(x,y) > 0, we construct Ry (x, y) using
+Taylor expansion;
+
+* For A(x,y) < 0, we construct Ry (x, y) using
+
+Jenson’s inequality.
+
+Lemma 1. [First-order Taylor Expansion] For
+any 6 € R, the exponential function satisfies
+
+eo >1+6.
+
+When A(x, y) > 0, we apply the first-order Taylor
+expansion in Eq. 7, which yields:
+R(x,y) = ePro (yle)—Brow (le) 4(a, y)
+
+nt
+
+= ele 2114) (wy)
+
+1
+Nt =i
+1+d,;)A(z,
+_SSG+a)Aey)
+, Ut
+ql
+where
+(10)
+
+Lemma 2. [Jensen’s Inequality] For a convex
+function f and a finite set {x;}"_,, we have
+
+((2¥on) < 23 sto.
+al i=1
+
+When A(x, y) < 0, by applying Jensen’s Inequal-
+ity in Eq. 7, we have:
+
+(1)
+
+V
+3 AN"
+B|h
+M
+i”
+
+=jyv oes (12)
+
+Putting everything together and letting:
+
+95= me (13)
+A F
+A Ale) | if A(a,y) <0,
+
+Riv(a, y) is constructed as a linear sum of g;:
+
+-Lo
+
+Riv(x, y) (14)
+
+As shown in Algorithm 1, the linearity of Ryy (2, y)
+(as well as 7p(0)) enables us to separate the gradi-
+ent backpropagations for each y,(;), thus keeping
+the memory usage constant and allowing a larger
+sample size n¢.
+
+3.2 Proof of Equivalence
+
+In on-policy training where 79 = 79,,,, the value
+of £;, is equal to fra 14? which means the value of
+d; is always 0. By applying this in Eq. 7 and 14,
+we can find the values of Ryp)(a, y) and R(x, y) are
+both equal to A(x, y). Moreover, the gradient of
+Rip(x, y) is also the same as that of R(a, y) when
+d; = 0. Specifically, by applying the chain rule of
+the derivative, we have:
+
+eee eee)
+
+Ao Weds
+
+(15)
+
+Similarly, when A(x, y) > 0, we have:
+
+)
+(yo Eeuiaen )
+
+VoeRw(2, y) = Vo
+
+and when A(x, y) < 0, we have:
+
+- “et A(x,
+VoRw(z,y) = Vol >_ “dew )
+
+nT
+1
+
+_ ys A(x, y)e% Vod;
+
+Nt
+
+S
+
+sco Sh Ao (17)
+
+j=l
+
+
+Algorithm 1 BGPO
+
+Input: dataset D; initial policy model 79; hyperparameters: G, nz, 17.
+
+1: for iteration = 1,2,..., do
+23 Update the old policy 7g
+
+old
+
+for each prompt x € Dp do
+
+< mo and sample a batch D, from D
+
+Sample G response {y}@, ~ m,,(-|v©) and compute advantages { A(x, y)}@, using Eq. 18
+
+3
+
+4
+
+5 for i= 1toGdo
+
+6: Sample nz timestamp {Ee Me ~ U(0, 1]
+7: for j = 1 ton; do
+
+8
+
+Sample partially masked response y, ~ q(-\t®, y, a)
+
++¢
+
+9: Compute g; using Eq. 13 and let £; + -%
+10: Backpropagate the gradient of £; (> graident accumulation)
+11: end for
+12: end for
+13: end for
+14: Update the policy 0 + 0— Vo
+15: end for
+Output: 74
+
+Therefore, Ry (x, y) and R(x, y) (as well as Jp(4)
+and 7(0)) are equivalent in terms of both value
+and gradient in on-policy training. This means like
+7 (6), Zp(9) is also an effective approximation of
+J (6), and using a large sample size n; can reduce
+the bias and various of 74 (0) and its gradient, lead-
+ing to better model performance.
+
+3.3 Final Loss of BGPO
+
+In practice, we adopt group-based advantage esti-
+mation. Specifically, for each prompt x7, we sam-
+ple G responses y"),...,y(@ from 79, (-|a’). Let
+r(a,y) denotes the reward of y. The advan-
+tage of y is defined as:
+
+, (x,y )—mean({r(a,y))}@_, )
+A(a,y' ) = std({r(w,y9))}% 1) =
+
+. (18)
+Accordingly, the loss for BGPO is formulated as:
+
+Le (i)
+(19)
+
+Lacro = —E 2nD
+
+{yO }Z 0,4 (le)
+
+Finally, we summarize our BGPO algorithm in
+Algorithm 1.
+
+4 Experiment
+
+In this section, we empirically validate the efficacy
+of BGPO through extensive RL experiments.
+
+4.1 Setup
+
+Models. We employ LLaDA-8B-Instruct (Nie
+et al., 2025b), a state-of-art dLLM that has un-
+dergone pre-training and supervised fine-tuning, as
+our initial policy model.
+
+Datasets. We conduct RL experiments in three
+domains: math problem solving, code generation,
+and planning tasks (Ye et al., 2025). For math prob-
+lem solving, we train the model on a mix of the
+training splits of MATH (Hendrycks et al., 2021)
+and GSM8K (Cobbe et al., 2021), and evaluate
+on the respective test sets. For code generation,
+we use 16K medium-difficulty problems filtered
+from DeepCoder (Luo et al., 2025) as the train-
+ing set, and adopt MBPP (Austin et al., 2021b)
+and HumanEval (Chen et al., 2021) as the test
+sets. For planning tasks, we train and evaluate
+on Countdown (Pan et al., 2025) and Sudoku (Arel,
+2025), adopting the same training and test splits as
+dl (Zhao et al., 2025a).
+
+Implementation Details. We implement BGPO
+based on the VeRL (Sheng et al., 2025) framework.
+The maximum response lengths for math problem
+solving, coding generation, and planning tasks are
+set to be 512, 512, and 256, respectively. The batch
+size, rollout group size G', and learning rate are set
+to 16, 8, and5 x 1077, respectively. The MC sam-
+ple size nz is set to 32 for Sudoku and 16 for other
+tasks. See Table 4 for more detailed hyperparam-
+eters. Following Zhao et al. (2025a), we evaluate
+the trained models (including baselines) every 20
+steps and report results from the best-performing
+checkpoint. All experiments are conducted on 8
+xH800 GPUs.
+
+Baselines. We mainly compare BGPO with two
+representative RL algorithms for dLLMs that are in-
+troduced in Section 2: (1) diffu-GRPO (Zhao et al.,
+2025a), which approximates the log-likelihoods
+with single-pass mean-field estimation; (2) VRPO-
+OL, which is the online version of VRPO (Zhu
+
+
+Mathematics Coding
+
+Planning
+Model
+MATHS500 GSM8K HumanEval MBPP Sudoku Countdown
+
+Prior works with LLaDA
+
+d1-LLaDA (Zhao et al., 2025a) 40.2 82.1 - - 16.7 32.0
+wdl (Tang et al., 2025) 39.0 82.3 - - 25.2 46.1
+LLaDA-IGPO (Zhao et al., 2025b) 42.8 83.6 - - - -
+LLaDA-1.5 (Zhu et al., 2025) 42.6 83.3 45.0* 40.0* - -
+RL from LLaDA-8B-Instruct
+
+LLaDA-8B-Instruct (Nie et al., 2025b) 39.6 79.3 45.1 39.1 12.0 19.5
++ diffu-GRPO (Zhao et al., 2025a) 43.1 82.1 47.0 40.3 26.7 53.1
++ VRPO-OL (Zhu et al., 2025) 44.1 83.3 44.8 41.5 26.1 84.8
++ BGPO (ours) 45.7 84.3 47.6 41.7 26.9 87.5
+
+Table 1: Performance comparison between BGPO and different baselines on mathematics, coding, and planning
+
+tasks. "*" indicates we re-evaluate the model using the same code environment.
+
+Mathematics
+
+Coding
+
+Sudoku Countdown
+
+0.6
+
+04
+
+0 200 400
+
+Steps
+
+600 0 200
+Steps
+
+— diffu-GRPO
+
+400
+
+— VRPO-OL
+
+0 100 200
+Steps
+
+—— BGPO (ours)
+
+300 400 0 100 200
+
+Steps
+
+300
+
+Figure 2: Training reward dynamics of BGPO, diffu-GRPO, and VRPO-OL across different tasks.
+
+et al., 2025) that adopts ELBO-based likelihood
+approximation and uses the objective in Eq 6. We
+set the MC sampling sizes of VRPO-OL to the
+maximum that H800 can support, i.e., nz = 4 for
+math and planning tasks and ny = 2 for code gener-
+ation, since the prompts of coding tasks are longer.
+Besides, we also present the results from several
+prior works as references, including dl (Zhao
+et al., 2025a), wd1 (Tang et al., 2025), LLaDA-
+IGPO (Zhao et al., 2025b), and LLaDA 1.5 (Zhu
+et al., 2025), though their training setting are par-
+tially different from ours.
+
+4.2 Main Results
+
+Table 1 presents the performance of BGPO and
+different baselines on math problem solving, code
+generation, and planning tasks. As shown in the
+table, our BGPO algorithm achieves significant
+improvement over LLaDA-8B-Instruct, and also
+outperforms previous RL algorithms (i.e., diffu-
+GRPO and VRPO-OL) on all tasks, indicating that
+BGPO can produce a more accurate approximation
+of the RL objective compared to these baselines.
+Specifically, BGPO improves the performance of
+
+LLaDA-8B-Instruct by about 5.5% and 2.5% on
+mathematical and coding tasks, respectively, and
+dramatically improves the performance on Sudoku
+and Countdown by 14.9% and 68.0%. Moreover,
+the model trained with BGPO also outperforms
+all previous LLaDA-based models, such as d1 and
+LLaDA-1.5, achieving state-of-the-art results.
+
+In addition, Figure 2 shows the reward dynamics
+of BGPO, diffu-GRPO, and VRPO-OL during the
+training on different tasks. The reward of BGPO is
+higher than the other two baselines in most steps.
+Particularly, BGPO exhibits a notably faster re-
+ward increase and significantly higher reward on
+the Countdown task, where the exploration space is
+relatively simple. These phenomena demonstrate
+that the larger MC sample size of BGPO brings a
+more accurate optimization direction, which aims
+to maximize the expectation of rewards.
+
+4.3 Effect of Increasing MC Sample Sizes
+
+To demonstrate the effect of increasing the MC
+sample size n; in approximating the RL objective,
+we train LLaDA-8B-Instruct on math problem solv-
+ing using BGPO with different n;. As shown in
+
+
+Model MATHS500 GSM8K
+LLaDA-8B-Instruct 39.6 719.3
++ BGPO (nm = 1) 43.5 83.5
++ BGPO (nm = 2) 44.1 82.5
++ BGPO (n; = 4) 43.7 82.7
++ BGPO (n; = 8) 45.3 83.9
++ BGPO (nt = 16) 45.7 84.3
+
+Table 2: Performance of BGPO with different Monte
+Carlo sampling size n; on mathematics benchmarks.
+
+B MH diffu-GRPO
+4 == VRPO-OL
+Ke} =—@® BGPO (ours)
+"3
+an
+S
+a
+32
+g
+oe)
+
+ny
+
+Figure 3: Standard deviation (std) of gradients of dif-
+ferent RL algorithms with different MC sampling size
+nz. The std is normalized by the absolute value of each
+parameter to unify the scale.
+
+5B @  diffu-GRPO
+—#— VRPO-OL
+3 4 =®= BGPO (ours)
+faa
+=| 3
+2
+2 2
+a)
+o)
+
+Figure 4: Gradient bias (normalized by the absolute
+value of parameter) with different MC sampling size n;.
+
+Table 2, the model performance consistently im-
+proves as n; increases from | to 16, implying that
+larger MC sample sizes can produce more approxi-
+mations of the RL objective.
+
+To further illustrate this, we compare the stan-
+dard deviation (i.e., root of variance) and bias of the
+loss gradients of different RL algorithms with dif-
+ferent n; *. Specifically, we compute the gradient
+
+"We do not directly compare the variance and bias of the
+loss since the value of loss is always 0 in on-policy training.
+
+of a batch 8 times with different MC sampling sizes,
+and then calculate the standard deviation for each
+parameter, normalized by the absolute value of the
+parameter to unify the scale. For the bias calcula-
+tion, we use the gradient of BGPO with n; = 256
+to simulate the golden gradient, and also normalize
+the bias of parameters by their absolute value. As
+shown in Figure 3 and 4, the gradient variance and
+bias of diffu-GRPO are quite large, since it adopts
+single-pass estimation and also partially masks the
+prompt. In contrast, the gradient variance and bias
+of VRPO-OL and our BGPO gradually decrease as
+the MC sampling size n; increases, and BGPO can
+even obtain a smaller variance and bias by using
+a larger n;, since the memory overhead of BGPO
+remains constant, regardless of n,;. This enables
+BGPO to have a more accurate optimization direc-
+tion and more stable training, resulting in better
+model performance.
+
+4.4 Out-of-domain Performance
+
+To evaluate the out-of-domain generalization capa-
+bility of BGPO, we train the models on math and
+coding tasks, respectively, and evaluate them on
+other tasks. As presented in Table 3, the model
+trained on math tasks improve the performance on
+the planning tasks, and the model trained on coding
+tasks achieves improvement on both math and plan-
+ning tasks, demonstrating the good generalizability
+of BGPO.
+
+4.5 Training Speed Comparison
+
+A potential concern for BGPO is that the large
+MC sample size may substantially increase the run-
+ning time of each RL step, affecting the training
+efficiency. To allay this concern, we compare the
+averaged training step time of BGPO and baseline
+algorithms on math problem solving, with the max-
+imum response length to be 512. As shown in
+Figure 5, even BGPO adopts a much larger MC
+sample size (i.e., 4x of VRPO-OL), its averaged
+training step time only slightly increased. This is
+because the dominant time cost of each step lies
+in the response rollout phase (i.e., sampling G re-
+sponses for each prompt) rather than the objective
+computation and policy updating phases.
+
+5 Related Work
+
+5.1 Diffusion Large Language Models
+
+Diffusion large language models (dLLMs), which
+generate text through masked diffusion (Austin
+
+
+Mathematics Coding Planning
+Movel MATHS00 GSM8K HumanEval MBPP Sudoku Countdown
+LLaDA-8B-Instruct 39.6 79.3 45.1 39.1 6.3 14.5
++BGPO (train on math tasks) 45.7 84.3 44.2 38.6 8.6 21.1
++BGPO (train on coding tasks) 40.8 80.4 47.6 41.7 9.2 21.5
+
+Table 3: Out-of-domain performance of BGPO. The in-domain results are in gray.
+
+e 151.5
+
+= 1288 130.2
+
+5
+
+A
+
+®
+
+toy)
+
+g
+
+2
+
+<
+
+diffu-GRPO |= VRPO-OL — BGPO (ours)
+(n=1) (,=4) (n,=16)
+
+Figure 5: Training speed comparison between baselines.
+
+et al., 2021a; Sahoo et al., 2024; Shi et al., 2024;
+Ou et al., 2025; Nie et al., 2025a), have recently
+achieved significant advances, demonstrating per-
+formance comparable to similarly-sized autoregres-
+sive models. Among existing open-source dLLMs,
+DiffuLLaMA (Gong et al., 2025a), Dream (Ye
+et al., 2025), and SDAR (Cheng et al., 2025) are
+adapted from pre-trained autoregressive LLMs,
+while LLaDA (Nie et al., 2025b) is trained from
+scratch using bidirectional attention by maximiz-
+ing the ELBOs of log-likelihoods, presenting a
+complete process of pre-training and supervised
+fine-tuning of (LLMs. Moreover, several commer-
+cial dLLMs like Mercury (Inception Labs et al.,
+2025), Gemini Diffusion (DeepMind, 2025), and
+Seed Diffusion (Song et al., 2025) not only achieve
+leading performance in code generation but also of-
+fer significantly faster inference, demonstrating the
+practical viability of dLLMs and their promising
+alternative to autoregressive LLMs.
+
+5.2 Reinforcement Learning for dLLMs
+
+Applying RL to dLLMs presents unique challenges
+compared to autoregressive models. The itera-
+tive, non-sequential generation process of dLLMs
+makes their likelihood functions intractable, neces-
+sitating the approximation of log-likelihoods for
+policy optimization. For instance, d1 (Zhao et al.,
+2025a) proposed diffu-GRPO, which approximates
+
+the log-likelihoods of dLLMs through single-pass
+mean-field estimation. Following wd1 (Tang et al.,
+2025; Zhao et al., 2025b) and IGPO (Zhao et al.,
+2025b) also adopt this approximation approach.
+Though efficient, the single-pass estimation intro-
+duces notable bias relative to the exact likelihoods.
+Alternatively, VRPO (Zhu et al., 2025) in LLaDA
+1.5 approximates the log-likelihoods by their EL-
+BOs, which is estimated via Monte Carlo (MC)
+sampling. Theoretically, this method can produce
+highly accurate approximations by using a large
+MC sample size. However, the practical sample
+size used in training is severely constrained by the
+GPU memory limit, since the computational graphs
+of all samples need to be retained for the gradient
+calculation of the non-linear function in the RL ob-
+jective. While our BGPO algorithm addresses this
+memory-inefficiency limitation and supports large
+MC sample sizes, thereby effectively reducing the
+bias and variance of approximations and achieving
+better performance.
+
+6 Conclusion
+
+In this work, we propose BGPO, a memory-
+efficient RL algorithm for dLLMs that supports
+a large Monte Carlo sample size for approximating
+the sequence-level log-likelihoods and the final ob-
+jective, thereby effectively reducing the bias and
+variance of approximations and leading to better
+model performance. We theoretically prove the
+equivalence of our BGPO objective and the previ-
+ous ELBO-based objective, and conduct extensive
+experiments to validate the efficacy of BGPO. We
+hope that our work lays a solid foundation for fu-
+ture research on RL of dLLMs.
+
+7 Limitations
+
+In this work, we only conduct experiments on 8B-
+level models, since there are no larger open-source
+dLLMs, and our computational resources are also
+limited. Nonetheless, we believe our BGPO algo-
+rithm can be well applied to larger dLLMs due to
+
+
+its solid theoretical foundation.
+
+8 Ethical Considerations
+
+All the models and datasets used in this work are
+publicly published with permissible licenses.
+
+References
+
+Arel. 2025. Arel’s sudoku generator. https: //www.
+
+ocf.berkeley.edu/~arel/sudoku/main. html.
+Accessed: 2025-09-23.
+
+Jacob Austin, Daniel D. Johnson, Jonathan Ho, Daniel
+Tarlow, and Rianne van den Berg. 2021a. Structured
+denoising diffusion models in discrete state-spaces.
+In Advances in Neural Information Processing Sys-
+tems 34: Annual Conference on Neural Information
+Processing Systems 2021, NeurIPS 2021, December
+6-14, 2021, virtual, pages 17981-17993.
+
+Jacob Austin, Augustus Odena, Maxwell I. Nye,
+Maarten Bosma, Henryk Michalewski, David Dohan,
+Ellen Jiang, Carrie J. Cai, Michael Terry, Quoc V. Le,
+and Charles Sutton. 2021b. Program synthesis with
+large language models. CoRR, abs/2108.07732.
+
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan,
+Henrique Pondé de Oliveira Pinto, Jared Kaplan,
+Harri Edwards, Yuri Burda, Nicholas Joseph, Greg
+Brockman, Alex Ray, Raul Puri, Gretchen Krueger,
+Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela
+Mishkin, Brooke Chan, Scott Gray, and 39 others.
+2021. Evaluating large language models trained on
+code. CoRR, abs/2107.03374.
+
+Shuang Cheng, Yihan Bian, Dawei Liu, Yuhua Jiang,
+Yihao Liu, Linfeng Zhang, Wenghai Wang, Qipeng
+Guo, Kai Chen, Biging Qi*, and Bowen Zhou.
+2025. Sdar: A synergistic diffusion—autoregression
+paradigm for scalable sequence generation.
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,
+Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+Plappert, Jerry Tworek, Jacob Hilton, Reiichiro
+Nakano, Christopher Hesse, and John Schulman.
+2021. Training verifiers to solve math word prob-
+lems. CoRR, abs/2110.14168.
+
+DeepMind. 2025. Gemini diffusion.
+
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang,
+Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu,
+Shirong Ma, Peiyi Wang, Xiao Bi, Xiaokang Zhang,
+Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhi-
+hong Shao, Zhuoshu Li, Ziyi Gao, and 81 others.
+2025. Deepseek-r1: Incentivizing reasoning capa-
+bility in Ilms via reinforcement learning. CoRR,
+abs/2501.12948.
+
+Shansan Gong, Shivam Agarwal, Yizhe Zhang, Jiacheng
+Ye, Lin Zheng, Mukai Li, Chenxin An, Peilin Zhao,
+Wei Bi, Jiawei Han, Hao Peng, and Lingpeng Kong.
+
+2025a. Scaling diffusion language models via adap-
+tation from autoregressive models. In The Thirteenth
+International Conference on Learning Representa-
+tions, ICLR 2025, Singapore, April 24-28, 2025.
+OpenReview.net.
+
+Shansan Gong, Ruixiang Zhang, Huangjie Zheng, Ji-
+atao Gu, Navdeep Jaitly, Lingpeng Kong, and Yizhe
+Zhang. 2025b. Diffucoder: Understanding and im-
+proving masked diffusion models for code generation.
+CoRR, abs/2506.20639.
+
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul
+Arora, Steven Basart, Eric Tang, Dawn Song, and Ja-
+cob Steinhardt. 2021. Measuring mathematical prob-
+lem solving with the MATH dataset. In Proceedings
+of the Neural Information Processing Systems Track
+on Datasets and Benchmarks 1, NeurIPS Datasets
+and Benchmarks 2021, December 2021, virtual.
+
+Jonathan Ho, Ajay Jain, and Pieter Abbeel. 2020. De-
+noising diffusion probabilistic models. In Advances
+in Neural Information Processing Systems 33: An-
+nual Conference on Neural Information Processing
+Systems 2020, NeurIPS 2020, December 6-12, 2020,
+virtual.
+
+Inception Labs, Samar Khanna, Siddhant Kharbanda,
+Shufan Li, Harshit Varma, Eric Wang, Sawyer Birn-
+baum, Ziyang Luo, Yanis Miraoui, Akash Palrecha,
+Stefano Ermon, Aditya Grover, and Volodymyr
+Kuleshov. 2025. Mercury: Ultra-fast language mod-
+els based on diffusion.
+
+Michael Luo, Sijun Tan, Roy Huang, Ameen Patel,
+Alpay Ariyak, Qingyang Wu, Xiaoxiang Shi, Rachel
+Xin, Colin Cai, Maurice Weber, Ce Zhang, Li Erran
+Li, Raluca Ada Popa, and Ion Stoica. 2025. Deep-
+coder: A fully open-source 14b coder at 03-mini level.
+https://pretty-radio-b75.notion.site/
+
+DeepCoder-A-Fully-Open-Source- 14B-Coder-at-03-mini-Leve
+
+Notion Blog.
+
+Shen Nie, Fengqi Zhu, Chao Du, Tianyu Pang, Qian
+Liu, Guangtao Zeng, Min Lin, and Chongxuan Li.
+2025a. Scaling up masked diffusion models on text.
+In The Thirteenth International Conference on Learn-
+ing Representations, ICLR 2025, Singapore, April
+24-28, 2025. OpenReview.net.
+
+Shen Nie, Fenggqi Zhu, Zebin You, Xiaolu Zhang,
+Jingyang Ou, Jun Hu, Jun Zhou, Yankai Lin, Ji-Rong
+Wen, and Chongxuan Li. 2025b. Large language
+diffusion models. CoRR, abs/2502.09992.
+
+OpenAI. 2024. Learning to reason with
+Ilms. https: //openai.com/index/
+learning-to-reason-with-11ms/. Accessed:
+2025-05-07.
+
+Jingyang Ou, Shen Nie, Kaiwen Xue, Fengqi Zhu, Ji-
+acheng Sun, Zhenguo Li, and Chongxuan Li. 2025.
+Your absorbing discrete diffusion secretly models the
+conditional distributions of clean data. In The Thir-
+teenth International Conference on Learning Repre-
+sentations, ICLR 2025, Singapore, April 24-28, 2025.
+OpenReview.net.
+
+
+Jiayi Pan, Junjie Zhang, Xingyao Wang, Lifan Yuan,
+Hao Peng, and Alane Suhr. 2025.  Tinyzero.
+https://github.com/Jiayi-Pan/TinyZero. Accessed:
+2025-01-24.
+
+Subham S. Sahoo, Marianne Arriola, Yair Schiff, Aaron
+Gokaslan, Edgar Marroquin, Justin T. Chiu, Alexan-
+der Rush, and Volodymyr Kuleshov. 2024. Simple
+and effective masked diffusion language models. In
+Advances in Neural Information Processing Systems
+38: Annual Conference on Neural Information Pro-
+cessing Systems 2024, NeurIPS 2024, Vancouver, BC,
+Canada, December 10 - 15, 2024.
+
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec
+Radford, and Oleg Klimov. 2017. Proximal policy
+optimization algorithms. CoRR, abs/1707.06347.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu,
+Junxiao Song, Mingchuan Zhang, Y. K. Li, Y. Wu,
+and Daya Guo. 2024. Deepseekmath: Pushing the
+limits of mathematical reasoning in open language
+models. CoRR, abs/2402.03300.
+
+Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin
+Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin
+Lin, and Chuan Wu. 2025. Hybridflow: A flexible
+and efficient RLHF framework. In Proceedings of
+the Twentieth European Conference on Computer
+Systems, EuroSys 2025, Rotterdam, The Netherlands,
+30 March 2025 - 3 April 2025, pages 1279-1297.
+ACM.
+
+Jiaxin Shi, Kehang Han, Zhe Wang, Arnaud Doucet, and
+Michalis K. Titsias. 2024. Simplified and generalized
+masked diffusion for discrete data. In Advances in
+Neural Information Processing Systems 38: Annual
+Conference on Neural Information Processing Sys-
+tems 2024, NeurIPS 2024, Vancouver, BC, Canada,
+December 10 - 15, 2024.
+
+Yang Song, Jascha Sohl-Dickstein, Diederik P. Kingma,
+Abhishek Kumar, Stefano Ermon, and Ben Poole.
+2021. Score-based generative modeling through
+stochastic differential equations. In 9th International
+Conference on Learning Representations, ICLR 2021,
+Virtual Event, Austria, May 3-7, 2021. OpenRe-
+view.net.
+
+Yuxuan Song, Zheng Zhang, Cheng Luo, Pengyang Gao,
+Fan Xia, Hao Luo, Zheng Li, Yuehang Yang, Hongli
+Yu, Xingwei Qu, Yuwei Fu, Jing Su, Ge Zhang, Wen-
+hao Huang, Mingxuan Wang, Lin Yan, Xiaoying Jia,
+Jingjing Liu, Wei-Ying Ma, and 3 others. 2025. Seed
+diffusion: A large-scale diffusion language model
+with high-speed inference. CoRR, abs/2508.02193.
+
+Xiaohang Tang, Rares Dolga, Sangwoong Yoon, and
+Tlija Bogunovic. 2025. wdl: Weighted policy opti-
+mization for reasoning in diffusion language models.
+CoRR, abs/2507.08838.
+
+Chengyue Wu, Hao Zhang, Shuchen Xue, Zhijian Liu,
+Shizhe Diao, Ligeng Zhu, Ping Luo, Song Han, and
+Enze Xie. 2025. Fast-dllm: Training-free acceler-
+ation of diffusion LLM by enabling KV cache and
+parallel decoding. CoRR, abs/2505.22618.
+
+10
+
+Jiacheng Ye, Zhihui Xie, Lin Zheng, Jiahui Gao, Zirui
+Wu, Xin Jiang, Zhenguo Li, and Lingpeng Kong.
+2025. Dream 7b: Diffusion large language models.
+CoRR, abs/2508.15487.
+
+Siyan Zhao, Devaansh Gupta, Qinqing Zheng, and
+Aditya Grover. 2025a. dl: Scaling reasoning in
+diffusion large language models via reinforcement
+learning. CoRR, abs/2504.12216.
+
+Siyan Zhao, Mengchen Liu, Jing Huang, Miao Liu,
+Chenyu Wang, Bo Liu, Yuandong Tian, Guan
+Pang, Sean Bell, Aditya Grover, and 1 others.
+2025b. Inpainting-guided policy optimization for
+diffusion large language models. arXiv preprint
+arXiv:2509. 10396.
+
+Fengqi Zhu, Rongzhen Wang, Shen Nie, Xiaolu Zhang,
+Chunwei Wu, Jun Hu, Jun Zhou, Jianfei Chen,
+Yankai Lin, Ji-Rong Wen, and Chongxuan Li. 2025.
+Llada 1.5: Variance-reduced preference optimiza-
+tion for large language diffusion models. CoRR,
+abs/2505.19223.
+
+
+MC sample size n;
+
+Task Response length Diffusion step Block size
+diffucGRPO VRPO-OL BGPO
+Mathematics 512 /512* 256 /512* 32 /32* 1 4 16
+Coding 512 /512* 512 /512* 32 /32* 1 2 16
+Sudoku 256 / 256* 128 / 256* 32 /32* 1 4 32
+1 4 16
+
+Countdown 256 / 256* 128 / 256* 32 /32*
+
+Table 4: Detailed hyperparameters for different tasks. "*" denotes the different hyperparameters used in evaluation.
+
+A_ Detailed hyperparameters
+
+We present detailed hyperparameters of BGPO on different tasks in Table 4. Following previous works,
+we adopt a block-wise decoding strategy in both training and evaluation. The choices of response length,
+diffusion step, and block size also follow Zhu et al. (2025) and Zhao et al. (2025a) for obtaining the best
+performance.
+
+11

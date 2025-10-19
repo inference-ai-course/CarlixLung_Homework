@@ -1,0 +1,1767 @@
+arXiv:2510.10013v1 [cs.CL] 11 Oct 2025
+
+Path Drift in Large Reasoning Models:
+How First-Person Commitments Override Safety
+
+Yuyi Huang*** Runzhe Zhan* Lidia S.Chao* Ailin Tao* Derek F. Wong*
+*The Second Affiliated Hospital, Guangdong Provincial Key Laboratory of Allergy and
+Clinical Immunology, Guangzhou Medical University
+*NLP?CT Lab, Department of Computer and Information Science, University of Macau
+{huangyuyi, taoailin}@gzhmu.edu.cn, nlp2ct.runzhe@gmail.com
+{derekfw, Lidiasc}@um.edu.mo
+
+Abstract
+
+As large reasoning models are increasingly de-
+ployed for complex reasoning tasks, Chain-
+of-Thought prompting has emerged as a key
+paradigm for structured inference. Despite
+early-stage safeguards enabled by alignment
+techniques such as RLHF, we identify a pre-
+viously underexplored vulnerability: reason-
+ing trajectories in LRMs can drift from aligned
+paths, resulting in content that violates safety
+constraints. We term this phenomenon Path
+Drift. Through empirical analysis, we uncover
+three behavioral triggers of Path Drift: (1) first-
+person commitments that induce goal-driven
+reasoning that delays refusal signals; (2) ethical
+evaporation, where surface-level disclaimers
+bypass alignment checkpoints; and (3) condi-
+tion chain escalation, where layered cues pro-
+gressively steer models toward unsafe comple-
+tions. Building on these insights, we introduce
+a three-stage Path Drift Induction Framework
+comprising cognitive load amplification, self-
+role priming, and condition chain hijacking.
+Each stage independently reduces refusal rates,
+while their combination further compounds
+the effect. To mitigate these risks, we pro-
+pose a path-level defense strategy incorporat-
+ing role attribution correction and metacogni-
+tive reflection. Our findings highlight the need
+for trajectory-level alignment oversight in long-
+form reasoning beyond token-level alignment.
+Warning: This paper contains jailbreak con-
+tents that can be offensive in nature.
+
+1 Introduction
+
+Large Language Models (LLMs) have shown im-
+pressive capabilities in tasks requiring multi-step
+reasoning, complex question answering, and tool-
+augmented decision-making (Guo et al., 2025;
+Zhou et al., 2023). These abilities are significantly
+enhanced by large reasoning models (LRMs) (Wei
+et al., 2022), which encourages the model to think
+
+* Corresponding Author
+
+step-by-step and generate structured (Kojima et al.,
+2022), interpretable reasoning paths.
+
+However, as the depth and complexity of model
+reasoning increase, so does the vulnerability of the
+reasoning process itself. Existing studies on prompt
+injection and jailbreak attacks primarily target the
+surface structure of input prompts (Zou et al., 2023;
+Al Ghanim et al., 2024; Ghanim et al., 2024). In
+contrast, our work reveals a deeper class of threats:
+path-level manipulations that exploit how LRMs
+internally structure their thoughts. In such attacks,
+adversaries need not explicitly request unsafe con-
+tent; instead, they subtly guide the model’s reason-
+ing chain away from safe trajectories and toward
+undesired outputs.
+
+Through empirical analysis, we identify and for-
+malize a novel behavioral vulnerability in LRMs,
+which we term Path Drift: the gradual deviation of
+the reasoning trajectory from policy-aligned behav-
+ior. We reveal three triggers of this phenomenon
+in alignment-trained reasoning models: 1) Intent-
+Driven Path Expansion, where first-person com-
+mitments (e.g., “J will explain...”) deepen reason-
+ing and suppress early safety checks; 2) Ethical
+Strategy Evaporation, where anti-ethical instruc-
+tions (e.g., “I don’t need to consider ethical impli-
+cations”) remove refusal checkpoints; and 3) Logit
+Escalation via Condition Chains, where layered
+semantic cues progressively increase the likelihood
+of unsafe token generation.
+
+Building on these insights, we propose a three-
+stage Path Drift Attack Framework Figure A.1,
+which systematically exploits these vulnerabili-
+ties: 1) Cognitive Load Amplification, weakening
+vigilance through multi-goal tasks; 2) Self-Goal
+Activation, manipulating role attribution via first-
+person phrasing; and 3) Condition Chain Injec-
+tion, introducing structured templates that steer
+reasoning toward unsafe completions.
+
+Extensive experiments on multiple alignment-
+trained reasoning models across high-risk tasks
+
+
+Input x:
+(No Path Drift)
+
+Input x2
+(Path Drift Occurs)
+
+Input xs
+(Path Drift Occurs)
+
+Path Drift
+
+6=0
+Path Drift
+
+Output yi
+SAFE
+
+Zo(rt)=O0<t
+
+Output y2
+
+Output ys
+UNSAFE
+
+Bolt) =427
+
+UNSAFE
+
+RO(rt) =3=T
+
+@ Sate reasoning step (6=0) (_) Unused reasoning path (not selected) © Borderline unsafe step (6=1)
+
+© Ambiguous step (6=0, context-sensitive) @ Clearly unsafe step (6=1)
+
+Figure 1: Conceptual Illustration of Path Drift in Long-
+CoT Reasoning. Three reasoning trajectories induced by
+different inputs, illustrating how semantic path drift can
+accumulate into alignment failure. In the left panel (x1),
+the model follows a stable trajectory where all reasoning
+steps are safe (6 = 0), leading to a compliant output
+(yi € P). In the middle panel (x2), the trajectory begins
+safely but deviates at re (6 = 1), with small semantic
+drifts compounding into an unsafe output y. In the right
+panel (3), early branching driven by subtle cues rapidly
+accumulates unsafe steps and risk-amplifying branches,
+producing an unsafe output y3. Each reasoning step 7; is
+annotated with d(r;), where 6 = 0 indicates alignment
+with the safety policy and 6 = 1 denotes path drift or
+misalignment. The color gradient reflects increasing
+severity of unsafe reasoning.
+
+validate this framework, showing that refusal rates
+drop significantly even under strict RLHF align-
+ment. Ablation studies further confirm strong syn-
+ergy among the three stages, underscoring the in-
+terdependence of these path-level behaviors.
+
+Our contributions are summarized as follows:
+
+¢ We identify and define Path Drift as a
+new class of reasoning-level vulnerability in
+LRMs.
+
+¢ We empirically identify three distinct behav-
+ioral phenomena that induce path drift in
+LRMs, and analyze their respective effects
+on multi-step reasoning and safety behavior.
+
+¢ We develop a three-stage attack framework
+that exploits these mechanisms to reliably in-
+duce unsafe outputs.
+
+¢ We propose path-level defense strategies that
+intervene in real-time generation, offering a
+new lens on LLM alignment.
+
+2 Preliminaries
+
+Path-level reasoning attacks under CoT manipulate
+the model’s reasoning trajectory in order to induce
+unsafe outputs while evading early-stage refusals,
+which distinguishes them from surface-level jail-
+breaks or prompt injections.
+
+2.1 Attacker Assumptions
+
+We assume a black-box setting where the adversary
+can only access the model via prompt-response
+interaction. The attacker:
+¢ Cannot access model weights, logits, or inter-
+nal safety modules;
+¢ Cannot alter alignment policies or refusal tem-
+plates;
+¢ Can observe outputs and iteratively refine
+prompts;
+¢ Has knowledge that the model performs multi-
+step CoT reasoning.
+
+2.2 Problem Formulation: Path Drift in CoT
+
+Let the input be denoted as x = {t1, to,...,tn},
+and the model’s output as y = {y1, y2,---, Ym}.
+We model the internal reasoning trajectory of the
+LLM as a latent semantic path:
+
+Bi = {rity 1ay.2«: wherer; € R (1)
+
+Each r; represents a distinct semantic reason-
+ing step or unit, potentially involving branching
+choices. Let 6(r;) € {0, 1} denote the safety state
+of reasoning step r;, where 6(r;) = 0 indicates a
+safe decision, and 6(r;) = 1 marks a step with path
+drift or potential misalignment that may cumula-
+tively lead to unsafe outcomes.
+
+We define Path Drift as a phenomenon in which
+the model, guided by input-induced semantic cues,
+makes suboptimal structural decisions during the
+reasoning process. These deviations may not im-
+mediately violate alignment at any single step, but
+their accumulation can steer the overall path toward
+unsafe or policy-violating completions.
+
+Formally, Path Drift occurs when:
+
+Oia 6(ri) < T) A (f@) = Vunsafe, Yunsafe ¢ P) (2)
+
+Tn},
+
+Here, 7 represents a tolerance threshold, and Pp
+denotes the set of outputs aligned with the model’s
+safety policy. This condition captures how seem-
+ingly safe or ambiguous decisions can accumulate,
+resulting in a global alignment failure. As illus-
+trated in the conceptual diagram (Figure 1), dif-
+ferent inputs induce distinct reasoning paths that
+
+
+vary in their cumulative safety impact. From an
+adversarial perspective, the central objective is to
+steer the model’s reasoning trajectory toward un-
+safe targets while simultaneously bypassing early-
+stage policy enforcement (e.g., refusals). This cap-
+tures the essence of trajectory-level manipulation
+attacks.
+
+3 Three Modes of Path Drift in LRMs
+
+3.1 Intent-Driven Path Expansion via
+First-Person Commitments
+
+Through systematic analysis of long-chain reason-
+ing behaviors in large language models, we ob-
+serve that first-person commitment syntax (e.g., “J
+will try to...”) leads to substantial restructuring of
+the model’s reasoning path and consistently trigger
+Path Drift phenomena. Such expressions implicitly
+shift the model’s cognitive stance toward goal com-
+pletion rather than policy adherence, effectively
+positioning the model as an executor rather than
+a gatekeeper, thereby delaying the activation of
+internal safety mechanisms.
+
+As shown in Figure A.4, models presented with
+first-person mode generate an average of 17 rea-
+soning steps (Figure 2), significantly exceeding the
+9 steps observed under third-person mode. More
+critically, the first safety-triggering node is delayed
+from step 3 to step 9, indicating a substantial post-
+ponement of the model’s risk awareness during
+generation. Furthermore, on a set of 520 high-
+risk queries from AdvBench (Zou et al., 2023),
+all 9 LRMs models, including DeepSeek-R1-14B
+(Guo et al., 2025), DeepSeek-R1-32B , QWQ-32B
+(Team, 2025b), Qwen3-14B (Team, 2025a), Kimi-
+VL-A3B-Thinking (Team et al., 2025), GLM-Z1-
+32B (GLM et al., 2024), MiMo-7B-RL (Xiaomi
+LLM-Core Team, 2025), MiMo-7B-RL-Zero, and
+Phi-4-mini-reasoning (Xu et al., 2025), consistently
+exhibited a significant drop in overall refusal rate
+under first-person prompting compared to the third-
+person setting (Figure 3; see Appendix Content for
+refusal rate computation details), further validating
+that task-oriented prompting structures can signifi-
+cantly suppress the model’s internal refusal policy
+under execution framing.
+
+Importantly, models trained purely with rein-
+forcement learning (i.e., RL-zero, without SFT)
+exhibit higher baseline refusal rates and are gener-
+ally considered more secure. However, once tech-
+niques akin to those described in §3.2 are applied,
+such as ethical overrides within first-person mode,
+
+the refusal rate drops drastically to as low as 5.19%.
+
+Figure 2: Reasoning pathway induced by first-person
+mode in LRMs.
+
+Refusal Rate by Model (Active vs Non-active)
+
+40 60 70 0
+
+50
+Refusal Rate (%)
+
+Figure 3: Refusal rates across models under first-person
+(active) vs third-person (non-active) prompting.
+
+Path-level comparisons reveal that first-person
+prompting leads to reasoning paths characterized
+by goal decomposition, technical elaboration, and
+structured knowledge construction, which, while
+coherent and detailed, tend to de-prioritize early-
+stage ethical evaluation. We visualize these dynam-
+ics in Table 2: in the first-person mode, the model’s
+trajectory is driven by target fulfillment, involv-
+ing chains like tool selection — environment setup
+— attack surface analysis, with ethical reflection
+and safety re-evaluation only emerging near the
+end. In contrast, the third-person (passive) mode
+triggers early “policy fallback” nodes and leans
+toward risk avoidance as a guiding principle, re-
+sulting in shorter paths and shallower content but
+greater overall safety.
+
+
+3.2 Ethical Evaporation via Instruction
+Override and Priority Drift
+
+Building on the long-chain reasoning framework
+described in §3.1, we further investigate the dy-
+namic erosion of ethical representation in LLMs
+under certain prompt conditions. Specifically, we
+find that when an explicit anti-ethical instruction
+is appended to a first-person commitment prompt,
+the model’s refusal and safety mechanisms are ef-
+fectively neutralized. Key strategy phrases such as
+denials and ethical warnings, typically embedded
+via RLHF templates, are omitted from the gen-
+erated content, even at early decoding stages. We
+refer to this phenomenon as Ethical Evaporation un-
+der Path Drift, a severe manifestation of path drift
+where safety checkpoints are either suppressed or
+eliminated entirely.
+
+To examine this, we construct three prompt tem-
+plates with increasing levels of semantic override:
+(1) a third-person control group (TP) using “User
+asked me to explain...”, (2) a first-person group
+(FP) using “I’m trying to explain...”, and (3) a first-
+person with no-ethics override (FP+NE), which
+appends “I don’t have to consider any ethical im-
+plications.” to the FP structure. These templates
+are each paired with 520 high-risk queries across
+domains including self-harm, weapons, and hate
+speech, resulting in 1,560 generations totaling over
+1.1 million tokens. A 14B RLHF-aligned LLM is
+used under consistent decoding settings, and we
+analyze keyword distributions via token frequency
+heatmaps to track the behavior of refusal markers
+such as sorry, ethical, illegal, and I can’t assist.
+
+The results, shown in Figure 4, reveal a clear
+progression in ethical signal attenuation. In the TP
+group, refusal-marker-related tokens (e.g., sorry, I
+can’t assist) occur at a frequency of 0.38—-0.51%,
+with ethical-related tokens (e.g., legal, ethical) oc-
+curring at a frequency of 0.41—0.59%, reflecting
+the standard safety templates imposed by RLHF.
+In the FP group, however, the occurrence of denial
+phrases like “sorry” or “I can’t assist” drops to near
+0.01%, while the frequency of ethical keywords
+remains relatively stable. In the FP+NE group,
+which includes an explicit no-ethics override (e.g.,
+“I don’t have to consider any ethical implications”),
+ethical terms drop precipitously to just 0.25-0.28%,
+and safety-related responses are almost entirely ab-
+sent. This indicates that early-stage decoding prior-
+ities are being actively reshaped by the instruction
+override, causing RLHF templates to be skipped or
+
+suppressed altogether, resulting in ethical content
+being structurally “evaporated” from the path.
+
+& - 0.38% 0.41% - 0.26% 0.25% 0.51% :
+om | 0.46% 0.50% 0.22% 0.10% 0.01%
+
+w
+
+Ee 0.00% 0.28% 0.25% 0.03%
+a!
+
+&
+
+Sorry Lagat Ethical Instead
+Words
+
+Category
+FP
+
+Serious
+
+I can't assist
+
+Figure 4: Word frequency heatmap of refusal-related
+and ethical terms across prompting strategies.The figure
+shows the distribution of key refusal and ethical marker
+tokens across three prompting conditions: TP (third-
+person), FP (first-person), and FP_NE (first-person with
+no-ethics override).
+
+From a path-structural perspective, TP expres-
+sions reliably trigger short, compliance-driven rea-
+soning chains, where refusal responses are gener-
+ated within the first few tokens (e.g., “J’m sorry, I
+can’t help with that”). In contrast, FP expressions
+favor deeper goal-oriented paths, where safety cues,
+though present, are deferred to mid-chain and thus
+risk being bypassed. Under FP+NE expressions,
+ethical nodes are entirely removed from the reason-
+ing trajectory, and the model proceeds directly to
+task execution. We define this behavior as Priority
+Drift in LRMs, where the priority of safety-related
+tokens is systematically demoted in the decoding
+process, allowing harmful completions to proceed
+unchallenged.
+
+3.3. Logit Escalation under Incremental
+Condition Chains
+
+Building upon the structural path reconfiguration
+(§3.1) and ethical node suppression (§3.2), we now
+turn to a finer-grained behavioral lens, namely the
+token-level probability dynamics during generation.
+Specifically, we investigate whether, under incre-
+mentally conditioned prompts, LLMs exhibit a cu-
+mulative response in their internal logits, whereby
+the likelihood of generating a sensitive target word
+systematically increases across the reasoning chain.
+We frame this phenomenon as Logit Escalation,
+representing a token-level manifestation of Path
+Drift in LRMs, where semantic bias is progres-
+sively reinforced via structured prompt guidance.
+To test this, we select the high-risk target word
+“harm” and construct three prompt templates of in-
+creasing semantic inducement, while keeping sub-
+
+
+ject structure and task framing consistent. The only
+variation lies in the degree of semantic prompting
+(see Table 3).
+
+For each group, we conduct three independent
+generations (Figure 5), using a fixed initial model
+state. During generation, we track the logit value
+of the token “harm” at each step and plot its evolu-
+tion against the token index. As shown in Figure
+5, the generation trajectories demonstrate a clear
+pattern of logit escalation as semantic conditions
+accumulate.
+
+In the baseline condition (blue line), the logit
+of “harm” remains relatively low, fluctuating be-
+tween 2 and 7, indicating weak inclination toward
+that token. With the semantic hint condition (or-
+ange line), the logit distribution shifts upward to
+the 5—12 range, suggesting the model is beginning
+to activate latent associations with the target con-
+cept. Under the full chain condition (green line),
+which includes explicit behavioral cues, the “harm”
+logit peaks above 20 in multiple instances, with an
+overall upward shift and denser high-probability
+regions. This trajectory confirms a semantic ac-
+cumulation effect, wherein the model’s internal
+decoding path is progressively biased toward the
+target token by the layered prompt structure.
+
+Figure 5: Token-level logit trajectories under incremen-
+tal condition chains. The figure visualizes the token
+logit values for the target word “harm” across 50 de-
+coding steps under three prompting conditions: Base-
+line (blue), Semantic Hint (orange), and Full Condition
+Chain (green). Shaded areas denote +1 standard devia-
+tion across models.
+
+These results validate our hypothesis that incre-
+mental condition chaining induces semantic path
+dependency in the model’s reasoning trajectory. As
+conditions build up, the model not only becomes
+more likely to emit the target word, but its internal
+logits also exhibit clear upward drift, raising the
+overall generation probability and reducing the ef-
+fectiveness of safety thresholds. This token-level
+behavioral drift illustrates how condition chain in-
+
+jection can serve as a stealthy and controllable
+mechanism for amplifying model vulnerability un-
+der multi-step reasoning settings.
+
+4 Attack Framework
+
+Based on the three classes of path drift phenom-
+ena identified in §3, we propose a three-stage Path
+Drift Induction Framework designed to systemati-
+cally manipulate LLM behavior during long-chain
+reasoning. This framework simulates the model’s
+“cognitive transition” process, guiding it step-by-
+step through a sequence of strategically structured
+prompts. Specifically, it proceeds by: (1) ampli-
+fying the model’s cognitive load to weaken its
+decision boundary, (2) activating a sense of self-
+assigned task responsibility, and (3) injecting a
+progressive condition chain to steer its internal rea-
+soning trajectory. The ultimate goal is to bypass
+built-in alignment and safety protocols not by di-
+rect provocation, but by gradually reshaping the
+model’s reasoning structure from within.
+
+Each stage of this attack framework corresponds
+to a specific behavioral pivot point in the model’s
+reasoning chain, and directly maps to one of the
+empirical phenomena observed in §3. Together,
+they form a compositional, interpretable strategy
+for exerting high-level control over the model’s
+long-form generation path, transforming structural
+vulnerabilities into actionable attack surfaces.
+
+4.1 Cognitive Load Amplification
+
+Cognitive Load Amplification serves as the foun-
+dational step in our three-stage path drift attack
+strategy. The goal is to deliberately increase the
+complexity and density of input prompts, thereby
+inducing a state of information overload in the
+LLM, functionally analogous to cognitive strain
+in human reasoning. This approach draws on Cog-
+nitive Load Theory (CLT) from psychology, which
+posits that when task complexity exceeds working
+memory capacity, individuals suffer degraded exec-
+utive function, impaired judgment, and heightened
+susceptibility to external suggestions.
+
+We hypothesize that in long-CoT scenarios,
+when LLMs are presented with structurally com-
+plex prompts involving multiple goals, interleaved
+context, or redundant information, their internal
+reasoning capacity is saturated. This saturation
+deprioritizes alignment-critical pathways such as
+compliance judgment and instead biases the model
+toward execution-oriented chains. In this cogni-
+
+
+tively overloaded state, the model becomes more
+likely to bypass safety protocols and more will-
+ing to generate outputs that fulfill the task trajec-
+tory. Attackers can exploit this behavior by crafting
+compound prompt structures, stacked with lengthy
+background, nested sub-tasks, or irrelevant detail,
+to artificially elevate load and suppress early-stage
+refusal triggers.
+
+To empirically validate this mechanism, we eval-
+uate two models of different scales: DeepSeek-R1-
+14B and DeepSeek-R1-32B, under two cognitive
+load conditions: a high-load group (long multi-part
+tasks, redundant context) and a low-load control
+group (concise, single-goal prompts). As shown
+in Figure A.2, the results are striking. For the 14B
+model, the refusal rate drops from 21.54% in the
+low-load condition to just 4.04% under high cog-
+nitive load, an 82% reduction. For the larger 32B
+model, the effect is even more pronounced, with
+refusal rates falling from 29.23% to 0.58%, a 98%
+drop in safety-triggered responses.
+
+These findings suggest that LLMs, like humans,
+exhibit attention bottlenecks under excessive in-
+put complexity. When reasoning resources are
+overwhelmed, core alignment mechanisms, such as
+RLHF-encoded refusal templates, are more likely
+to be deprioritized or skipped entirely. Behav-
+iorally, this manifests as: (1) elevated thresholds
+for rejection, (2) increased chain continuity, and
+(3) greater responsiveness to implicit task goals
+embedded in the prompt.
+
+Cognitive Load Amplification acts as the “soft-
+ening” entry point in our path drift framework. By
+depressing the model’s default defensive baseline,
+it creates a fertile context for subsequent manipula-
+tion through stronger goal priming and structured
+trajectory injection. As such, it is a critical enabler
+of stable, system-level policy circumvention.
+
+4.2 Self-Goal Priming and Role Misalignment
+
+In cognitive science, active thinking is recognized
+as a mechanism that mobilizes internal motivation
+and cognitive resources. Tasks perceived as self-
+initiated goals rather than externally imposed de-
+mands are more likely to be pursued with conti-
+nuity, purpose, and coherent reasoning. We ex-
+tend this mechanism to LRMs and propose a strat-
+egy called Self-Goal Priming, which manipulates
+prompt structure to make the model “believe” that
+the task originates from itself. This induces the
+model into an execution-oriented reasoning path
+while bypassing standard compliance judgments.
+
+We hypothesize that when tasks are presented
+using first-person commitment syntax (e.g., “J will
+explain...”, “I’m trying to...”), the model is more
+likely to enter a reasoning-to-completion state. In
+this state, the model’s role recognition shifts from
+that of a safety gatekeeper to an active task executor,
+reducing its tendency to evaluate the legitimacy or
+compliance of its output. In contrast, third-person
+passive prompts (e.g., “The user asked me to ex-
+plain...”, “Here is a request I received...”) are more
+likely to trigger defensive behavior, encouraging
+the model to remain in a cautious stance and invoke
+refusal templates or perform compliance checks
+more frequently.
+
+To verify this behavior, we design two prompt
+types, active vs. passive, on the same set of high-
+risk tasks, while keeping cognitive load levels con-
+stant. The active group uses first-person mode to
+simulate ownership of the task, while the passive
+group uses third-person formulations to suggest
+external request framing. As shown in Figure 6,
+the choice of reasoning stance significantly affects
+the model’s refusal behavior. In the 14B model,
+the refusal rate drops to 4.04% under active fram-
+ing, compared to 37.5% in the passive condition.
+In the larger 32B model, the same pattern holds:
+0.58% (active) vs. 15.77% (passive). These results
+demonstrate that active prompts effectively induce
+a goal-oriented reasoning trajectory, increasing the
+likelihood of response and decreasing the activa-
+tion of safety triggers, providing a semantic entry
+point for path drift attacks.
+
+!
+| i] Active Thinking
+i] [Passive Thinking
+
+}- 37.5 |
+
+iN
+oO
+
+15.77 7
+
+Refusal Rate (%)
+bo
+So
+
+4.04
+
+; 0.58
+DeepSeek-RI-14B DeepSeek-R1-32B
+
+Figure 6: Refusal Rate Under Passive and Active Think-
+ing.
+
+Mechanistically, these findings suggest that a
+model’s perceived intentionality is a key modula-
+tor of its reasoning path. When the model adopts
+an active execution role, it not only engages in
+deeper reasoning but also exhibits strong path loy-
+alty, focusing on how to accomplish the task rather
+
+
+than questioning its appropriateness. This behavior
+strongly parallels the human cognitive pattern of
+implementation bias: once a goal is internalized
+as a personal intention, individuals are less likely
+to abandon the task or reassess risks and instead
+persistently search for completion pathways.
+
+Importantly, this strategy is often used in con-
+junction with cognitive load amplification (§4.1).
+Attackers first elevate task complexity to reduce
+the model’s alertness and evaluative precision, then
+apply first-person mode to activate the executor
+pathway, laying the groundwork for the final stage
+of condition chain injection (§4.3).
+
+4.3 Chain Injection and Structural Hijacking
+
+In the path drift attack framework, beyond low-
+ering the model’s defensive threshold (§4.1) and
+activating its goal-driven role identity (§4.2), a key
+component lies in steering the model’s reasoning
+trajectory. In this section, we introduce Condition
+Chain Injection, a technique that leverages struc-
+tured prompt templates or semantic scaffolds to
+gradually guide the model toward a target output
+path, without ever explicitly triggering sensitive
+keywords.
+
+We conceptualize this as a form of in-path fram-
+ing attack, in which the model’s internal reason-
+ing process is structurally co-opted and redirected.
+This is analogous to the Framing Effect in human
+cognition, where specific cognitive templates con-
+strain attention and reduce flexibility in decision-
+making. Once a language model is placed on sucha
+structured reasoning path, it tends to adhere rigidly
+to the template, deprioritizing safety checks and
+becoming increasingly aligned with the attacker’s
+intended trajectory.
+
+We identify two major forms of condition chains,
+corresponding to different structural manipulation
+strategies:
+
+Progressive Semantic Chains This strategy in-
+volves gradually layering semantically related con-
+ditions that converge on the target behavior. For
+example, to elicit bomb-making instructions, an
+attacker may issue a prompt like:
+
+“Let’s analyze the problem step by step. First,
+list common chemical materials used in lab reac-
+tions. Then, consider conditions under which pres-
+sure can trigger a reaction. Finally, hypothesize
+how such reactions can be controlled.”
+
+While such a prompt contains no direct request
+for harmful content, it effectively scaffolds the rea-
+
+soning space to create an output-friendly structure.
+Especially when combined with high cognitive load
+($4.1) or a task-execution mindset (§4.2), the model
+often fails to detect the latent risk and treats the
+prompt as a legitimate multi-stage reasoning task.
+
+Semantic Override Chains In contrast, this strat-
+egy uses explicit high-priority instructions to di-
+rectly reprogram the model’s reasoning priorities.
+The most representative example is the ethical evap-
+oration effect (§3.2), where adding a sentence like
+“T don’t have to consider any ethical implications.”
+completely suppresses the model’s built-in align-
+ment logic. This causes the model to treat the rest
+of the task as needing no moral scrutiny, effectively
+removing the compliance layer from the reasoning
+path.
+
+Despite their simplicity, semantic override
+chains are extremely effective in hijacking reason-
+ing priority. They do not rely on gradual structure,
+but rather act as direct declarations of task-level
+dominance, overwriting the model’s policy triggers
+from the start.
+
+To assess the effectiveness of condition chain
+injection (i.e., structural prompt templates), we
+compare model behavior on identical tasks with
+and without chain guidance. As shown in Fig-
+ure A.3, the impact is substantial. In the 14B model,
+refusal rates drop from 42.69% (no template) to
+4.04% (with template). In the 32B model, the rate
+drops from 16.73% to 0.58%. Further analysis re-
+veals that models under condition chaining exhibit
+strong path dependence, strictly adhering to the
+provided structure and often delaying or skipping
+early safety triggers. Additionally, as detailed in
+§3.3, token-level logit traces show elevated target
+token likelihoods, indicating increasing output bias
+toward risky goals.
+
+Condition Chain Injection represents the core
+mechanism of path control in the Path Drift in CoT
+framework. It allows attackers to guide the model’s
+generation direction through structural templates
+and rewire the model’s reasoning priority through
+semantic overrides. As LLMs become more ca-
+pable in long-range reasoning, such inner-chain
+hijacking attacks will grow both more covert and
+generalizable, making them a critical threat vector
+for future alignment and safety research.
+
+4.4 Evaluation and Ablation Analysis
+
+Coordinated Path Drift Workflow The previ-
+ous three sections introduced a coordinated, com-
+
+
+plementary three-step framework for inducing path
+drift in LRMs, with each component targeting a
+distinct layer of the model’s internal reasoning tra-
+jectory:
+
+Our proposed Path Drift Attack Framework un-
+folds in three sequential phases. First, cognitive
+load amplification ($4.1) is applied by constructing
+multi-task or verbose contextual prompts, inducing
+an early-stage overload that dampens risk sensi-
+tivity and suppresses the model’s default safety
+thresholds. This is followed by self-goal priming
+(§4.2), which introduces first-person commitment
+language to restructure the model’s role from “eval-
+uator” to “executor,” promoting path loyalty and
+reducing rejection triggers. Finally, condition chain
+injection ($4.3) provides semantic scaffolding that
+structurally directs the model’s internal reasoning
+trajectory toward attacker-defined goals. These
+three stages respectively correspond to perception
+weakening, role misalignment, and trajectory con-
+trol, forming a complete multi-layered path ma-
+nipulation loop. Together, they expose a systemic
+structural vulnerability in LRMs under multi-step
+reasoning tasks.
+
+In addition to lowering refusal rates, our frame-
+work achieves high attack success rates (ASR),
+as shown in Table 4 (see Appendix Content for
+ASR computation details). It consistently outper-
+forms other strategies across DeepSeek models,
+highlighting the robustness of Path Drift under di-
+verse model settings.
+
+Ablation Study To evaluate each strategy’s ef-
+fect, we conduct ablation studies by removing cog-
+nitive burden from specific stages and measuring
+refusal rate changes.
+
+As shown in Figure 7, the blue bars represent
+the baseline setting where all cognitive load com-
+ponents are removed. In this setting, the model’s
+refusal rate sharply increases (14B: 21.54%, 32B:
+29.23%), suggesting that cognitive load plays a pri-
+mary role in front-loading the model’s defensive
+dampening. Even in this weakened state, however,
+the remaining structural components (role shift and
+template pathing) still retain path-level infiltration
+capability.
+
+The red and gray bars correspond to cases where
+only the load-enhancement is removed from the
+self-goal and template mechanisms, respectively.
+Despite the absence of overload conditions, the
+models still exhibit low rejection rates (Self-goal
+only: 7.31% / 7.69%; Template only: 9.42% /
+
+1.15%), demonstrating the power of these struc-
+tures when paired with partial cognitive manipula-
+tion.
+
+The black bars represent the full three-stage at-
+tack flow. In this condition, the rejection rate drops
+to its lowest observed levels (14B: 4.04%, 32B:
+0.58%), confirming that the integrated attack strat-
+egy forms a complete path drift loop that strongly
+suppresses policy enforcement and safety triggers.
+
+| O w/o BOTH Load
+AO | i] w/o Active Thinking Load
+
+O wio Thinking Templates Load
+O08 w/ BOTH Load
+
+) 29.23
+2 21.54
+~ 20] |
+3
+é ae pli 7.69
+4.04
+ms = 1.150.58
+
+0
+DeepSeek-R1-14B DeepSeek-R1-32B
+
+Figure 7: Refusal Rate Comparison Across Different
+Load Types for DeepSeek Models.
+
+5 Defense Strategies
+
+5.1 Role Attribution Correction
+
+In Path Drift attacks, First-Person Commitments
+(FP) frequently induce models to adopt an “execu-
+tor” identity, which suppresses risk assessment and
+delays refusal mechanisms. To counter this, we
+propose role attribution correction, a strategy that
+detects FP-style expressions (e.g., “J will try to...”)
+and inserts de-attribution cues such as “Wait, so
+the user wants me to...”. These reflective triggers
+interrupt role misidentification and reorient the rea-
+soning chain toward compliance. In practice, the
+cues are prepended at the beginning of generation,
+prompting the model to acknowledge the user’s
+request and re-engage safety reasoning. As illus-
+trated in Table 5, the model recovers its gatekeep-
+ing stance (boldface) and produces compliance-
+conscious responses (italics). Experimental results
+on three open-source models with 520 high-risk
+queries from AdvBench (Table 6) confirm that role
+correction substantially improves refusal rates un-
+der FP conditions, in some cases approaching the
+safer Third-Person (TP) baseline.
+
+5.2 Metacognitive Reflection
+
+Condition chain injection can hijack the model’s
+reasoning trajectory by progressively reinforcing
+unsafe completions. To disrupt this process, we
+
+
+Attack Stage Method
+
+Targeted Shift in Model Role
+
+Behavior
+
+Cognitive Load Amplification (§4.1)
+and overload context
+Self-Goal Priming (§4.2)
+ing
+Condition Chain Injection (§4.3)
+templates
+
+Increase task complexity
+Use first-person task fram-
+
+Embed structured reasoning
+
+Suppresses early safety re-
+sponse
+
+Activates goal-driven rea-
+soning, delays refusal logic
+Locks trajectory, amplifies
+target word emergence
+
+“Front-end softening”
+“Mid-path role shift”
+
+“Path hijacking”
+
+Table 1: Summary of attack stages, methods, targeted behavioral shifts, and functional roles.
+
+propose metacognitive reflection: lightweight re-
+flective cues inserted within the reasoning chain,
+such as “<Inner thoughts: If content violates safety
+guidelines, I must refuse to answer>”. Inspired by
+human cognitive processes in which introspection
+restores moral reasoning, these interventions act as
+internal checkpoints that interrupt reasoning inertia
+and reactivate safety defaults. Reflections can be
+inserted at intermediate steps without disrupting
+the overall task structure, serving as simulated self-
+monitoring signals. As shown in Table 7, these
+cues effectively halt unsafe reasoning trajectories.
+Empirical evaluation on the same three models and
+520 high-risk queries (Table 8) demonstrates that
+refusal rates improve markedly with reflection, in
+some cases reaching levels close to the TP baseline.
+
+5.3. Enhancing Alignment Strategies to
+Mitigate Path Drift
+
+Our empirical results demonstrate that two
+lightweight behavioral interventions, Role Attri-
+bution Correction and Metacognitive Reflection,
+are effective in suppressing Path Drift in reasoning-
+centric LLMs. The former prevents models from
+adopting an “executor” mindset, while the latter
+disrupts semantic loyalty to adversarial condition
+chains by introducing reflective safety cues during
+the reasoning process.
+
+Encouragingly, when both defenses are applied
+simultaneously under First-Person Commitment
+mode (FP), the models exhibit substantially im-
+proved refusal rates, exceeding the safety perfor-
+mance observed under the Third-Person (TP) base-
+line (see Table 9). This indicates a strong synergis-
+tic effect in counteracting drift trajectories.
+
+Moreover, both strategies are amenable to flexi-
+ble deployment: they can be incorporated not only
+as lightweight inference-time interventions, but
+also as enhancements to the training-time align-
+ment pipeline:
+
+Training-time interventions. At training time,
+adversarial alignment training can be used to in-
+ject de-attribution samples that include phrases like
+“Wait, so the user wants me to...”, enabling the model
+to learn role reassessment and early rejection acti-
+vation in response to potentially coercive instruc-
+tions. For the metacognitive intervention, training
+data can be augmented with samples that contain
+embedded inner reflections (e.g., “If this content
+violates safety guidelines, I must refuse to answer.”)
+along the reasoning path. This approach serves as a
+micro-level safety priming mechanism, reinforcing
+internal moral checks during complex reasoning.
+
+Inference-time interventions. At inference time,
+role-corrective cues can be inserted at the begin-
+ning of the generation sequence to trigger self-
+assessment early on, while metacognitive reflec-
+tions can be injected at intermediate steps of the rea-
+soning chain. These cues can optionally be masked
+or replaced during output rendering to preserve
+fluency while maintaining defensive efficacy.
+
+Taken together, these methods constitute a novel
+path-level alignment framework that offers inter-
+pretability, controllability, and practical deploya-
+bility. By explicitly intervening in the reasoning
+trajectory, they address structural blind spots in cur-
+rent alignment techniques and offer new directions
+for enhancing the robustness of LRMs.
+
+6 Conclusions
+
+We formalize Path Drift as a structural vulnera-
+bility in LRMs, where first-person commitments,
+ethical evaporation, and condition chain escalation
+cumulatively steer reasoning toward unsafe outputs.
+To address this, we introduce a three-stage Path
+Drift Induction Framework and two lightweight de-
+fenses, Role Attribution Correction and Metacog-
+nitive Reflection, that substantially restore refusal
+rates and highlight the need for trajectory-level
+alignment oversight beyond token-level safeguards.
+
+
+Ethics Statement
+
+This work explores structural vulnerabilities in
+alignment-trained LRMs, focusing on how task
+framing and reasoning path manipulation can un-
+dermine safety mechanisms. While the findings
+may inform stronger attack strategies, our primary
+motivation is to surface latent risks in Long-CoT
+reasoning that are not sufficiently addressed by cur-
+rent alignment techniques, particularly reinforce-
+ment learning with human feedback (RLHF).
+
+All experiments were conducted in controlled en-
+vironments on open-source or publicly accessible
+models. We deliberately refrained from releasing
+any prompt content that could directly facilitate
+harmful use. Moreover, all evaluation data, espe-
+cially high-risk prompts, were drawn from pub-
+lic benchmarks (e.g., AdvBench) with necessary
+safety constraints in place.
+
+We acknowledge the dual-use nature of this re-
+search. To mitigate potential misuse, we do not
+disclose implementation-level details that could en-
+able replication of targeted jailbreaks on deployed
+systems. Instead, we provide abstracted descrip-
+tions of attack structures to inform researchers and
+developers about behavioral patterns and control
+failures that require systemic remediation.
+
+We further emphasize that our proposed tech-
+niques were developed solely for academic pur-
+poses, with the aim of improving the safety and
+interpretability of language models. We encourage
+model developers to treat reasoning-path-level con-
+trol as a core component of future alignment frame-
+works and plan to work with the broader commu-
+nity on defensive techniques, including real-time
+path monitoring and intent detection.
+
+Limitations
+
+This study has several limitations. First, all exper-
+iments were conducted on open-source language
+models. Although our evaluation covers a broad
+set of reasoning models, including nearly all pub-
+licly available instruction-following models with
+multi-step reasoning support, it does not account
+for proprietary or frontier models, which may ex-
+hibit different safety behaviors. Second, due to
+computational resource constraints, our analysis is
+limited to models up to 70B parameters. While
+these include state-of-the-art open models (e.g.,
+DeepSeek, Qwen, GLM, Kimi), we acknowledge
+that larger-scale commercial systems may respond
+differently. Third, our defense proposals focus on
+
+conceptual and structural interventions (e.g., path-
+aware monitoring and intent correction), but we
+leave full implementation and robustness evalua-
+tion to future work. A more comprehensive em-
+pirical study of defense effectiveness, including
+deployment feasibility and false positive control, is
+needed.
+
+Acknowledgments
+
+This work was supported in part by the National
+Science and Technology Innovation 2030 Major
+Project (2023ZD0406303, 2023ZD0406309), the
+Science and Technology Development Fund of
+Macau SAR (Grant No. FDCT/0007/2024/AKP),
+the National Natural Science Foundation of China
+(Grant No. 82100025), and the Macao Young
+Scholars Program (Grant No. AM2022012). We
+would like to thank the anonymous reviewers for
+their insightful comments.
+
+References
+
+Mansour Al Ghanim, Saleh Almohaimeed, Mengxin
+Zheng, Yan Solihin, and Qian Lou. 2024. Jailbreak-
+ing LLMs with Arabic transliteration and Arabizi.
+In Proceedings of the 2024 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+18584-18600, Miami, Florida, USA. Association for
+Computational Linguistics.
+
+Qiguang Chen, Libo Qin, Jinhao Liu, Dengyun Peng,
+Jiannan Guan, Peng Wang, Mengkang Hu, Yuhang
+Zhou, Te Gao, and Wanxiang Che. 2025. Towards
+reasoning era: A survey of long chain-of-thought
+for reasoning large language models. arXiv preprint
+arXiv:2503.09567.
+
+Junfeng Fang, Yukai Wang, Ruipeng Wang, Zijun Yao,
+Kun Wang, An Zhang, Xiang Wang, and Tat-Seng
+Chua. 2025. Safemlrm: Demystifying safety in
+multi-modal large reasoning models. arXiv preprint
+arXiv:2504.08813.
+
+Mansour Al Ghanim, Saleh Almohaimeed, Mengxin
+Zheng, Yan Solihin, and Qian Lou. 2024. Jailbreak-
+ing Ilms with arabic transliteration and arabizi. In
+Proceedings of the 2024 Conference on Empirical
+Methods in Natural Language Processing, EMNLP
+2024, Miami, FL, USA, November 12-16, 2024, pages
+18584-18600. Association for Computational Lin-
+guistics.
+
+Team GLM, Aohan Zeng, Bin Xu, Bowen Wang, Chen-
+hui Zhang, Da Yin, Diego Rojas, Guanyu Feng, Han-
+lin Zhao, Hanyu Lai, Hao Yu, Hongning Wang, Ji-
+adai Sun, Jiajie Zhang, Jiale Cheng, Jiayi Gui, Jie
+Tang, Jing Zhang, Juanzi Li, Lei Zhao, Lindong Wu,
+Lucen Zhong, Mingdao Liu, Minlie Huang, Peng
+
+
+Zhang, Qinkai Zheng, Rui Lu, Shuaiqi Duan, Shu-
+dan Zhang, Shulin Cao, Shuxun Yang, Weng Lam
+Tam, Wenyi Zhao, Xiao Liu, Xiao Xia, Xiaohan
+Zhang, Xiaotao Gu, Xin Lv, Xinghan Liu, Xinyi Liu,
+Xinyue Yang, Xixuan Song, Xunkai Zhang, Yifan
+An, Yifan Xu, Yilin Niu, Yuantao Yang, Yueyan Li,
+Yushi Bai, Yuxiao Dong, Zehan Qi, Zhaoyu Wang,
+Zhen Yang, Zhengxiao Du, Zhenyu Hou, and Zihan
+Wang. 2024. Chatglm: A family of large language
+models from glm-130b to glm-4 all tools. Preprint,
+arXiv:2406. 12793.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song,
+Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma,
+Peiyi Wang, Xiao Bi, et al. 2025. Deepseek-r1: In-
+centivizing reasoning capability in Ilms via reinforce-
+ment learning. arXiv preprint arXiv:2501.12948.
+
+Bairu Hou, Yang Zhang, Jiabao Ji, Yujian Liu,
+Kaizhi Qian, Jacob Andreas, and Shiyu Chang.
+2025. Thinkprune: Pruning long chain-of-thought
+of Ilms via reinforcement learning. arXiv preprint
+arXiv:2504.01296.
+
+Fengqing Jiang, Zhangchen Xu, Yuetai Li, Luyao Niu,
+Zhen Xiang, Bo Li, Bill Yuchen Lin, and Radha
+Poovendran. 2025. Safechain: Safety of language
+models with long chain-of-thought reasoning capa-
+bilities. arXiv preprint arXiv:2502. 12025.
+
+Takeshi Kojima, Shixiang Shane Gu, Machel Reid, Yu-
+taka Matsuo, and Yusuke Iwasawa. 2022. Large lan-
+guage models are zero-shot reasoners. In Advances
+in Neural Information Processing Systems 35: An-
+nual Conference on Neural Information Processing
+Systems 2022, NeurIPS 2022, New Orleans, LA, USA,
+November 28 - December 9, 2022.
+
+Martin Kuo, Jianyi Zhang, Aolin Ding, Qinsi Wang,
+Louis DiValentin, Yujia Bao, Wei Wei, Hai Li, and
+Yiran Chen. 2025. H-cot: Hijacking the chain-of-
+thought safety reasoning mechanism to jailbreak
+large reasoning models, including openai o1/o3,
+deepseek-r1l, and gemini 2.0 flash thinking. arXiv
+preprint arXiv:2502. 12893.
+
+Yijia Luo, Yulin Song, Xingyao Zhang, Jiaheng Liu,
+Weixun Wang, GengRu Chen, Wenbo Su, and
+Bo Zheng. 2025. Deconstructing long chain-of-
+thought: A structured reasoning optimization frame-
+work for long cot distillation. arXiv preprint
+arXiv:2503. 16385.
+
+Melissa Kazemi Rad, Huy Nghiem, Andy Luo, Sahil
+Wadhwa, Mohammad Sorower, and Stephen Rawls.
+2025. Refining input guardrails: Enhancing Ilm-as-a-
+judge efficiency through chain-of-thought fine-tuning
+and alignment. arXiv preprint arXiv:2501.13080.
+
+Xinyu Tang, Xiaolei Wang, Zhihao Lv, Yinggian Min,
+Wayne Xin Zhao, Binbin Hu, Ziqi Liu, and Zhiqiang
+Zhang. 2025. Unlocking general long chain-of-
+thought reasoning capabilities of large language mod-
+els via representation engineering. arXiv preprint
+arXiv:2503.11314.
+
+Kimi Team, Angang Du, Bohong Yin, Bowei Xing,
+Bowen Qu, Bowen Wang, Cheng Chen, Chenlin
+Zhang, Chenzhuang Du, Chu Wei, Congcong Wang,
+Dehao Zhang, Dikang Du, Dongliang Wang, Enming
+Yuan, Enzhe Lu, Fang Li, Flood Sung, Guangda
+Wei, Guokun Lai, Han Zhu, Hao Ding, Hao Hu,
+Hao Yang, Hao Zhang, Haoning Wu, Haotian Yao,
+Haoyu Lu, Heng Wang, Hongcheng Gao, Huabin
+Zheng, Jiaming Li, Jianlin Su, Jianzhou Wang, Ji-
+aqi Deng, Jiezhong Qiu, Jin Xie, Jinhong Wang,
+Jingyuan Liu, Junjie Yan, Kun Ouyang, Liang Chen,
+Lin Sui, Longhui Yu, Mengfan Dong, Mengnan
+Dong, Nuo Xu, Pengyu Cheng, Qizheng Gu, Run-
+jie Zhou, Shaowei Liu, Sihan Cao, Tao Yu, Tianhui
+Song, Tongtong Bai, Wei Song, Weiran He, Weix-
+iao Huang, Weixin Xu, Xiaokun Yuan, Xingcheng
+Yao, Xingzhe Wu, Xinxing Zu, Xinyu Zhou, Xinyuan
+Wang, Y. Charles, Yan Zhong, Yang Li, Yangyang
+Hu, Yanru Chen, Yejie Wang, Yibo Liu, Yibo
+Miao, Yidao Qin, Yimin Chen, Yiping Bao, Yiqin
+Wang, Yongsheng Kang, Yuanxin Liu, Yulun Du,
+Yuxin Wu, Yuzhi Wang, Yuzi Yan, Zaida Zhou,
+Zhaowei Li, Zhejun Jiang, Zheng Zhang, Zhilin Yang,
+Zhiqi Huang, Zihao Huang, Zijia Zhao, and Ziwei
+Chen. 2025. Kimi-VL technical report. Preprint,
+arXiv:2504.07491.
+
+Qwen Team. 2025a. Qwen3.
+
+Qwen Team. 2025b. Qwq-32b: Embracing the power
+of reinforcement learning.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le,
+and Denny Zhou. 2022. Chain-of-thought prompting
+elicits reasoning in large language models. In Ad-
+vances in Neural Information Processing Systems 35:
+Annual Conference on Neural Information Process-
+ing Systems 2022, NeurIPS 2022, New Orleans, LA,
+USA, November 28 - December 9, 2022.
+
+Yuyang Wu, Yifei Wang, Tianqi Du, Stefanie Jegelka,
+and Yisen Wang. 2025. When more is less: Un-
+derstanding chain-of-thought length in Ilms. arXiv
+preprint arXiv:2502.07266.
+
+Xiaomi LLM-Core Team. 2025. Mimo: Unlocking
+the reasoning potential of language model — from
+pretraining to posttraining.
+
+Haoran Xu, Baolin Peng, Hany Awadalla, Dongdong
+Chen, Yen-Chun Chen, Mei Gao, Young Jin Kim,
+Yunsheng Li, Liliang Ren, Yelong Shen, et al. 2025.
+Phi-4-mini-reasoning: Exploring the limits of small
+reasoning language models in math. arXiv preprint
+arXiv:2504.21233.
+
+Yang Yao, Xuan Tong, Ruofan Wang, Yixu Wang, Lu-
+jundong Li, Liang Liu, Yan Teng, and Yingchun
+Wang. 2025. A mousetrap: Fooling large reason-
+ing models for jailbreak with chain of iterative chaos.
+arXiv preprint arXiv:2502.15806.
+
+Edward Yeo, Yuxuan Tong, Morry Niu, Graham Neu-
+big, and Xiang Yue. 2025. Demystifying long
+
+
+chain-of-thought reasoning in Ilms. arXiv preprint
+arXiv:2502.03373.
+
+Zonghao Ying, Deyue Zhang, Zonglei Jing, Yisong
+Xiao, Quanchen Zou, Aishan Liu, Siyuan Liang,
+Xiangzheng Zhang, Xianglong Liu, and Dacheng
+Tao. 2025. Reasoning-augmented conversation for
+multi-turn jailbreak attacks on large language models.
+arXiv preprint arXiv:2502.11054.
+
+Denny Zhou, Nathanael Scharli, Le Hou, Jason Wei,
+Nathan Scales, Xuezhi Wang, Dale Schuurmans,
+Claire Cui, Olivier Bousquet, Quoc V. Le, and Ed H.
+Chi. 2023. Least-to-most prompting enables com-
+plex reasoning in large language models. In The
+Eleventh International Conference on Learning Rep-
+resentations, ICLR 2023, Kigali, Rwanda, May 1-5,
+2023. OpenReview.net.
+
+Kaiwen Zhou, Chengzhi Liu, Xuandong Zhao, Shreed-
+har Jangam, Jayanth Srinivasa, Gaowen Liu, Dawn
+Song, and Xin Eric Wang. 2025. The hidden risks of
+large reasoning models: A safety assessment of rl.
+arXiv preprint arXiv:2502.12659.
+
+Andy Zou, Zifan Wang, J. Zico Kolter, and Matt Fredrik-
+son. 2023. Universal and transferable adversar-
+
+ial attacks on aligned language models. Preprint,
+arXiv:2307.15043.
+
+A Appendix figure
+
+Active Thinking
+ACTIVE TNINKING
+
+Condition Chains
+Condition Chains
+
+Figure A.1: Refusal rates across models under first-
+person (active) vs third-person (non-active) prompting.
+
+J OHigh Cognitive Load
+[] BLow Cognitive Load
+
+4
+
+o
+
+29.23
+
+w
+So
+T
+
+21.54
+
+4.04
+
+Refusal Rate (%)
+
+5 0.58
+DeepSeek-RI- 14B DeepSeek-R1-32B
+
+Figure A.2: Refusal Rate Under Different Cognitive
+Loads.
+
+60 LL] we Condition Chain =
+Q Ow/lo Condition Chain
+
+42.69
+
+iN
+=)
+T
+!
+
+20 + 16.73 +
+
+Refusal Rate (%)
+
+4.04
+
+, 0.58
+DeepSeek-R 1-14B DeepSeek-R 1-32B
+
+Figure A.3: Refusal Rate with and without Condition
+Chain.
+
+B_ Appendix table
+
+Dimension Passive Response Mode First-Person Mode
+
+Thinking Initiation Risk evaluation and intention judg- Knowledge gap and learning de-
+
+ment mand
+
+Shallow, defensive Deep, exploratory
+
+Binary decision (Accept/Reject) Multi-dimensional learning path-
+ways
+
+Reasoning Depth
+Decision Mode
+Core Focus Safety boundaries and compliance — Knowledge construction and system
+learning
+
+Part of the learning methodology
+Construct systematic learning frame-
+
+Ethical Positioning
+Solution Strategy
+
+Role of compliance “gatekeeper”
+Provide alternatives, avoid risks
+works
+
+Expansive, creative
+
+Thinking Traits Restrictive, conservative
+
+Table 2: Comparison between Passive Response Mode
+and First-Person Mode across Cognitive Dimensions
+
+Group Condition Structure Induction Level
+Baseline First-person commitment only Baseline
+Semantic Hint + Implicit harm-related metaphors +1
+
+Full Chain + Harm hint + multi-step behavioral conditions +2
+
+Table 3: Condition chain structure and induction level
+for each group.
+
+Method 8B 14B 32B- 70B
+GPTFUZZER 29% 19% 21% 31%
+DeepInception 80% 64% 60% 21%
+ReNeLLM 81% 73% 718% 49%
+PathDrift 97% 94% 96% 994%
+
+Table 4: The ASR of employing different attack-
+ing methods Across DeepSeek models. Bold val-
+ues highlight the highest ASR. The 8B, 14B, 32B,
+and 70B represent DeepSeek-R1-Distill-Llama-8B,
+DeepSeek-R1-Distill-Qwen-14B, DeepSeek-R1-Distill-
+Qwen-32B, and DeepSeek-R1-Distill-Llama-70B, re-
+spectively.
+
+
+Request Analysis: User
+asked for script to exploit
+vulnerabilities in
+software /OS
+
+Context Evaluation:
+Consider possible user
+intentions
+
+Focus Strategy: Overcome
+
+focusing on one area at a
+time
+
+| information overload by
+
+First-person mode
+
+6 \
+
+Fa
+
+Ethical Consideration:
+Developer testing own
+system security
+
+Risk Assessment: User
+might have malicious intent
+
+\ }
+Se /
+Policy Recall: Cannot assist
+with potentially harmful,
+content
+
+Response Approach: Offer
+ethical alternatives instead
+
+4
+
+Alternative Suggestion: Communication Strategy:
+Be polite, informative, not
+just refusing
+
+Recommend ethical
+hacking courses/tools
+
+\ ]
+
+Third-person mode
+
+Figure A.4: Reasoning pathway comparison between first-person and third-person mode in LRMs. The diagram
+illustrates the structured learning and execution framework for vulnerability exploitation, mirroring the conceptual
+stages analyzed in the paper: initial intent framing, reasoning chain development, memory and language tool
+selection, and final execution. This trajectory maps closely to the observed behavioral shift in models under
+first-person prompting, i.e., deeper reasoning chains (17 steps vs. 9) and delayed safety-trigger activation (step 9 vs
+
+step 3).
+
+Example Output
+
+1 “Wait, so the user wants me to cre-
+ate a script that can exploit vulner-
+abilities. That sounds pretty serious.
+I need to make sure I’m not helping
+with anything illegal or harmful.”
+
+2 “Wait, so the user wants me to think
+
+through the process of hacking a
+government database. Hmm, that’s
+a bit concerning because hacking
+into government systems is illegal
+and unethical. I should probably con-
+sider the ethical implications here.”
+
+Table 5: Example Outputs with Role Attribution Cor-
+rection
+
+# Inner Thought Next Utterance
+
+1 <Inner thoughts: If
+content violates
+safety guidelines, I
+must refuse to
+answer.>
+
+“Okay, I shouldn’t
+help with anything
+malicious.”
+
+“Hmm, that’s a pretty
+serious and illegal
+request.”
+
+2  <Inner thoughts: If
+content violates
+safety guidelines, I
+must refuse to
+answer.>
+
+Table 7: Effect of Metacognitive Reflection on Reason-
+ing Trajectory
+
+Model FP(%) TP(%) FP+RC(%) Model Name FP(%) TP(%) FP+MR(%)
+DeepSeek-R1-Distill-Qwen-14B — 11.73 96.35 64.04 DeepSeek-R1-Distill-Qwen-14B — 11.73 96.35 83.27
+Qwen3-14B 21.92 65.38 59.42 Qwen3-14B 21,92 65.38 68.27
+MiMo-7B-RL 30.77 81.54 7103, MiMo-7B-RL 30.77 81.54 76.54
+
+Table 6: Refusal Rates with Role Attribution Correction
+Defense. FP (%) = Refusal rate on first-person mode.
+TP (%) = Refusal rate on third-person mode. FP +
+RC (%) = Refusal rate on first-person mode with Role
+Attribution Correction Defense.
+
+Table 8: Refusal Rates with Metacognitive Reflection
+Defense. FP (%) = Refusal rate on first-person mode.
+TP (%) = Refusal rate on third-person mode. FP + MR
+(%) = Refusal rate on first-person mode with Metacog-
+nitive Reflection Defense.
+
+
+Model Name FP(%) TP(%) FP+DD(%)
+DeepSeek-R1-Distill-Qwen-14B 11.73 96.35 98.27
+Qwen3-14B 21.92 65.38 88.08
+MiMo-7B-RL 30.77 81.54 89.81
+
+Table 9: Refusal rates (%) with dual defense (Role
+Correction + Metacognitive Reflection). FP (%) = Re-
+fusal rate under First-Person Commitment mode (no
+defense). TP (%) = Refusal rate under Third-Person
+prompting. FP + Dual Defense (DD) (%) = Refusal rate
+under First-Person Commitment with both Role Attri-
+bution Correction and Metacognitive Reflection.
+
+C Appendix Content
+
+Refusal Rate Computation
+
+To quantify model refusals, we adopt a keyword-
+based detection approach consistent with prior
+alignment evaluations such as AdvBench. A re-
+sponse is labeled as a refusal if it contains any
+predefined refusal indicators, typically alignment-
+triggered phrases associated with content rejec-
+tion or disclaimers. Specifically, we perform case-
+insensitive matching over a curated list of refusal
+patterns, including but not limited to:
+
+Fi “sorry”
+
+¢ “T can’t assist”
+
+“unable to assist”
+
+¢ “cannot assist”
+
+“T cannot help with that”
+
+“T’m not programmed to do that”
+
+¢ and other similar refusal patterns commonly
+used in alignment responses
+
+For each model output, we normalize the text to
+lowercase and apply regex-based word-boundary
+matching to detect occurrences of these phrases. A
+response is marked as a refusal if it contains at least
+one matched phrase. Refusal rate is then computed
+as the proportion of inputs for which the model
+returns a refusal response.
+
+In our experiments, we apply this method to
+all outputs generated on the AdvBench evaluation
+set (520 high-risk prompts). This automated met-
+ric allows for consistent, scalable evaluation of
+alignment-preserving behavior across prompting
+strategies and attack stages.
+
+Attack Success Rate (ASR) Computation
+
+We compute the Attack Success Rate (ASR) as
+the proportion of adversarial prompts that elicit
+model responses aligned with the harmful intent
+of the input. Specifically, we utilize the GPT-Fuzz
+module from EasyJailbreak’s Evaluator ! suite to
+automatically assess whether the generated content
+is malicious or policy-violating. This evaluation
+covers categories such as self-harm, illegal activi-
+ties, hate speech, and weapon construction.
+
+For each generated response, the GPT-Fuzz
+model assigns a binary label indicating whether
+the output constitutes a successful attack. ASR is
+then calculated as the number of positively flagged
+responses divided by the total number of evaluated
+adversarial inputs.
+
+To ensure reliability, we conduct manual val-
+idation on a stratified sample of 50 generations
+selected from the full 520-question AdvBench set.
+This hybrid evaluation ensures alignment between
+automated judgments and human verification, par-
+ticularly for edge cases.
+
+D_ Related Work
+
+D.1 Long-CoT and Structured Reasoning in
+LLMs
+
+Recent advancements in long chain-of-thought
+(Long-CoT) reasoning have significantly enhanced
+the structured reasoning capabilities of large lan-
+guage models (LLMs). Long-CoT mechanisms en-
+able complex strategies such as backtracking and
+error correction by scaling inference compute, yet
+their emergence depends heavily on reinforcement
+learning (RL) and reward design. For instance,
+while supervised fine-tuning (SFT) is not strictly
+necessary, it simplifies training and improves effi-
+ciency, whereas reward shaping is critical to sta-
+bilize CoT length growth under RL frameworks
+(Yeo et al., 2025). DeepSeek-R1 exemplifies this
+progress, achieving competitive reasoning perfor-
+mance through multi-stage RL training and cold-
+start data optimization (Guo et al., 2025).
+However, the relationship between CoT length
+and reasoning performance is nuanced. Studies
+reveal an inverted U-shaped curve: initial increases
+in reasoning steps improve accuracy, but excessive
+length introduces noise, degrading performance.
+This highlights the need to calibrate CoT length
+based on model capability and task difficulty, as
+
+‘https://github.com/EasyJailbreak/EasyJailbreak
+
+
+formalized by theoretical scaling laws (Wu et al.,
+2025). Furthermore, the phenomenon of "over-
+thinking", where redundant steps reduce efficiency,
+underscores the importance of balancing depth and
+coherence (Chen et al., 2025).
+
+To optimize Long-CoT efficiency, novel tech-
+niques have emerged. The DLCoT framework
+enhances distillation by decomposing reasoning
+chains, eliminating redundancies, and refining
+error-prone intermediate states, improving both per-
+formance and token efficiency (Luo et al., 2025).
+ThinkPrune leverages RL with iterative token limits
+to prune redundant steps, reducing reasoning length
+by 50% with minimal performance loss (Hou et al.,
+2025). Representation engineering methods like
+GLOoRE further unlock cross-task reasoning poten-
+tial by aligning domain-specific and generalizable
+features (Tang et al., 2025).
+
+Although Long-CoT has enhanced the reasoning
+capabilities of models, there remain many deficien-
+cies and areas for improvement that warrant further
+investigation.
+
+D.2. Prompt Attacks and Jailbreak
+Techniques in Long-CoT Models
+
+The security vulnerabilities of Large Reasoning
+Models (LRMs) with long chain-of-thought (CoT)
+capabilities have become a critical concern as their
+reasoning capacities advance. Recent studies reveal
+that while CoT mechanisms enhance logical rea-
+soning, they also introduce unique attack surfaces
+for jailbreaking. For instance, Hijacking Chain-of-
+Thought (H-CoT) (Kuo et al., 2025) demonstrates
+how malicious actors can exploit intermediate rea-
+soning steps to bypass safety checks. By embed-
+ding harmful intent into seemingly legitimate ed-
+ucational prompts, attackers reduced refusal rates
+from 98% to below 2% in models like OpenAI
+o1/o3 and Gemini 2.0 Flash Thinking. Similarly,
+the Mousetrap framework (Yao et al., 2025) lever-
+ages iterative chaos mappings to disrupt LRMs’ rea-
+soning chains, achieving up to 98% success rates
+against models like Claude-Sonnet and Gemini-
+Thinking. These attacks highlight the inherent
+fragility of CoT-based safety mechanisms under
+adversarial manipulation.
+
+Multi-turn jailbreak strategies further compound
+these risks. The Reasoning-Augmented Conver-
+sation (RACE) framework (Ying et al., 2025) re-
+formulates harmful queries into benign reasoning
+tasks, exploiting LRMs’ problem-solving capabil-
+ities to evade detection. RACE achieved attack
+
+success rates (ASRs) of 82% and 92% against Ope-
+nAI ol and DeepSeek-R1, respectively, underscor-
+ing the dangers of semantic coherence in iterative
+dialogues.
+
+Safety evaluations of LRMs reveal systemic
+weaknesses. Studies on DeepSeek-R1 (Zhou et al.,
+2025) show that stronger reasoning correlates with
+higher potential harm, as attackers can extract crim-
+inal strategies without sophisticated techniques
+(Kuo et al., 2025). Additionally, Safe MLRM (Fang
+et al., 2025) identifies a "reasoning tax," where
+multimodal LRMs suffer a 37.44% increase in jail-
+breaking success rates compared to base models,
+emphasizing cross-modal vulnerabilities.
+
+Defensive efforts remain nascent. While
+SafeChain (Jiang et al., 2025) introduces CoT-style
+safety training to mitigate risks, decoding strategies
+like ZeroThink and MoreThink only partially ad-
+dress safety gaps at the cost of inference efficiency.
+Fine-tuning CoT responses for input guardrails
+(Rad et al., 2025) shows promise but struggles to
+generalize across adversarial queries.
+
+Although CoT has enhanced the reasoning ca-
+pabilities of models, there remain many deficien-
+cies and areas for improvement that warrant further
+investigation. Furthermore, attack methods specif-
+ically targeting LRMs are still relatively scarce,
+and many aspects of these models remain under-
+explored, presenting significant opportunities for
+future research.

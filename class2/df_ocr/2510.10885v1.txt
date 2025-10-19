@@ -1,0 +1,655 @@
+arXiv:2510.10885vl1 [cs.CL] 13 Oct 2025
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+Rethinking Agentic Workflows: Evaluating Inference-Based
+Test-Time Scaling Strategies in Text2SQL Tasks
+
+Jiajing Guo, Kenil Patel * Jorge Piazentin Ono, Wenbin He, Liu Ren
+Bosch Research North America, USA
+
+Bosch Center for Artificial Intelligence (BCA)
+jiajing.guo@us.bosch.com
+
+kenilpatel2047@gmail.com
+
+{jorge.piazentinono, wenbin.he2, liu. ren}@us.bosch.com
+
+Abstract
+
+Large language models (LLMs) are increasingly powering Text-to-SQL
+(Text2SQL) systems, enabling non-expert users to query industrial
+databases using natural language. While test-time scaling strategies have
+shown promise in LLM-based solutions, their effectiveness in real-world
+applications, especially with the latest reasoning models, remains uncertain.
+In this work, we benchmark six lightweight, industry-oriented test-time
+scaling strategies and four LLMs, including two reasoning models, evaluat-
+ing their performance on the BIRD Mini-Dev benchmark. Beyond standard
+accuracy metrics, we also report inference latency and token consumption,
+providing insights relevant for practical system deployment. Our findings
+reveal that Divide-and-Conquer prompting and few-shot demonstrations
+consistently enhance performance for both general-purpose and reasoning-
+focused LLMs. However, introducing additional workflow steps yields
+mixed results, and base model selection plays a critical role. This work
+sheds light on the practical trade-offs between accuracy, efficiency, and
+complexity when deploying Text2SQL systems.
+
+1 Introduction
+
+The Text-to-SQL (Text2SQL) task aims to translate natural language questions into executable
+SQL queries. This capability is valuable in real-world scenarios, as it enables non-technical
+users to access and analyze information stored in enterprise databases without writing
+SQL. Recent advances in large language models (LLMs) for instruction following and code
+generation have motivated researchers to employ agentic methods that leverage pretrained
+LLMs at inference time. These approaches enhance model performance by applying a variety
+of test-time scaling strategies that go beyond basic Chain-of-Thought (CoT) prompting (Wei
+et al., 2022), such as structured reasoning steps (Wang et al., 2023), parallel execution (Lee
+et al., 2024), verification (Xia et al., 2024), and result aggregation (Lee et al., 2024). Instead
+of pure prompting, these methods scale the reasoning process by adopting a sequential
+workflow that decomposes query generation into modular steps like schema linking, SQL
+generation, and refinement.
+
+Recent reasoning models, such as OpenAl’s o-series and Gemini 2.5, have demonstrated
+strong performance in logic and coding tasks. Unlike classical methods that rely on human-
+crafted reasoning frameworks, these models gain reasoning abilities through post-training
+techniques such as reinforcement learning or finetuning with reasoning procedures. This
+evolution raises key questions for practical Text2SQL deployment: Is extensive prompt
+and workflow engineering still valuable given the advances in reasoning models? Which
+test-time scaling strategies best balance accuracy and latency? How should workflows be
+optimized for industry applications?
+
+*This work is done during internship at Bosch.
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+In this work, we focus on lightweight, industry-ready workflows rather than directly
+adopting the often complex workflows proposed in the literature. We evaluate six agentic
+workflows, each leveraging different test-time scaling strategies, across four LLMs, includ-
+ing both general and reasoning-focused models. Our assessment uses metrics such as SOL
+accuracy, latency, and token consumption, with the goal of providing actionable guidance
+for practitioners deploying Text2SQL systems.
+
+Our main findings are: (1) Divide-and-Conquer (DC) instructions and few-shot demonstra-
+tions significantly improve SQL generation quality. This holds true for both general-purpose
+models and models finetuned for advanced reasoning, indicating that even specialized
+models benefit from explicit, procedural guidance for Text-to-SQL tasks. (2) Among more
+complex workflows, adding a Result Verification step provides the most consistent perfor-
+mance gains. However, increasing workflow complexity does not always lead to improve-
+ment in other workflows, and the effectiveness of any technique also depends on the base
+model. (3) More complex workflows and challenging questions typically introduce higher
+latency, underscoring the need to balance efficiency and answer quality. In practice, this
+may require product design choices to manage user expectations.
+
+2 Experiment
+
+Our experiments address the following research questions:
+
+RQ1: How do inference-based test-time scaling strategies affect Text2SQL performance in
+general-purpose versus reasoning models?
+
+RQ2: Which test-time scaling methods have the greatest impact on overall accuracy?
+
+RQ3: What are the trade-offs between accuracy and system performance (e.g., latency)
+when applying these strategies?
+
+2.1 Agentic Workflows
+
+We selected six representative agentic workflows for evaluation. These workflows are
+extracted from literature on agent workflows for Text2SQL tasks and other reasoning and
+code tasks !. A summary of existing Text2SQL workflows can be found in Appendix A.1,
+and diagrams of the workflows evaluated in our experiments are provided in Appendix A.2.
+
+CoT + ReAct (Baseline): SW > EX <> SR. We choose ReAct agent (Yao et al., 2023) as
+baseline workflow. Following the "think, act, observe” loop, in Text2SQL system, agent
+iteratively refines the query if execution error or empty data is observed (Pourreza & Rafiei,
+2023; Wang et al., 2023; Pourreza et al., 2024; Xia et al., 2024).
+
+Divide-and-Conquer with and without Few-shots: SW > EX <> SR. Divide-and-Conquer is
+a reasoning technique that breaks down a complex problem into a series of smaller subprob-
+lems, solving them in sequence and combining them as the final response. This technique
+specifically instructs the agent how to perform decomposition and combination (Pourreza
+et al., 2024), and its effectiveness is evaluated with and without few-shot demonstrations.
+
+Parallel Scaling: (SW > EX <> SR) || 5 > MV/ CS. This workflow generated multiple
+candidates and select the final answer via majority vote. If the candidates have no majority,
+a Candidate Selector agent chooses the final answer.
+
+Result Verification: SW > EX <> SR <> FP. This workflow aims to handle the situation
+where the generated SQL query is syntactically correct but semantically incorrect. After the
+workflow generates syntactically correct query, the execution output is passed to a Feedback
+Provider to decide if it needs refinement.
+
+lWe use the following symbols to represent workflow components: SW: SQL Writer; EX: Executor
+(a tool rather than an LLM agent); SR: SQL Refiner (refines the SQL query based on executor output
+or agent feedback); > : Sequential workflow order; <>: Iteration between two components.
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+Retrieval-based Structured Reasoning: KE > (ER || CR) > SW > EX <> SR. Adapted from
+the CHESS method (Talaei et al., 2024), this workflow proceeds as follows. First, a Keyword
+Extractor identifies keywords in the question. Next, two processes run in parallel: an Entity
+Retriever uses the keywords to retrieve syntactically similar entities (database values) from
+a Locality-Sensitive Hashing (LSH) index, while a Column Retriever identifies semantically
+similar columns based on column descriptions. The retrieved information is then passed to
+the SQL Writer, where selected tables and columns are emphasized by presenting Example
+Cell Values. Non-selected tables and columns are represented only through their column
+descriptions in the database schema.
+
+2.2 Dataset and Metrics
+
+We evaluate on BIRD Mini-Dev benchmark (Li et al., 2023). BIRD Mini-Dev is a subset
+with 500 question-SQL pairs derived from the original BIRD Dev set. Metrics include both
+accuracy and system performance, as described below.
+
+Soft F1-Score. Evaluates SQL query correctness by measuring the similarity between the
+tables produced by the predicted queries and those generated by the ground-truth queries,
+thereby mitigating the impact of variations such as column order or missing values. This
+metric is less strict than the commonly used Execution Accuracy (EX).
+
+Execution Error Rate. The percentage of tasks that encounter syntax execution error in the
+workflow. Since all workflows include a syntax-fixing iteration, this metric indicates the
+quality of generated SQL.
+
+Inference Time. The duration, in seconds, from the moment the agentic workflow receives
+the user’s question to the generation of the corresponding SQL query 7.
+
+Number of LLM Calls. Average number of LLM calls used in the workflow.
+
+Token Count. The average number of prompt and completion tokens (in units of 1,000
+tokens) required to generate a single SQL query.
+
+3 Results
+
+Soft Fl How Many Cases Have Execution Error?
+
+70 —®- Gemini 1.5 Flash
+14 —® Gemini 2.5 Flash
+© GPT-40
+
+B
+
+—® 04-mini
+
+Execution Error Rate
+
+57a —®- Gemini 1.5 Flash
+568 —@® Gemini 2.5 Flash
+—® GPT-40
+—® 04-mini
+Baseline DC+ReAct DC 3-shot DC 3-shot DC 3-shot Retrieval Baseline DC+ReAct DC 3-shot DC 3-shot DC 3-shot Retrieval
+CoT+ReAct +ReAct x5 Parallel+VerificationDC 3-shot CoT+ReAct +ReAct x5 Parallel+Verification-DC 3-shot
+Test-Time Scaling Strategy Test-Time Scaling Strategy
+
+Figure 1: Soft-F1 Score (left) and Execution Error Rate (right). The label DC 3-shot x5
+Parallel, DC 3-shot+Verification, and Retrieval+DC 3-shot denote the workflows that
+use parallel scaling, result verification, and retrieval-enhanced techniques, respectively. For
+visual clarity, the "+ReAct" suffix is omitted from their labels in the figure.
+
+RQ1: How do inference-based test-time scaling strategies affect Text2SQL performance in
+general-purpose versus reasoning models?
+
+2Inference time can be affected by various factors, including model region, network latency, server
+resource availability, and the complexity of both the workflow and prompts. Therefore, the values
+reported in this paper should be interpreted as indicative rather than absolute, and may vary under
+different deployment conditions.
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+—®- Gemini 1.5 Flash
+—@® Gemini 2.5 Flash
+
+2.00} ~®- GPT-40 © GPT-40
+—@ 04-mini —e 04-mini
+1.75 15
+1.50
+10
+1.25
+1.00 : = = ~ + : SL . : u i ! l
+Baseline DC+ReAct DC3-shot DC3-shot DC3-shot Retrieval Baseline  DC+ReAct DC3-shot DC3-shot DC3-shot Retrieval
+CoT+ReAct +ReAct x5 Parallel +Verification +DC 3-shot CoT+ReAct +ReAct x5 Parallel +Verification +DC 3-shot
+
+Average # of LLM Calls
+
+Average Inference Time
+
+2.4
+
+—®- Gemini 1.5 Flash
+—® Gemini 2.5 Flash
+
+Average Completion Tokens Usage
+
+Average Prompt Tokens Usag' §
+
+—®- Gemini 1.5 Flash
+
+—®- Gemini 1.5 Flash
+
+30) e— Gemini 2.5 Flash 15) —e— Gemini 2.5 Flash
+25| —@- GPT-40 © GPT-40 a i
+—@ 04-mini —@® 04-mini
+
+20 1.0
+
+14.2
+15 -
+
+0.5
+10 an 74
+2 2.3 1s
+; : 0.0 -
+Baseline DC+ReAct DC3-shot DC 3-shot DC3-shot Retrieval Baseline DC+ReAct DC3-shot DC 3-shot DC3-shot Retrieval
+
+CoT+ReAct
+
++ReAct
+
+x5 Parallel +Verification +DC 3-shot
+
+Test-Time Scaling Strategy
+
+CoT+ReAct
+
++ReAct —_x5 Parallel +Verification +DC 3-shot
+Test-Time Scaling Strategy
+
+Figure 2: Average # of LLM Calls and Latency (left). Prompt and Completion Tokens (right).
+
+Error Analysis
+
+Error Type
+Wrong Query Logic
+200 7 Schema Linking Error
+2 Missing or Extra Joins
+(5.7%) (@@ Ignoring Evidence
+17s sem Incorrect Column in SELECT
+10 j= Incorrect Gold SQL
+(5.3%) cee Clause Misuse
+150 a7 (e.g., GROUP BY, ORDER BY)
+eo (17.5%) Sy Wrong or Hallucinated
+ae (14.9%) 7 15.29 Data Value
+Pr (13.3%) 31 arin oo Column Belongs to Wrong Table
+= 125 zB (15.7%) rl ~~ — Wrong SQL Function
+s — 16 «ithe (2.7%) oe a (e.g., COUNT, AVG, CAST)
+23 (8.0%) 1. ‘ |e Other
+(11.2%)
+© 100 (12.2%) 14 19 GS 7) a2 Vague Question
+18) 19 (9.6%) ee)
+3 (11.7%) (e:18) = 24
+28 (16.4%) si 7 24 20 (12.2%)
+5 (14.9%) eS (9.8%) oe (11.4%) (10.4%)
+(13.5%) "
+50
+65 70 7 ee a 3B
+(34.6%) (ER) 28 (41.0%) 58 (32.2%) (35.8%) (37.1%)
+25 A (36.2%) (29.3%)
+0
+oy oy oy Xx x Ay
+OP OO = Oe OP OL eto Sa Bea Byung
+a oher® onc oher® gens Kn Kix ob SEpE fS
+\ Vor ‘i vee
+at r® A SC at ® aoc “ ae ot
+on oa" en OS as aw as RY
+C ee o ee oe se of xe
+oe J
+
+Figure 3: Error analysis on DC 3-shot+ReAct and Retrieval+DC 3-shot+ReAct workflows.
+
+We observed that both reasoning and general-purpose models benefit from test-time scaling
+strategies, with the most significant performance gains stemming from combining Divide-
+and-Conquer (DC) and few-shot demonstration. As shown in Figure 1, the application of DC
+3-shot+ReAct workflow consistently enhances the Soft-F1 score for all models. For instance,
+the general-purpose model GPT-40 saw its Soft-F1 increase from 61.1 in the baseline to
+64.4. Similarly, the reasoning model 04-mini improved from a baseline of 56.3 to 65.5.
+This indicates that although reasoning models have the capacity to scale their reasoning,
+incorporating human-like procedural steps for a specific task like SOL generation still
+improves their performance.
+
+Another finding is that a strong foundational model can be more impactful than workflow
+complexity. For example, the Gemini 2.5 Flash model baseline (CoT+ReAct), with Soft-F1 of
+65.75, already performs better than the most complex workflows of GPT-4o0 (max 64.95) and
+Gemini 1.5 Flash (max 63.63). While workflow design is important for performance tuning,
+this result clearly indicates that the selection of a robust base model is a critical factor in
+achieving high-performance Text2SQL solutions.
+
+RQ2: Which test-time scaling methods have the greatest impact on overall accuracy?
+
+We found that the combination of Divide-and-Conquer, few-shot demonstrations and
+ReAct (denoted as DC 3-shot+ReAct) consistently improves performance over the Baseline
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+CoT+ReAct across all models. Given its robust gains, we use DC 3-shot+ReAct as the
+primary benchmark to evaluate the impact of more complex workflows. Adding additional
+steps to this strong baseline yielded mixed results.
+
+The Verification method proved most effective, delivering reliable performance boosts
+across most models. It increased the Soft-F1 score for Gemini 1.5 Flash (from 62.58 to 63.63),
+Gemini 2.5 Flash (68.12 to 68.44), and GPT-4o (64.44 to 64.95). The only exception was
+04-mini, where the score remained unchanged (65.53). Parallel scaling showed moderate
+gains but slightly degraded performance for Gemini 2.5 Flash (67.32 vs. 68.12). In contrast,
+the retrieval-enhanced method was generally counterproductive, underperforming DC
+3-shot+ReAct workflow for nearly every model. This method is designed to help the model
+by filtering the database schema down to only the most relevant columns based on semantic
+similarity. However, this creates a critical trade-off: if identifying the correct columns
+requires complex reasoning rather than simple similarity matching, the model may be
+deprived of essential information, leading to errors.
+
+To investigate this, we conducted an error analysis by prompting 04-mini model to catego-
+rize failures based on common error types summarized from previous work (Wang et al.,
+2023; Pourreza & Rafiei, 2023). Our analysis (Figure 3) reveals that Wrong Query Logic is
+the most common failure type across all methods and models, and the retrieval-enhanced
+method consistently exacerbates this problem. Furthermore, the retrieval method also
+increased the rate of Schema Linking Errors for Gemini 1.5 Flash (from 14.9% to 16.4%) and
+04-mini (from 10.4% to 12.2%).
+
+RQ3: What are the trade-offs between accuracy and system performance when applying
+these strategies?
+
+Gemini Flash models demonstrate significantly lower latency, with response times between
+5.02-12.03 seconds, compared to GPT-40 and 04-mini, which take 15.70-18.43 seconds (Fig-
+ure 2). Analyzing the results by query difficulty reveals a clear trade-off. More challenging
+questions take longer to answer, consume more tokens, and often result in lower accuracy.
+A notable finding is that incorrect answers are 19.58% slower to generate than correct ones.
+The extended wait times for these complex queries are particularly problematic, as they do
+not guarantee a correct answer. The findings on latency and error rates highlight a critical
+challenge for practical deployment: balancing computational efficiency with output quality.
+Consequently, the focus may need to shift to product design to manage user expectations
+and experience. This could include allowing users to select between speed and accuracy
+modes or adding UX features such as progress indicators or partial results to manage
+expectations during longer waits.
+
+4 Conclusion
+
+In this work, we evaluate six inference-based test-time scaling strategies on four LLMs for
+Text2SQL tasks. We found that Divide-and-Conquer instructions and few-shot demonstra-
+tions, provide significant and reliable performance gains across all models, including those
+specialized for reasoning. This suggests that advanced models also benefit from explicit
+procedural guidance. In contrast, more complex workflows yielded mixed results: while a
+result verification step was beneficial, increasing complexity did not always lead to better
+outcomes. Also, a robust base model is a critical prerequisite for high performance.
+
+While our findings offer actionable guidance for practitioners, this work serves as a prelimi-
+nary benchmark with several limitations. We focused exclusively on lightweight, industry-
+oriented workflows, which may not represent the upper bounds of performance achievable
+with more sophisticated agentic workflow designs. Our evaluation was confined to the
+BIRD Mini-Dev benchmark for reasons of efficiency. Additionally, the reported latency
+and token consumption metrics should be interpreted as indicative rather than absolute, as
+they are influenced by external factors like network latency and server load. Future work
+can build on our results by examining more complex workflows, validating these findings
+across a broader range of datasets, and exploring the applicability of these strategies to other
+tasks.
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+References
+
+Dongjun Lee, Choongwon Park, Jaehyuk Kim, and Heesoo Park. MCS-SQL: Leveraging
+multiple prompts and multiple-choice selection for text-to-SQL generation. arXiv [cs.CL],
+13 May 2024.
+
+Jinyang Li, Binyuan Hui, Ge Qu, Binhua Li, Jiaxi Yang, Bowen Li, Bailin Wang, Bowen
+Qin, Rongyu Cao, Ruiying Geng, Nan Huo, Chenhao Ma, K Chang, Fei Huang, Reynold
+Cheng, and Yongbin Li. Can LLM already serve as a database interface? a BIg bench
+for large-scale database grounded text-to-SQLs. Neural Information Processing Systems,
+abs/2305.03111:42330-42357, 4 May 2023. doi: 10.48550/arXiv.2305.03111.
+
+M Pourreza and Davood Rafiei. DIN-SQL: Decomposed in-context learning of text-to-SQL
+with self-correction. Advances in neural information processing systems, abs/2304.11015,
+21 April 2023. ISSN 1049-5258. doi: 10.48550 /arXiv.2304.11015.
+
+Mohammadreza Pourreza, Hailong Li, Ruoxi Sun, Yeounoh Chung, Shayan Talaei, Gau-
+rav Tarlok Kakkar, Yu Gan, Amin Saberi, Fatma Ozcan, and Sercan O Arik. CHASE-SQL:
+Multi-path reasoning and preference optimized candidate selection in text-to-SQL. arXiv
+[cs.LG], 2 October 2024.
+
+Shayan Talaei, Mohammadreza Pourreza, Yu-Chen Chang, Azalia Mirhoseini, and Amin
+Saberi. CHESS: Contextual harnessing for efficient SQL synthesis. arXiv [cs.LG], 27 May
+2024.
+
+Bing Wang, Changyu Ren, Jian Yang, Xinnian Liang, Jiaqi Bai, Linzheng Chai, Zhao Yan,
+Qian-Wen Zhang, Di Yin, Xing Sun, and Zhoujun Li. MAC-SQL: A multi-agent collabora-
+tive framework for text-to-SQL. arXiv [cs.CL], 18 December 2023.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed Chi,
+Quoc Le, and Denny Zhou. Chain-of-thought prompting elicits reasoning in large lan-
+guage models. arXiv [cs.CL], 28 January 2022.
+
+Hanchen Xia, Feng Jiang, Naihao Deng, Cunxiang Wang, Guojiang Zhao, Rada Mihalcea,
+and Yue Zhang. 7°: “this is my SQL, are you with me?” a consensus-based multi-agent
+system for text-to-SQL tasks. arXiv [cs.CL], 19 February 2024.
+
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and
+Yuan Cao. ReAct: Synergizing reasoning and acting in language models. In The Eleventh
+International Conference on Learning Representations, 2023.
+
+A Appendix
+
+A.1_ Agentic Workflows in Text2SQL
+
+We extract and generalize common agent modules (e.g., keyword extraction, column selec-
+tion, SOL generation, self-repair) and workflow patterns such as sequential and parallel that
+have emerged as effective building blocks. Table 1 and 2 summarize agentic workflows for
+NL2SQL tasks from previous literature.
+
+A.2. Workflow Diagrams
+
+Figure 4 depicts the diagrams of three workflows in the study. The other workflow that uses
+parallel scaling technique runs five threads of the DC+3-shot. It selects the final answer via
+majority vote. If the candidates have no majority, a Candidate Selector agent chooses the
+final answer.
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+Workflow Reference Symbol Definition
+CS >QC>SW>SR DIN-SQL ha rsd lig a ad
+
+olumn Selector
+: S ow > EX> SR ares ES Example Selection
+
+a ER Entity Retrieval
+
+(SW > FR > SR) || «1 R3 Qc Query Classifier / Decomposer
+CS >QC>SW>SR>FR DEA-SQL sw oa (task splitting)
+(SW > EX) I -n > CP SQLPrompt EX Executor (runs SQL)
+CS > (SW | SW )>CP MCS-SOL SR Self-Refiner (LLM error correction)
+CS > DC>(SW>SR || SW>SR ||...) MAG-SQL FR seg flesd efi
+KE > ER > CS > SW > EX > SR CHESS P Candidate Picker / Selector
+KE > ER > (SW > EX > SR |...)n > CP CHASE-SQL | Indicates parallel execution
+
+CS > CE > (SW || SW) > SR> CP ReFoRCE () Groups parallel branches in workflow
+
+Table 1: High-Level Workflows for LLM/Agent- Table 2: Standardized Symbol Defi-
+Based Text-to-SQL Methods. Bold symbols indicate Nitions and Notation for Workflow
+components powered by LLMs. Mapping.
+
+User question
+
+( User question )
+
+f
+
+}
+
+(sw ) a ER ) (CR )
+| execution error or empty ; ' | :
+
+( User question )
+
+@
+
+-
+
+execution error or empty // BuSress syntax correct refinement need _
+(SR ) ( End ) (FP) > ao
+NY Ne = i \
+execution error or empty, / success
+looks good «1 ae
+(sR) (End )
+End
+
+Figure 4: Workflows diagrams of ReAct: SW > EX <> SR (left), Verification: SW > EX <> SR
+<> FP (middle), Retrieval-based: KE > (ER || CR) > SW > EX <> SR (right) .
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+A.3 Experiment Result Details
+
+Besides Soft-F1 score, we also report other commonly used metrics in Text2SQL tasks.
+
+Execution Accuracy (EX). The percentage of generated SQL queries that produce results
+identical to those of the ground truth on the target database Li et al. (2023). This is one of the
+most commonly used metrics in Text2SQL tasks. We use it as the primary accuracy metric.
+Other performance metrics are in Appendix A.3.
+
+Reward-based Valid Efficiency Score (R-VES). Quantifying how effectively models gener-
+ate SOL queries that produce correct and optimized results. As a more stable and reliable
+version version of VES, reward point based on the time ratio in R-VES.
+
+The results of EX and R-VES are visualized in Figure 5.
+
+Detailed experiment results are reported in Table 3. The accuracy and performance results
+are visualized in Figure 6 and Figure 7
+
+Workflow Model EX Soft-F1 R-VES' Inf(s) PT (k) CT (k)
+Baseline CoT+ReAct Gemini1.5 Flash 54.6 57.51 54.68 3.95 5.36 0.08
+Baseline CoT+ReAct Gemini 2.5 Flash 62.8 65.75 65.74 7.19 5.18 0.26
+Baseline CoT+ReAct GPT-40 55.0 61.07 53.27 14.15 4.61 0.57
+Baseline CoT+ReAct o04-mini 51.6 56.27 53.72 11.45 4.60 0.74
+DC+ReAct Gemini1.5 Flash 59.8 62.47 57.18 2.25 5.80 0.08
+DC+ReAct Gemini 2.5 Flash 64.8 66.65 67.01 10.95 4.39 0.15
+DC+ReAct GPT-40 59.6 64.48 62.13 14.77 4.96 0.58
+DC+ReAct o04-mini 61.0 64.73 63.00 12.65 4.47 1.02
+DC 3-shot+ReAct Gemini1.5 Flash 59.8 62.58 61.86 4.12 9.72 0.15
+DC 3-shot+ReAct Gemini 2.5 Flash 65.0 68.12 64.26 14.61 8.42 0.19
+DC 3-shot+ReAct GPT-40 60.0 64.44 63.07 18.08 6.71 0.50
+DC 3-shot+ReAct 04-mini 61.4 65.53 62.02 17.12 5.02 1.35
+DC 3-shotx5 Parallel Gemini1.5 Flash 59.4 63.31 59.76 5.93 10.97 0.12
+DC 3-shotx5 Parallel Gemini 2.5 Flash 63.0 66.00 63.06 17.24 9.53 0.12
+DC 3-shotx5 Parallel GPT-40 59.2 64.91 57.73 17.94 7.94 0.62
+DC 3-shotx5 Parallel o04-mini 62.6 66.15 61.38 15.57 9.87 1.08
+DC 3-shot+Verification Geminil.5 Flash 59.2 63.24 58.27 10.92 12.23 0.34
+DC 3-shot+Verification Gemini2.5 Flash 64.8 68.28 65.24 20.02 10.39 1.09
+DC 3-shot+Verification GPT-40 56.6 60.68 59.42 28.16 8.47 0.86
+DC 3-shot+Verification 04-mini 59.4 63.56 57.00 26.68 7.85 1.98
+Retrieval+DC 3-shot Gemini1.5 Flash 59.6 62.93 60.24 8.28 9.22 0.11
+Retrieval+DC 3-shot Gemini 2.5 Flash 64.0 67.32 61.69 18.97 9.39 0.76
+Retrieval+DC 3-shot GPT-40 57.8 62.74 57.56 33.28 8.71 0.72
+Retrieval+DC 3-shot o04-mini 60.6 64.58 57.82 18.16 8.61 1.67
+Table 3: Experiment Results
+Execution Accuracy R-VES
+—®- Gemini 1.5 Flash
+64.8 65.0 oo ors 610 66.6 —® Gemini 2.5 Flash
+
+65.0 oe 64.0
+
+65.0
+
+R-VES
+
+Execution Accuracy
+
+—®- Gemini 1.5 Flash
+=—@ Gemini 2.5 Flash
+—® GPT-40
+50.0 —® 04-mini
+
+Baseline DC+ReAct DC 3-shot DC 3-shot DC 3-shot Retrieval
+CoT+ReAct +ReAct x5 Parallelt+Verification-DC 3-shot
+Test-Time Scaling Strategy
+
+Baseline DC+ReAct DC 3-shot DC 3-shot DC 3-shot Retrieval
+CoT+ReAct +ReAct x5 Parallelt+ Verification DC 3-shot
+Test-Time Scaling Strategy
+
+Figure 5: Execution Accuracy and R-VES Score
+
+
+Published at the Workshop on Test-time Scaling and Reasoning Models at COLM 2025
+
+Soft F1 Score v.s. Average Inference Time
+
+@ Gemini 1.5 Flash
+sent @ Gemini 2.5 Flash
+be pWerification ee Go
+© o4-mini
+68 DC 3-shot Retrieval Baseline
+x5 Parallel +DC 3-shot CoT+ReAct
+@ HBB oc+react
+DC+ReAct DC 3-shot
+5 DC 3-shot +ReAct
+Baseline x5 Parallel DC3-shot
+CoT+ReAct DC 3-s. DC 3-shot x5 Parallel
+§6 +ReAct ferification DC 3-shot
+(2) DC 3-shot +Verification
+Dc t afloat
+A erification Retrieval
+DC+ReA’ DC 3-shot Retigval " x5 Pavgilel DOCS Shot
+a DC+ReAct +ReActa, *PC 3-sho
+o DC 3-shot a A e
+= 64 Werification
+° 1C-9/shatcirieval
+o DC 3-shot arallebc 3-shot
++ Pes React @
+Lu +DC|3-shot
+pe”
+Baseline
+[e} CoT+ReAct
+n o
+60
+Baseline
+58 CoT+ReAct
+@
+Baseline
+CoT+ReAct
+@
+56
+3 10 15 20 25 30
+Average Inference Time (seconds)
+Figure 6: Soft-F1 Score by Average Inference Time
+Soft F1 Score v.s. Total Tokens
+© Gemini 1.5 Flash
+De 3-she @ Gemini 2.5 Flash
+DC 3-shot #Velifics o> Goran
++ReAct Vv © eenint
+68 Retriev; DC 3-shot Baseline
++DC 3- x5 Parallel CoT+ReAct
+HBB oct react
+DC+ReAct DC 3-shot
+pc hot +ReAct
+aline x5 Parallel DC 3-shot
+CoT+ReAct DC 3-shot x5 Parallel
+bag erification DC 3-shot
+Eshrat: +Verification
+ification ee Fettieval
+DC+ReAct +DC 3-shot
+o DC 3-shot
+= 64 +Verification
+° Retrieval | DC 3-shot
+o +DC 3-shat x5 Parallel
+DC+ReAct @ Grier
+et a Retrieval
+Ll +DC 3-shot
+pe”
+Baseline
+° CoT+ReAct
+” @
+60
+Baseline
+58 CoT+ReAct
+Baseline
+CoT+ReAct
+56
+5.0 75 10.0 12.5 15.0 17.5 20.0 22.5 25.0
+
+Total Tokens
+
+Figure 7: Soft-F1 Score by Average Token Usage (Prompt and Completion). DC 3-shot x5
+Parallel reports the token usage of final selected trace.

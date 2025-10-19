@@ -1,0 +1,1273 @@
+arX1v:2510.10815v1 [cs.AI] 12 Oct 2025
+
+Preprint
+
+DRIFT: DECOMPOSE, RETRIEVE, ILLUSTRATE, THEN
+FORMALIZE THEOREMS
+
+Meiru Zhang*', Philipp Borchert”, Milan Gritta*, Gerasimos Lampouras”
+‘Language Technology Lab, University of Cambridge, UK
+
+?Huawei Noah’s Ark Lab, London, UK
+
+mz468@cam.ac.uk, philipp.borchert@h-partners.com,
+milan.gritta@huawei.com, gerasimos.lampouras@huawei.com
+
+ABSTRACT
+
+Automating the formalization of mathematical statements for theorem proving re-
+mains a major challenge for Large Language Models (LLMs). LLMs struggle to
+identify and utilize the prerequisite mathematical knowledge and its correspond-
+ing formal representation in languages like Lean. Current retrieval-augmented
+autoformalization methods query external libraries using the informal statement
+directly, but overlook a fundamental limitation: informal mathematical statements
+are often complex and offer limited context on the underlying math concepts.
+To address this, we introduce DRIFT, a novel framework that enables LLMs to
+decompose informal mathematical statements into smaller, more tractable “sub-
+components”. This facilitates targeted retrieval of premises from mathematical
+libraries such as Mathlib. Additionally, DRIFT retrieves illustrative theorems to
+help models use premises more effectively in formalization tasks. We evaluate
+DRIFT across diverse benchmarks (ProofNet, ConNF, and MiniF2F-test) and find
+that it consistently improves premise retrieval, nearly doubling the F1 score com-
+pared to the DPR baseline on ProofNet. Notably, DRIFT demonstrates strong per-
+formance on the out-of-distribution ConNF benchmark, with BEq+ @ 10 improve-
+ments of 37.14% and 42.25% using GPT-4.1 and DeepSeek-V3.1, respectively.
+Our analysis shows that retrieval effectiveness in mathematical autoformalization
+depends heavily on model-specific knowledge boundaries, highlighting the need
+for adaptive retrieval strategies aligned with each model’s capabilities.
+
+1 INTRODUCTION
+
+Autoformalization is formulated as a translation task that aims to translate natural language math-
+ematical descriptions into machine-verifiable statements written in formal languages, such as
+Coq |1997), Isabelle [1994), and Lean (2015). Previous
+work has shown that accurate autoformalization is a critical step towards developing automated the-
+orem proving systems 2025c), and
+ultimately assist mathematicians in new discoveries (Gouézel & Shchur| :
+Despite recent progress of Large Language Models (LLMs) in informal mathematical reasoning
+(2025), formal reasoning presents distinct
+challenges. The strict syntax and necessity for precise alignment between informal concepts and
+formal definitions mean that even powerful pretrained models often fail at autoformalization tasks
+
+off-the-shelf 2025).
+
+Although synthetic data generation could enable the fine-tuning of LLMs for autoformaliza-
+
+ton 2024), the knowledge
+cut-off issue raised by updating formal libraries like Mathlib (Mathlib Community| makes
+finetuned models prone to hallucinating non-existent formal objects that have been renamed, reor-
+ganized or deprecated (2025). Early retrieval-augmented methods addressed this by
+retrieving similar theorems from external libraries to provide useful syntactic structure and com-
+positional examples. However, their practical utility as exemplars has been limited by the retrieval
+
+“Work conducted during an internship at Huawei Noah’s Ark Lab, London.
+
+
+Preprint
+
+Informal Statement (IF)
+
+Consider a prime $p$ of the form $4 t+3$. Show that $a$ is a primitive root modulo $p$ iff $-a$ has order $(p-1) / 25.
+
+Q,:A prime number p is ..., formally expressed in ' Ss \ PNat Prime Lee : {Formalization
+Leanasp: . ' ' : .
+
+B ! ! n) = Instruction}
+Q,: A primitive root modulo p is ..., in Lean using ss! = (Int. castRingHom
+..., Which asserts that ... , primitiveRoots (Zmod§ p)) ..
+
+Premise Set
+Q,; : The negation -a in modular arithmetic... ring t }
+
+mt i
+
+cA mt
+
+ow mt
+
+et wt
+
+Ce wt
+
+és !| Theorem 2 .. {a : i ae rT
+
+structure of ZMod p oe '! zmod lp} (ha: a BS
+Q,: ... -a has order (p-1)/2 means ... expressed as i # 8) torderof @a |
+
+i uw
+
+is mt
+
+i it
+
+i i
+
+ee it
+
+i i
+
+orderOf (-a : (ZMod p) ... pot {Theorem Set}
+
+Theorem 3... {p :
+N+ } :PNat.Prime§
+p> 1 <.p....
+
+{Informal Statement}
+
+Q,: The multiplicative order of an element a ...,
+using orderOf a in (ZMod p)...
+
+ie
+
++S orderOf
+
+ae Formalize
+/ Theorems
+
+Formal Statement (FS)
+
+theorem Ireland-Rosen.exercise_4 5 {p t : N} (hp@ : p.Prime) (hp1 : p = 4*t + 3) (a: ZMod p) :
+p @ ((-a) * ((p-1)/2) = 1 AV (k : N), k < (p-1)/2 > (-a)*k # 1) := sorry
+
+Figure 1: An overview of the DRIFT framework. Given an informal statement, Given an informal
+statement, DRIFT operates in four stages. © Decompose: An LLM breaks down the statement into
+atomic, concept-focused sub-queries (Q) ($3. Ip. @ Retrieve: For each sub-query, a dense retriever
+identifies foundational dependent premises from a formal library (3.2). ® Illustrate: A greedy
+algorithm selects a small set of theorems that demonstrate the practical usage of these retrieved
+premises ($3.3). ® Formalize Theorems: Finally, conditioned on all retrieved context, an LLM
+synthesizes the final formal statement (§3.4).
+
+methods used to find them. These methods often lack task-specific training data and rely on general-
+purpose techniques like keyword searching (Agrawal et al.| [2022), k-NN (Azerbayev et al.|/2023),
+or pretrained dense retrievers 2024). (2025) introduced dependency retrieval
+task and developed the RAutoformalizer (RAuto) framework. Similar to the premise selection for
+proof generation (2023), this paradigm enables the training of specialized retrievers to
+identify the exact definitions that formal statements require. However, this new approach created
+a key trade-off: focusing on individual components meant losing the valuable context provided by
+full theorem statements. Based on this, we identify two main limitations in the current approach
+to retrieval-augmented autoformalization: Informal statements are often dense and multifaceted.
+This underlying complexity of queries makes them suboptimal as direct queries for retrieving the
+precise, atomic definitions required for formalization. Additionally, even when the correct formal
+definitions are retrieved, models often lack the knowledge of contextual usage required to correctly
+structure and integrate them into the formal statement.
+
+In information retrieval, query enhancement techniques like query expansion (Chan et al.||2024),
+pseudo-document generation 2023), and neural query rewriting (Wang et al.| [2025)
+
+have demonstrated effectiveness of reformulating queries to provide more semantic information.
+Query decomposition has proven particularly useful for multi-hop question answering, as it matches
+the granularity of the dense query statements with the indexed documents (2025).
+In addition to retrieving correct premises, providing rich context like exemplar proofs can guide
+proof generation effectively (2025). De-
+spite advances in adjacent domains, these techniques have not yet been systematically applied to
+dependency retrieval for autoformalization, which still relies on monolithic queries and provides
+context-free definitions.
+
+We propose DRIFT, a novel framework depicted in Figure}1| that enhances retrieval-augmented
+autoformalization by adapting query decomposition and context augmentation to address unique
+challenges of theorem autoformalization. To address complex queries, we adapt query decomposi-
+tion to break down complex informal statements into a series of simpler, atomic sub-queries. Each
+sub-query targets a single mathematical concept, transforming a multifaceted retrieval problem into
+focused, precise searches. Second, to illustrate the usage of the dependencies, we contextualize the
+
+
+Preprint
+
+retrieved definitions with demonstrative theorems, giving the model concrete examples of syntax
+and application patterns.
+
+Contributions. 1) We introduce DRIFT] (Decompose, Retrieve, Illustrate, then Formalize
+Theorems), a decomposition-driven retrieval augmented formalization framework that breaks down
+informal mathematical statements into atomic sub-queries and contextualizes retrieved premises
+with demonstrative theorems, transforming monolithic retrieval into a process aligned with the de-
+pendency structure of formal mathematics. 2) Our experiments establish new state-of-the-art in
+dependency retrieval and autoformalization on ProofNet and ConNF across models, with excep-
+tional performance on out-of-distribution ConNF benchmark. 3) Through systematic analysis, we
+establish that the utility of retrieved dependencies is conditioned on the gap between a model’s para-
+metric knowledge and the statement complexity. These insights reveal critical design considerations
+for retrieval-augmented systems and point toward the necessity of adaptive strategies that can assess
+when external knowledge genuinely complements model capabilities.
+
+2 RELATED WORK
+
+Retrieval-augmented Autoformalization. Early retrieval-augmented autoformalization methods
+retrieved similar theorems as few-shot examples: ProofNet employs k-
+NN search, while MS-RAG (Zhang et al.| uses informal-to-informal retrieval with iterative
+refinement. LTRAG retrieves thought-guided theorem pairs for neuro-symbolic
+formalization. (2025) established this paradigm by introducing “dependency retrieval’,
+a premise selection task specialized for autoformalization: given an informal statement, retrieve
+the precise set of formal objects and definitions Poraciex that are required for its autoformalization
+from a library D (e.g. Mathlib). While RAutoformalizer (RAuto) 2025) demonstrated
+improvements over non-retrieval methods, evaluation revealed a significant gap compared to oracle
+systems with ground-truth dependencies. CRANF attempts conceptual mapping
+between abstraction levels. Critically, all existing approaches treat complex statements as monolithic
+queries, failing to identify distinct mathematical concepts within them.
+
+Query Decomposition and Enhancement. Query enhancement has proven effective across re-
+trieval tasks. Query2Doc and a) Cea Doe generate pseudo-
+documents to expand semantic coverage. SemanticSearch (Gao et al.||2024) augment the informal
+statement by prompting an LLM to translate the query into a detailed statement with both informal
+and formal expressions. However, they only evaluated with similar theorem retrieval but not on the
+downstream formalization. More relevant to our work, query decomposition has shown success in
+
+multi-hop question answering 2025), where breaking complex questions into sub-
+queries improves retrieval of distinct information aspects. (2023) and (2022)
+
+applied similar decompositions to theorem proving, showing the effectiveness of divide and con-
+quer in formal math. Despite these successes, no prior work has applied decomposition to informal
+mathematical statements for autoformalization.
+
+3. METHODOLOGY
+
+We introduce DRIFT (Decompose, Retrieve, Illustrate, then Formalize Theorems), a novel four-
+stage method designed to address the two main limitations of previous retrieval-augmented formal-
+ization methods, 1) handling the complexity of informal statements and 2) the lack of demonstrative
+examples for retrieved formal objects. As a first step, an LLM decomposes the informal statement
+into a set of smaller, granular sub-queries (3-1). These queries then guide the retrieval of dependent
+premises from a formal library such as Mathlib ($3.2). In a subsequent, bottom-up illustration step,
+we find theorems that utilize the retrieved premises, providing in-context demonstrations of their
+application ($3.3). Finally, the LLM formalizes the original statement, conditioned on all retrieved
+premises and theorems (§3.4). This process is visualized in Figure[I]
+
+'The code and models are available atthttps: //github.com/huawei-noah/DRIFT
+
+
+Preprint
+
+3.1 DECOMPOSE
+
+Standard retrieval methods often treat complex informal statements as monolithic queries and simply
+embed the entire statement. This approach disregards the rich semantic structure within a statement,
+which may contain multiple distinct mathematical concepts. Their complexity means that a state-
+ment could be under-specified, ambiguous and/or simply too information-dense to be used as is.
+Compressing the entire statement’s meaning into a single dense vector creates a representational
+bottleneck, risking the loss of nuanced details and focusing the retrieval on only the most salient
+concepts. We hypothesize that by decomposing an informal statement into its constituent concepts,
+we can perform a more granular and accurate retrieval for each concept.
+
+To this end, DRIFT begins with a Decompose module (panel © in Figure[I), which is implemented as
+an LLM tasked with breaking down an informal statement (J F’) into a set of structured sub-queries,
+Q, see Equation While the decomposer could be a finetuned model, we leverage in-context
+learning (ICL) with off-the-shelf LLMs in this study.
+
+Decomposer(IF’) > Q = {(qi, li) }Py (1)
+Each sub-query Q; = (qi, I) is designed to isolate a single mathematical concept. As illustrated
+in Figure[I| the component gq; is a natural language phrase describing the concept (e.g., “A prime
+number p of the form 4t + 3 is a prime that leaves remainder 3 when divided by 4”) while I; is a
+predicted formal representation for that concept (e.g., “p : N with the conditions Nat.Prime p and p
+% 4 = 3, where % denotes the modulo operation on natural numbers.”). Appending this predicted
+formal name serves a dual purpose. First, it probes the LLM’s parametric knowledge, providing a
+syntactic “anchor” for the concept. Second, it allows the retriever to jointly leverage the semantics
+of the natural language phrase q; and the syntactic cues from [; to identify the correct premise even
+in the presence of minor inaccuracies in the predicted formal representations.
+
+3.2 RETRIEVE
+
+The Retrieve module is designed to identify dependent premises from the library that correspond
+to the concepts isolated in each sub-query. This one-to-one mapping is visualized in the @ panel of
+Figure [I] which shows each sub-query (Q;) being linked to a formal object (e.g., PNat . Prime).
+To accomplish this, we implement a dense passage retriever using a BGE-
+M3 (Chen et al.||2024) encoder (9), finetuned on the dependency prediction task as introduced
+by (2025). This training objective aligns the formal dependencies with their informal
+statement, thereby making semantic similarity a strong proxy for logical dependency. We achieve
+this by encoding queries and formal library objects into a shared d-dimensional embedding space.
+The vector representations p = E9(p) for all formal objects p € D are pre-computed in an offline
+step and stored in an efficient search index. At inference, each sub-query is encoded into a vector
+qi = Eo(Q;) and the closest dependent premise p; is identified by finding the library object that
+maximizes the cosine similarity score, ¢ with the query vector. This is formally defined as:
+
+pi = argmax ((qi, p)) (2)
+pED
+
+where ¢(q;,P) = Tail: The final set of dependent premises, Rprirr, is formed by aggregating
+the top-1 result from each sub-query and removing duplicates: Rpgier = U;_, {pi}-
+
+3.3. ILLUSTRATE
+
+Retrieving useful formal definitions is a necessary first step, however, it is not sufficient for success-
+ful autoformalization. For instance, a retrieved definition like def ZMod : N > Type tells
+the model what the concept is, but provides no further guidance on its practical application such as
+the syntax for declaring a variable of that type(a : ZMod jp). This gap between definition and
+usage is a primary source of syntactic and structural errors in LLM-generated formal statements.
+
+The Illustrate module is designed to bridge this gap by providing examples of formal object usage,
+visualized in Figure[I] (panel @). Given a premise like ZMod from the “Retrieve” step, the module
+selects illustrative theorems, e.g. “Theorem 2” which demonstrates the correct application of ZMod.
+
+
+Preprint
+
+The module takes the set of retrieved premises 7pgirr, and a budget m, as input, and outputs a small
+set of illustrative theorems 7, where |7| < m. The selection process is a greedy algorithm designed
+to maximize the coverage of the input premises Rppirr as follows. First, we compile a candidate set
+Teana Of all theorems in library D that utilize at least one of the retrieved premises Rppirr-
+
+In order to ensure relevance and provide a deterministic tie-breaker, we pre-sort this candidate set
+by the semantic similarity of each theorem’s informal statement I Fignq to the original informal
+statement Jf’. The cosine similarity is computed using vectors from the same encoder Ey as the
+retrieval stage: pre_sort(Teana) = $(Eo(1Feana), Eo (LF).
+
+The final set of illustrative theorems 7 is built iteratively. The process begins by initializing an
+empty set of selected theorems 7p = @ and an empty set of covered premises Peoy,o = 0. At each
+
+step 7 = 1,...,m, we select the theorem ¢; that provides the maximal marginal gain by including
+the most new premises in 2prirr Not previously covered:
+t; = argmax |P(t) M (Roper \ Peov,j—1)| (3)
+
+t€Teand \\T 5-1
+
+where P(t) is the set of premises used in theorem t. After selecting t;, the sets are updated for the
+next iteration: 7; = 7j~-1 U {t;} and Poov,j = Peov,j—1 U (P(t; ) A Rover). The process terminates
+when either the budget of m theorems is reached or when no remaining candidate theorem can offer
+additional coverage (i.e., the marginal gain is zero). The final set 7 = 7; from the last iteration j.
+
+3.4 FORMALIZE THEOREMS
+
+The final DRIFT step is Formalize Theorems, shown in panel ® of Figure[I] The formalizer assem-
+bles the previously gathered definitions and theorem demonstrations into a comprehensive prompt
+C and generates the final formal statement. The formalization module is designed to be flexible and
+can be implemented with either a finetuned model or a general-purpose LLM guided with ICL. The
+formalizer compiles information in the following logical order: C = Z ® Rpgirr BT & IF, where
+® denotes the concatenation operator, Z is a formalization instruction (details in Section [A.3.2),
+Roprirr are the retrieved premises, 7 are the illustrative theorems and JF is the original informal
+statement. Conditioned on this comprehensive prompt, the formalizer then generates the final output
+of the DRIFT framework, the formal statement FS = Formalizer(C).
+
+4 EXPERIMENTAL SETUP
+
+4.1 BENCHMARKS
+
+We evaluate DRIFT on three distinct autoformalization benchmarks to test its in-distribution, self-
+contained and out-of-distribution performance. While the experiments are conducted in Lean, our
+framework is language-agnostic and adaptable to other formal systems with structured libraries.
+
+ProofNet (In-Distribution). We use the ProofNet benchmark (Azerbayev et al.) |2023) for in-
+
+distribution evaluation. Its 374 theorems, sourced from undergraduate mathematics textbooks, are
+integrated with the Mathlib library and require an average of 3.39 dependent premises from over
+243k formal objects (including 139k theorems). This benchmark tests the framework’s primary
+function, which is to effectively retrieve and utilize dependent premises with demonstration from a
+large-scale, in-distribution knowledge base.
+
+MiniF2F (Self-Contained). We use the MiniF2F-test set to evaluate the frame-
+work on self-contained problems. This benchmark consists of 224 Olympiad-style theorems with a
+notably low average of just 0.43 dependencies from MathlibP| MiniF2F-test serves as a boundary
+condition, testing the model’s core formalization capabilities and its robustness against potentially
+distracting context when retrieval is not strictly necessary.
+
+ConNF (Out-of-Distribution). The OOD challenge refers to evaluation scenarios where neither the
+retrieval model nor the formalization model has been exposed to the formal objects used in the test
+
+?We removed duplicate and low-quality pairs that do not compile with our Lean version (4.18.0).
+
+
+Preprint
+
+datal] We therefore evaluate on ConNF, a benchmark curated by (2025) through topolog-
+ical informalization to test OOD generalization. This benchmark is based on the con-nf library
+
+and is not integrated with Mathlib}* It formalizes a consistency proof for Quine’s New Founda-
+tions (Quine|/1951), established by and contains 961 research-level theo-
+rems requiring an average of 3.92 premises from its distinct library of 1,348 formal objects. ConNF
+provides a rigorous test of DRIFT’s ability to generalize to a novel mathematical domain
+
+eta. 2024}
+
+4.2 BASELINES
+
+We evaluate our proposed framework against three key baselines representing zero-shot, state-of-
+the-art retrieval, and oracle-level performance. We note that concurrent work, CRAMF
+(2025), was not publicly available for comparison at the time of our experiments. The no retrieval
+(zero-shot) baseline establishes a performance floor. The autoformalization model receives only
+the informal statement as input, without access to any retrieved context. DPR (RAuto) repre-
+sents the current state-of-the-art. We compare our method to the dependency retrieval module from
+the RAutoformalizer framework (2025), which is a finetuned dense passage retriever
+(DPR) The top-5 retrieved premises are provided to the formalizer model
+as augmented context. The oracle* (retrieval) setting provides an approximate upper bound for
+retrieval. The model is provided with ground-truth dependencies (Poraciex) for each problem, sim-
+ulating a ’perfect’ retriever, as defined by|Liu et al.|(2025). We mark this setting with an asterisk (*)
+to denote that this oracle is in fact imperfect because the provided dependencies are not necessarily
+optimal or exhaustive for formalization and do not necessarily lead to the best autoformalization
+performance as we discuss in Section [5] i.e. some of our settings are actually outperforming this
+imperfect oracle.
+
+4.3. IMPLEMENTATION DETAILS
+
+In this study, we evaluate DRIFT as a lightweight prompting strategy, leveraging the in-context
+
+learning capabilities of instruction-following models such as DeepSeek-3.1 (DeepSeek-AI} |2024),
+GPT-4.1 (OpenAI]} |2025), and Claude-Opus-4 (Anthropic||2025) to demonstrate DRIFT’s broad ap-
+
+plicability without introducing task-specific biases from finetuning. While we use the same model
+for both decomposition and formalization for consistency, these modules are independent and could
+be replaced with specialized finetuned models.
+
+Decompose. We construct a few-shot prompt using five expertly-verified examples from the Put-
+nam benchmark (Tsoukalas et al.! to decompose the informal statements; full details in Sec-
+tion[A.1.Tand Section Each decomposed sub-query consists of a natural language description
+of a concept and its formal representation retrieved from parametric knowledge, as detailed in Sec-
+tionB.T] Through this, we instruct the LLMs to decompose problems.
+
+Retrieve. The retriever model is a dense passage retrieve i°| (DPR) finetuned on Mathlib data to map
+informal queries to their formal dependencies (Liu et al.|/2025). We pre-compute embeddings for
+all formal declarations in the relevant libraries (Mathlib for ProofNet and MiniF2F-test; con-nf
+for ConNF). This training setup establishes ConNF as an OOD benchmark for the retrieval module.
+For the baseline, we retrieve the top-5 premises based on the entire informal statement.
+
+Illustrate. In order to demonstrate premise usage in real contexts, we select up tom = 3 exemplar
+theorems using the greedy coverage algorithm described in Section [3.3]
+
+Formalize Theorems. As described in Section [3.4] the formalization prompt combines the original
+informal statement with the retrieved premises and illustrative theorems. Each premise is presented
+
+>The knowledge cutoff dates of the models we used are June 2024, March 2025 and July 2025, for GPT-4.1,
+Claude-Opus-4, and DeepSeek-3.1, respectively. Though there is a risk of exposure to the formalizer which
+cannot be controlled or confirmed, from our zero-shot results on ConNF, it is hypothesised that the models have
+not been extensively trained on this benchmark.
+
+“The con-nf library is available at/https : //github.com/leanprover—community/con-nf|
+
+>Model available at/https: / /huggingface.co/purewhite42/dependency_retriever_f
+
+*Implementation details in Section
+
+
+
+Preprint
+
+Benchmark Decomposer Precision Recall Fl
+- 11.55 17.03 13.77
+ProofNet Claude-Opus-4 23.02 34.70 27.68
+GPT-4.1 21.71 34.46 26.64
+DeepSeek-3.1 24.38 30.28 27.01
+- 0.36 4.12 0.66
+wo Claude-Opus-4 2.08 23.71 3.83
+MiniF2F-test GPT-4.1 1.42 15.46 2.60
+DeepSeek-3.1 0.98 9.28 1.78
+- 25.12 32.06 28.17
+Claude-Opus-4 30.97 41.01 35.29
+Cone GPT-4.1 31.62 40.64 35.56
+DeepSeek-3.1 34.67 39.39 36.88
+
+Table 1: A comparison of dependency retrieval performance (%) between DRIFT and a no-
+decomposition baseline (“-’’). The baseline queries the retriever directly with the original informal
+statement. Best results are in bold.
+
+with its full name, formal declaration, and source code. Each illustrative theorem is included as a
+pair of its informal and formal statements. This demonstrates both the informal-to-formal alignment
+and the concrete application of the premises within a theorem instance. To evaluate pass@k, we
+generate 10 formalizations for each problem. The prompt context, including the retrieved premises
+and the illustrative theorems, remains consistent across all 10 runs.
+
+4.4 EVALUATION METRICS
+
+We ablate the evaluation of DRIFT in two stages: a) the intrinsic performance of dependency retrieval
+plus the selection of illustrative theorems, and b) the extrinsic performance of autoformalization.
+
+Intrinsic Dependency Retrieval. The effectiveness of the decomposition is measured by its impact
+on the dependency retrieval task as the quality of the decomposed sub-queries directly impacts the
+relevance of the retrieved premises. We measure the quality of the retrieved premises against the
+oracle* dependencies using Precision, Recall, and their harmonic mean, F1-score.
+
+Formalization Correctness. For extrinsic evaluation, we use Typecheck (TC) and BEq+. Type-
+check measures syntactic correctness, indicating the percentage of the generated statements that are
+valid and can pass the compiler’s type checker (Lu et al.
+2025). For semantic correctness, we use BEq+ (Poiroux et al.||2025), a symbolic metric that mea-
+sures the logical equivalence between a predicted formal statement and the ground-truth reference
+by using deterministic proof tactics to bidirectionally prove that each statement can be transformed
+into the other. For each metric, we assess performance using pass@ 1 and pass@ 10, where pass @k
+indicates that at least one of / independent generations was successful.
+
+5 RESULTS AND DISCUSSION
+
+5.1 DEPENDENCY RETRIEVAL
+
+We evaluate the effectiveness of the Decompose and Retrieve modules by looking at their impact
+on intrinsic performance in dependency retrieval. As detailed in Table[i] we compare DRIFT against
+a no-decomposition baseline that uses the same dense retriever but with the original informal state-
+ments as queries. This provides a direct comparison to DRIFT, which retrieves a similar number of
+premises by taking the union of the top-1 results for each of the 5.21 to 6.42 sub-queries generated
+by the Decompose module. The results show that decomposition provides a substantial perfor-
+mance improvement in both precision and recall. Averaged across all decomposer models, DRIFT
+achieves an absolute improvement of 13.34, 2.08, and 7.74 points over the baseline F1 score on
+the ProofNet, MiniF2F-test, and ConNF benchmarks, respectively. Regarding the choice of decom-
+
+
+Preprint
+
+Dataset Formalizer Retrieval TC@1 BEq+@1 TC@10 BEq+@10
+
+Oracle* 58.82 20.32 79.68 27.54
+GPT-4.1 Zero-shot 34.22 9.36 51.60 13.37
+
+: DPR (RAuto) 51.60(+17.38) 14.71(+ 5.35) 73.53(+21.93) 19.25(+ 5.88)
+
+ProofNet DRIFT 55.88(+21.66) 17.38(+ 8.02) 77.01(+25.41) 21.93(4+ 8.56)
+Oracle* 71.12 21.93 82.09 27.54
+DeepSeek-3.1 Zero-shot 60.43 15.51 71.93 20.32
+
+P , DPR (RAuto) 63.37(+ 2.94) 17.38(+ 1.87) 73.53(+ 1.60) 19.52(— 0.80)
+
+DRIFT 72.73(+12.30) 18.18(+ 2.67) 79.41(+ 7.48) 20.59(+ 0.27)
+Oracle* 75.45 23.66 89.29 30.36
+GPT-4.1 Zero-shot 69.64 23.21 84.82 28.12
+
+: DPR (RAuto) 77.23(+ 7.59) 24.55(+ 1.34) 92.41(+ 7.59) 32.14(+ 4.02)
+
+MiniF2F-test DRIFT 74.55(+ 4.91) 24.55(+ 1.34) 92.41(4+ 7.59) 29.02(+ 0.90)
+Oracle* 77.68 23.21 87.50 28.12
+DeepSeek-3.1 Zero-shot 76.34 22.77 87.50 27.23
+
+P “~~ DPR (RAuto) 75.89(— 0.45) 22.77(+ 0.00) 87.95(+ 0.45) 27.68(+ 0.45)
+
+DRIFT T4.11(— 2.23) 22.77(+ 0.00) 88.84(4+ 1.34) 24.55(— 2.68)
+Oracle* 60.46 48.28 75:23 58.90
+GPT-4.1 Zero-shot 7.28 4.47 11.45 6.76
+
+: DPR (RAuto) 24.56(+417.28) 15.19(+10.72) 31.95(+20.50) 20.08(+13.32)
+
+ConNF DRIFT 65.76(+58.48) 54.84(+50.37) 77.00(+65.55) 62.33(+55.57)
+Oracle* 57.34 44,22 71.28 55.15
+DeepSeek-3.1 Zero-shot 13.42 8.12 17.59 11.03
+
+P : DPR (RAuto) 21.96(+ 8.54) 12.90(+ 4.78) 28.20(+10.61) 17.07(4+ 6.04)
+
+DRIFT 60.67(+47.25) 46.72(+38.60) 71.18(+53.59) 54.21(+43.18)
+
+Table 2: Autoformalization performance on ProofNet, MiniF2F-test, and ConNF. Performance
+is measured by Typecheck (TC@k) and BEq+@k. We compare DRIFT against zero-shot, DPR
+(RAuto), and oracle* settings. Colored subscripts indicate improvement (blue) or decrease (red) rel-
+ative to zero-shot. All values are percentages (%), the best results (excluding the oracle*) are bold.
+
+poser, we observe that while Claude-Opus-4 achieves the highest Fl scores on ProofNet (27.68%)
+and MiniF2F-test (3.83%), the performance variation among the LLMs is marginal. Our findings
+indicate that frontier LLMs are largely interchangeable for this task, as the top-performing models
+have a maximum FI score difference of only 2.05% on any benchmark.
+
+The Illustrate module proves highly effective at selecting a concise set of theorems to demonstrate
+premise usage. Within a maximum of only three selected theorems (m = 3), the algorithm achieves
+a high average premise coverage rate of 74.59+4.80% across all the decomposers and benchmarks.
+
+5.2 FORMALIZATION
+
+On autoformalization, DRIFT consistently outperforms both the zero-shot baseline and the strong
+retrieval-augmented baseline DPR (RAuto) on ProofNet and ConNF benchmarks, both on Type-
+check and BEq+ with pass@1 and pass@ 10 (see Table [2). Specifically, on ProofNet, GPT-4.1 with
+DRIFT achieves a BEq+ pass @ 10 of 21.93%, a 2.74% improvement over DPR (RAuto). This trend
+holds across models in our main evaluation, demonstrating that our decomposition-driven approach
+provides more effective context for the formalization task. A key insight from our results is that
+while the frontier models we tested are all highly proficient and largely interchangeable as query
+decomposers, this parity does not extend to the final formalization step. For instance, DeepSeek-3.1
+generally outperforms GPT-4.1 in the zero-shot setting across all benchmarks, suggesting a stronger
+parametric knowledge for direct formalization. However, this trend reverses when retrieval is intro-
+duced, most significantly on the OOD ConNF benchmark. On ConNF, all models achieve low zero-
+shot BEq+ scores (<10%), confirming a severe knowledge gap. Retrieval substantially improves
+performance, where GPT-4.1 consistently outperforms DeepSeek-3.1 across all metrics with differ-
+ent retrieval strategies. DRIFT provides a particularly substantial improvement, increasing GPT-4.1’s
+
+
+Preprint
+
+Retrieval ProofNet MiniF2F-test ConNF
+TC@l1 BEq+@1 TC@1 BEq+@1 TC@1 BEq+@1
+DRIFT (GPT-4.1) 55.88 17.38 74.55 24.55 65.76 54.84
+w/o Illustrate 56.15 (+ 0.27) 14.17 (- 3.21) 76.34(4 1.79) 24.55(+0.00) 45.47 (-20.29) 35.90 (-18.94)
+w/o Decompose 50.80 (- 5.08) 13.64 (- 3.74) 76.34 (4 1.79) 26.34 (4 1.79) 59.63 (- 6.13) 46.72 (- 8.12)
+w/o Retrieval 34.22 (-21.66)  9.36(- 8.02) 69.64(- 4.91) 23.21(- 1.34) 7.28 (-58.48) 4.47 (-50.37)
+DRIFT (DeepSeek-3.1) 72.73 18.18 TAAL 2247 60.67 46.72
+w/o Illustrate 70.32 (- 2.41) 15.24(- 2.94) 77.68 (4 3.57) 21.43 (- 1.34) 41.31 (-19.36) 29.34 (-17.38)
+w/o Decompose 64.97 (- 7.76) 15.78 (- 2.40) 77.68 (+ 3.57) 20.98 (- 1.79) 50.36 (-10.31) 38.81 (- 7.91)
+w/o Retrieval 60.43 (-12.30) 15.51 (- 2.67) 76.34 (4 2.23) 22.77(40.00) 13.42 (-47.25) 8.12 (-38.60)
+
+Table 3: Ablation study of DRIFT using GPT-4.1 and DeepSeek-3.1 with pass@1. First, we remove
+the Illustrate module (premises retrieved with sub-queries provided in C), then the Decompose
+module (premises retrieved from base retriever provided in C), and finally all Retrieval components.
+Values in parentheses show relative performance (increase) or (decrease) compared to the full model.
+
+BEq@ 10 score by 55.57%, even surpasses the Oracle* baseline by 3.43%. We hypothesize this is
+because the Oracle* provides only necessary premises based on the reference statement, while the
+illustrative theorems selected with DRIFT provide crucial demonstrations of premise usage.
+
+On the in-distribution ProofNet benchmark, the results are more nuanced. GPT-4.1 surpasses
+DeepSeek-3.1 on BEq+@ 10 when using DRIFT. This pattern suggests that GPT-4.1 is more adept at
+in-context synthesis, integrating and reasoning over retrieved information to construct formal state-
+ments, especially in unfamiliar domains. The distinction suggests that the two stages of our pipeline
+rely on distinct LLM capabilities. Decomposition leverages natural language reasoning whereas
+formalization demands advanced formal reasoning.
+
+As we discussed in Section|4] the MiniF2F-test benchmark presents a distinct profile with an average
+of only 0.43 library dependencies. This limits the potential for retrieval-based improvements, as
+evidenced by the small gap between the zero-shot and Oracle* performance, e.g. a pass@ 10 gap of
+only 2.24% for GPT-4.1 and 0.89% for DeepSeek-3.1. Instead, this low-dependency regime reveals
+the models’ high sensitivity to the provided context, which can act as a distractor rather than an aid.
+
+5.3. ABLATION STUDY
+
+In order to isolate and measure the contribution of each component of DRIFT, we conducted a
+systematic ablation study (Table[3). As expected, removing the illustrative theorems (w/o Illustrate)
+significantly decreased the BEq+ score on ProofNet and ConNF, which confirms that demonstrative
+examples of premise usage are crucial for the formalization correctness beyond just the definitions
+of the formal objects. Intriguingly, additionally removing the Decompose module (w/o Decompose)
+does not further degrade performance and even leads to a slight recovery on ConNF and ProofNet in
+BEq+ score. We hypothesize this is because the baseline DPR retrieves a thematically homogeneous
+(though less precise) set of premises via single query retrieval, which may be less distracting than
+the precise but more diverse set retrieved via decomposition. This reveals a crucial synergy: the
+illustrative theorems act as a scaffold that helps the model navigate the diverse information from the
+decomposer.
+
+The complex interaction is further highlighted by the observations on MiniF2F-test, where remov-
+ing theorems improved Typecheck rate but reduced BEq+ scores that measures the logical correct-
+ness of the generated formal statement. This further supports the hypothesis that for the simpler,
+low-dependency problems in MiniF2F-test, adding more context can act as a distractor. Remov-
+ing external context improves syntactic validity but degrades logical correctness of the generated
+formal statements. This sensitivity strongly motivates the need for more dynamic and adaptive re-
+trieval strategies. Future work on agentic frameworks could selectively retrieve information, judge
+its utility and iterate based on the compiler feedback.
+
+
+Preprint
+
+6 CONCLUSION
+
+In this work, we introduced DRIFT, a framework that improves autoformalization by tackling two
+distinct challenges: the underlying complexity of queries and the lack of contextual usage. Our
+decomposition-driven retrieval addresses the former by breaking down the informal statement into
+sub-queries and conducting point-to-point retrieval of its formal dependencies. Concurrently, our
+theorem selector resolves the latter by providing illustrative examples to guide the utilization of
+retrieved premises in theorem instances. This dual approach substantially improves formaliza-
+tion correctness on complex and out-of-distribution benchmarks, demonstrating its effectiveness
+as a broadly generalizable and model-agnostic strategy. On simpler, low-dependency MiniF2F-test
+dataset, our method performs on-par with related methods. Our findings suggest future work to fo-
+cus on dynamic and adaptive retrieval strategies, as well as on agentic frameworks that iteratively
+refine attempts based on compiler feedback.
+
+REFERENCES
+
+Ayush Agrawal, Siddhartha Gadgil, Navin Goyal, Ashvni Narayanan, and Anand Tadipatri. To-
+wards a mathematics formalisation assistant using large language models. arXiv preprint
+arXiv:2211.07524, 2022.
+
+Janice Ahn, Rishu Verma, Renze Lou, Di Liu, Rui Zhang, and Wenpeng Yin. Large language models
+for mathematical reasoning: Progresses and challenges. In Proceedings of the 18th Conference
+of the European Chapter of the Association for Computational Linguistics: Student Research
+Workshop, pp. 225-237, 2024.
+
+Paul J. L. Ammann, Jonas Golde, and Alan Akbik. Question decomposition for retrieval-augmented
+generation. In Jin Zhao, Mingyang Wang, and Zhu Liu (eds.), Proceedings of the 63rd Annual
+Meeting of the Association for Computational Linguistics (Volume 4: Student Research Work-
+shop), pp. 497-507, Vienna, Austria, July 2025. Association for Computational Linguistics.
+
+Anthropic. Introducing claude 4. https://www.anthropic.com/news/claude-— 4) May
+2025. Accessed: September 24, 2025.
+
+Zhangir Azerbayev, Bartosz Piotrowski, Hailey Schoelkopf, Edward W. Ayers, Dragomir Radev,
+and Jeremy Avigad. Proofnet: Autoformalizing and formally proving undergraduate-level math-
+ematics, 2023.
+
+Anne Baanen, Matthew Robert Ballard, Johan Commelin, Bryan Gin-ge Chen, Michael Rothgang,
+and Damiano Testa. Growing mathlib: maintenance of a large scale mathematical library. arXiv
+preprint arXiv:2508.21593, 2025.
+
+Bruno Barras, Samuel Boutin, Cristina Cornes, Judicaél Courant, Jean-Christophe Filliatre, Eduardo
+Gimenez, Hugo Herbelin, Gerard Huet, Cesar Munoz, Chetan Murthy, et al. The Coq proof
+assistant reference manual: Version 6.1. PhD thesis, Inria, 1997.
+
+Chi-Min Chan, Chunpu Xu, Ruibin Yuan, Hongyin Luo, Wei Xue, Yike Guo, and Jie Fu. Rq-rag:
+Learning to refine queries for retrieval augmented generation. In First Conference on Language
+Modeling, 2024.
+
+Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, and Zheng Liu. Bge m3-embedding:
+Multi-lingual, multi-functionality, multi-granularity text embeddings through self-knowledge dis-
+tillation. arXiv preprint arXiv:2402.03216, 2024.
+
+Luoxin Chen, Jinming Gu, Liankai Huang, Wenhao Huang, Zhicheng Jiang, Allan Jie, Xiaoran Jin,
+Xing Jin, Chenggang Li, Kaijing Ma, et al. Seed-prover: Deep and broad reasoning for automated
+theorem proving. arXiv preprint arXiv:2507.23726, 2025.
+
+Leonardo De Moura, Soonho Kong, Jeremy Avigad, Floris Van Doorn, and Jakob von Raumer. The
+
+lean theorem prover (system description). In International Conference on Automated Deduction,
+pp. 378-388. Springer, 2015.
+
+10
+
+
+Preprint
+
+DeepSeek-AI. Deepseek-v3 technical report, 2024. URL https://arxiv.org/abs/2412.
+
+Guoxiong Gao, Haocheng Ju, Jiedong Jiang, Zihan Qin, and Bin Dong. A semantic search engine
+for mathlib4. In Findings of the Association for Computational Linguistics: EMNLP 2024, pp.
+8001-8013, 2024.
+
+Luyu Gao, Xueguang Ma, Jimmy Lin, and Jamie Callan. Precise zero-shot dense retrieval without
+relevance labels. In Proceedings of the 61st Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pp. 1762-1777, 2023.
+
+Sébastien Gouézel and Vladimir Shchur. A corrected quantitative version of the morse lemma.
+Journal of Functional Analysis, 277(4):1258—1268, 2019.
+
+Yuhang He, Jihai Zhang, Jianzhu Bao, Fangquan Lin, Cheng Yang, Bing Qin, Ruifeng Xu, and
+Wotao Yin. BC-prover: Backward chaining prover for formal theorem proving. In Yaser Al-
+Onaizan, Mohit Bansal, and Yun-Nung Chen (eds.), Proceedings of the 2024 Conference on Em-
+pirical Methods in Natural Language Processing, pp. 3059-3077, Miami, Florida, USA, Novem-
+ber 2024. Association for Computational Linguistics.
+
+M Randall Holmes and Sky Wilshaw. Nf is consistent. arXiv preprint arXiv: 1503.01406, 2015.
+
+Ruikang Hu, Shaoyu Lin, Yeliang Xiu, and Yongmei Liu. Ltrag: Enhancing autoformalization and
+self-refinement for logical reasoning with thought-guided rag. In Findings of the Association for
+Computational Linguistics: ACL 2025, pp. 2483-2493, 2025.
+
+Albert Q Jiang, Wenda Li, and Mateja Jamnik. Multilingual mathematical autoformalization. arXiv
+preprint arXiv:2311.03755, 2023.
+
+Albert Qiaochu Jiang, Sean Welleck, Jin Peng Zhou, Timothee Lacroix, Jiacheng Liu, Wenda Li,
+Mateja Jamnik, Guillaume Lample, and Yuhuai Wu. Draft, sketch, and prove: Guiding formal
+theorem provers with informal proofs. In The Eleventh International Conference on Learning
+Representations, 2022.
+
+Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi
+Chen, and Wen-tau Yih. Dense passage retrieval for open-domain question answering. In
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing
+(EMNLP), pp. 6769-6781, 2020.
+
+Joshua Ong Jun Leang, Giwon Hong, Wenda Li, and Shay B Cohen. Theorem prover as a judge
+for synthetic data generation. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mo-
+hammad Taher Pilehvar (eds.), Proceedings of the 63rd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pp. 29941-29977, Vienna, Austria, July
+2025. Association for Computational Linguistics. ISBN 979-8-89176-25 1-0.
+
+Haohan Lin, Zhiqing Sun, Sean Welleck, and Yiming Yang. Lean-star: Learning to interleave
+thinking and proving. In The Thirteenth International Conference on Learning Representations,
+2025a.
+
+Yong Lin, Shange Tang, Bohan Lyu, Jiayun Wu, Hongzhou Lin, Kaiyu Yang, Jia Li, Mengzhou Xia,
+Danqi Chen, Sanjeev Arora, et al. Goedel-prover: A frontier model for open-source automated
+theorem proving. arXiv preprint arXiv:2502.07640, 2025b.
+
+Yong Lin, Shange Tang, Bohan Lyu, Ziran Yang, Jui-Hui Chung, Haoyu Zhao, Lai Jiang, Yihan
+Geng, Jiawei Ge, Jingruo Sun, Jiayun Wu, Jiri Gesi, Ximing Lu, David Acuna, Kaiyu Yang,
+Hongzhou Lin, Yejin Choi, Danqi Chen, Sanjeev Arora, and Chi Jin. Goedel-Prover-V2: Scaling
+Formal Theorem Proving with Scaffolded Data Synthesis and Self-Correction, August 2025c.
+
+URL|http://arxiv.org/abs/2508.03613} arXiv:2508.03613 [cs].
+
+Q. Liu, X. Zheng, X. Lu, et al. Rethinking and improving autoformalization: towards a faithful
+metric and a dependency retrieval-based approach. In The Thirteenth International Conference
+on Learning Representations, 2025.
+
+11
+
+
+Preprint
+
+Jiangiao Lu, Yingjia Wan, Zhengying Liu, Yinya Huang, Jing Xiong, Chengwu Liu, Jianhao Shen,
+Hui Jin, Jipeng Zhang, Haiming Wang, Zhicheng Yang, Jing Tang, and Zhijiang Guo. Process-
+driven autoformalization in lean 4, 2024. URL/https://arxiv.org/abs/2406.01940
+
+Wangyue Lu, Lun Du, Sirui Li, Ke Weng, Haozhe Sun, Hengyu Liu, Minghe Yu, Tiancheng Zhang,
+and Ge Yu. Automated formalization via conceptual retrieval-augmented lms. arXiv preprint
+arXiv:2508.06931, 2025.
+
+Thang Luong and Edward Lockhart. Advanced version of gemini with deep think officially achieves
+gold medal standard at the international mathematical olympiad, July 2025. Accessed: 2025-09-
+09.
+
+Mathlib Community. The lean mathematical library. In Proceedings of the 9th ACM SIGPLAN
+International Conference on Certified Programs and Proofs, CPP 2020, pp. 367-381, New York,
+NY, USA, 2020. Association for Computing Machinery. ISBN 9781450370974. doi: 10.1145/
+
+3372885.3373824. URL https: //doi.org/10.1145/3372885. 3373824
+
+OpenAI. Introducing gpt-4.1 model family. |nttps://openai.com/index/gpt-4-1/
+April 2025. Accessed: September 24, 2025.
+
+Lawrence C Paulson. Isabelle: A generic theorem prover. Springer, 1994.
+
+Auguste Poiroux, Gail Weiss, Viktor Kunéak, and Antoine Bosselut. Improving autoformalization
+using type checking, 2025. URL|https://arxiv.org/abs/2406.07222
+
+WV Quine. On the consistency of “new foundations”. Proceedings of the National Academy of
+Sciences, 37(8):538-540, 1951.
+
+Amrith Setlur, Saurabh Garg, Xinyang Geng, Naman Garg, Virginia Smith, and Aviral Kumar. Rl
+on incorrect synthetic data scales the efficiency of llm math reasoning by eight-fold. Advances in
+Neural Information Processing Systems, 37:43000—4303 1, 2024.
+
+Amitayush Thakur, George Tsoukalas, Yeming Wen, Jimmy Xin, and Swarat Chaudhuri. An in-
+context learning agent for formal theorem-proving. In First Conference on Language Modeling,
+2024.
+
+Kyle Thompson, Nuno Saavedra, Pedro Carrott, Kevin Fisher, Alex Sanchez-Stern, Yuriy Brun,
+Joao F Ferreira, Sorin Lerner, and Emily First. Rango: Adaptive retrieval-augmented proving for
+automated software verification. In 2025 IEEE/ACM 47th International Conference on Software
+Engineering (ICSE), pp. 347-359. TEEE, 2025.
+
+George Tsoukalas, Jasper Lee, John Jennings, Jimmy Xin, Michelle Ding, Michael Jennings, Ami-
+tayush Thakur, and Swarat Chaudhuri. Putnambench: Evaluating neural theorem-provers on the
+
+putnam mathematical competition, 2024. URL|https://arxiv.org/abs/2407.11214
+
+Liang Wang, Nan Yang, and Furu Wei. Query2doc: Query expansion with large language models.
+In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing,
+pp. 9414-9423, 2023.
+
+Ruida Wang, Jipeng Zhang, Yizhen Jia, Rui Pan, Shizhe Diao, Renjie Pi, and Tong Zhang. The-
+oremllama: Transforming general-purpose Ilms into lean4 experts. In Proceedings of the 2024
+Conference on Empirical Methods in Natural Language Processing, pp. 11953-11974, 2024.
+
+Shuting Wang, Xin Yu, Mang Wang, Weipeng Chen, Yutao Zhu, and Zhicheng Dou. Richrag: Craft-
+ing rich responses for multi-faceted queries in retrieval-augmented generation. In Proceedings of
+the 31st International Conference on Computational Linguistics, pp. 11317-11333, 2025.
+
+Yutong Wu, Di Huang, Ruosi Wan, Yue Peng, Shijie Shang, Chenrui Cao, Lei Qi, Rui Zhang, Zidong
+Du, Jie Yan, et al. Stepfun-formalizer: Unlocking the autoformalization potential of Ilms through
+knowledge-reasoning fusion. arXiv preprint arXiv:2508.04440, 2025.
+
+Huajian Xin, ZZ Ren, Junxiao Song, Zhihong Shao, Wanjia Zhao, Haocheng Wang, Bo Liu, Liyue
+Zhang, Xuan Lu, Qiushi Du, et al. Deepseek-prover-v1. 5: Harnessing proof assistant feedback
+for reinforcement learning and monte-carlo tree search. In The Thirteenth International Confer-
+ence on Learning Representations, 2024.
+
+12
+
+
+Preprint
+
+Kaiyu Yang, Aidan Swope, Alex Gu, Rahul Chalamala, Peiyang Song, Shixing Yu, Saad Godil,
+Ryan J Prenger, and Animashree Anandkumar. Leandojo: Theorem proving with retrieval-
+augmented language models. Advances in Neural Information Processing Systems, 36:21573-
+21612, 2023.
+
+Huaiyuan Ying, Zijian Wu, Yihan Geng, Jiayu Wang, Dahua Lin, and Kai Chen. Lean workbook:
+a large-scale lean problem set formalized from natural language math problems. In Proceedings
+of the 38th International Conference on Neural Information Processing Systems, pp. 105848-
+105863, 2024.
+
+Lan Zhang, Xin Quan, and André Freitas. Consistent autoformalization for constructing mathemat-
+ical libraries. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language
+Processing, pp. 4020-4033, 2024.
+
+Xueliang Zhao, Wenda Li, and Lingpeng Kong. Decomposing the enigma: Subgoal-based demon-
+stration learning for formal theorem proving. arXiv preprint arXiv:2305.16366, 2023.
+
+Kunhao Zheng, Jesse Michael Han, and Stanislas Polu. Minif2f: a cross-system benchmark for
+formal olympiad-level mathematics. arXiv preprint arXiv:2109.00110, 2021.
+
+A APPENDIX
+
+A.1 IMPLEMENTATION DETAILS
+A.1.1 FEW-SHOT EXAMPLE GENERATION FOR DECOMPOSITION
+
+To construct a robust set of few-shot demonstrations for our decomposition module, we strategically
+
+selected five problems from the Putnam benchmark (Tsoukalas et al.||2024). These problems were
+
+chosen to ensure diversity in both their mathematical domain and the number of underlying premises
+required for their proofs.
+
+We decomposed the informal statement of each selected problem into its atomic logical components
+using a zero-shot prompting strategy with Claude-Opus-4 in think mode, guided by a carefully
+engineered instruction set. To ensure the correctness and logical atomicity of these decompositions,
+each one was manually verified.
+
+This curated set of examples, detailed below, provides the model with varied demonstrations for the
+decomposition task across number theory, algebra, analysis, and geometry.
+
+¢ Number Theory: putnam_1966_b2
+
+* Algebra: putnam_2000_b1
+
+¢ Analysis: putnam_2000_a4, putnam_2015_b1
+* Geometry: putnam_2003 _b5
+
+A.1.2. RETRIEVER FINETUNING DETAILS
+
+We finetuned the BGE-M3 retriever model on the Mathlib 4.7 dataset to spe-
+cialize it for dependency retrieval in formal mathematics. The fine-tuning process was executed
+using the FlagEmbedding library on a server equipped with four 32GB GPUs.
+The complete set of hyperparameters used for this process, including optimizer settings and loss
+configuration, is provided in Table [4]
+
+A.1.3. LLM GENERATION PARAMETERS
+
+For all generative tasks, sub-query generation (decomposition) and formal statement generation (for-
+malization), we set the temperature to 0.7 for all models (GPT-4.1, DeepSeek-3.1, and Claude-Opus-
+4) to encourage diverse yet coherent outputs. To ensure reproducibility, single-attempt evaluations
+(Pass @ 1) used a fixed seed of 42. For multi-attempt evaluations (Pass@10), we generated ten dis-
+tinct outputs by using a sequential range of seeds from 42 to 51.
+
+13
+
+
+Preprint
+
+Category Hyperparameter Value
+
+Model & Data model_name_or_path bge-m3
+train_data mathlib 4.7
+query_max_len 1024
+passage_max_len 1024
+train_group_size 4
+sentence_pooling_method cls
+
+Training num_train_epochs 1
+per_device_train_batch_size 32
+per_device_eval_batch_size 4
+learning_rate 5 x 10-6
+warmup_ratio 0.1
+weight_decay 0.01
+repetition_penalty 1.0
+dataloader_drop_last True
+even_batches True
+non_blocking False
+split_batches False
+use_seedable_sampler True
+
+Loss & Objective temperature 0.02
+normalize_embeddings True
+negatives_cross_device True
+same_benchmark_within_batch True
+unified_finetuning True
+kd_loss_type m3_kd_loss
+
+Optimizer optim adamw_torch
+adafactor False
+adam_betal 0.9
+adam_beta2 0.999
+adam_epsilon 1x 10-8
+
+Table 4: Hyperparameters for model fine-tuning.
+
+A.2. ADDITIONAL RESULTS AND DISCUSSION
+A.2.1 DEPENDENCY RETRIEVAL PERFORMANCE METRICS
+
+We evaluate retrieval performance using standard precision, recall, and their harmonic mean, the
+F1 score. For a given retrieved set R and the ground-truth set of oracle premises Poracie, precision
+
+and recall are defined as: Precision (P) = Pages OR and Recall (R) = Feel The F1 score
+. P-R
+
+provides a single, balanced measure of performance by combining precision and recall: Fl = 2: 57
+The composition of the retrieved set 7? varies by method.
+
+For baseline retrievers, R consists of the top-k premises with the highest cosine similarity to the
+embedding of the full informal statement. For DRIFT, F is the union of the single best-retrieved
+premise for each of the n decomposed sub-queries.
+
+A.2.2. DEPENDENCY RETRIEVAL RESULTS OF RAUTO
+
+This section presents the performance of DPR (RAuto) across both in-distribution (ProofNet,
+MiniF2F-test) and out-of-distribution (ConNF) benchmarks. The results, detailed in Table[5| high-
+light a crucial trade-off between specialization and generalization that motivates our proposed
+approach. When comparing the baselines, our baseline retriever substantially outperforms DPR
+(RAuto) on the ConNF benchmark but underperforms on ProofNet and MiniF2F-test. We hypothe-
+size that this discrepancy arises because DPR (RAuto) may be overfitted to Mathlib-specific content.
+
+14
+
+
+Preprint
+
+Dataset Precision Recall F1
+ProofNet 22.89 33.75 27.28
+MiniF2F-test 0.63 7.22 1.15
+
+ConNF 14.01 17.88 15.71
+
+Table 5: Dependency Retrieval performance (%) of DPR (RAuto), the retriever from RAutoformal-
+
+izer 2025). Retrieval k is set to 5.
+
+A.2.3, AUTOFORMALIZATION RESULTS OF CLAUDE
+
+Table (6| summarizes the pass@1 results of Claude-Opus-4, reporting both the Typecheck rate
+(TC@ 1) and the equivalence rate (BEq+@ 1) across the ProofNet, MiniF2F-test, and ConNF bench-
+marks. These results provide context for the performance Claude-Opus-4 discussed in the main
+
+paper.
+
+Dataset Retrieval TC@1 BEq+@1
+Oracle* 81.28 26.20
+Zero-shot 68.45 17.65
+
+ProviNct lau S.e7eaam 19.25(41.60)
+DRIFT 78.61 (+10.16) 19.79 (42.14)
+Oracle* 93.30 35.27
+
+oe Zero-shot 95.09 31.25
+
+MiniF2F-test RAuto 95.98 (+0.89) 30.36(-0.89)
+
+DRIFT 93.75 (1.34) 32.59 (41.34)
+Oracle* 62.75 50.36
+Zero-shot 13.32 8.53
+
+ConNF RAs )6=— 26. 4am 18.52440'69)
+DRIFT 72.32(+59.00) 60.35 (+51.82)
+
+Table 6: Autoformalization performance on ProofNet, MiniF2F-test, and ConNF. Performance
+is measured by Typecheck (TC@1) and BEq+@1. We compare DRIFT against zero-shot, DPR
+(RAuto), and oracle* settings. Colored subscripts indicate improvement (blue) or decrease (red) rel-
+ative to zero-shot. All values are percentages (%), the best results (excluding the oracle*) are bold.
+The pass @ 10 experiments for Claude were omitted due to funding constraints.
+
+A.2.4. THE ROLE OF ILLUSTRATIVE THEOREMS AS A SCAFFOLD
+
+As presented in Table[3} removing the query decomposer (w/o Decompose: reverting to the baseline
+DPR) does not degrade performance further. In fact, on ConNF and ProofNet, it led to a slightly
+recovery in the BEq+ score compared to the “w/o Illustrate” setting. We hypothesize this is due to the
+nature of retrieval noise. The baseline DPR, using a single query, retrieves a thematically clustered
+set of premises. While its precision is lower, its noise is homogeneous and may be less distracting
+to the LLM. Our decomposition method retrieves more diverse set of premises. While this captures
+more correct dependencies (higher recall and precision), the accompanying noise is also more varied.
+This reveals a crucial synergy: the theorem selector acts as a contextual scaffold, helping the model
+navigate the diverse information retrieved by the decomposer. Without this guidance, the varied
+noise can outweigh the benefit of improved retrieval.
+
+A.2.5 SCALING PERFORMANCE WITH SAMPLING
+
+Across all experiments in Table }2} we observe a consistent and significant gap between pass@1
+and pass@ 10 results. For instance, performance on ProofNet improved by an average of 27.20%
+across all settings and formalizer models. This large uplift underscores the potential for enhancing
+performance through sampling-based methods at test time. This suggests that performance could
+
+15
+
+
+Preprint
+
+be further scaled by integrating our method into an agentic framework equipped with a verifier (e.g
+Typecheck correctness).
+
+Notably, DeepSeek-3.1’s performance of pass@10 saturates more quickly than Claude-Opus-4’s
+on the ProofNet benchmark. Its zero-shot Pass@10 score is only 0.27% lower than its retrieval-
+augmented DRIFT score. This suggests that with sufficient sampling, the model can sometimes
+recover the necessary knowledge parametrically. We anticipate a similar, albeit slower, trend for the
+larger Claude-Opus-4 and GPT-4.1 models if the number of attempts were increased further.
+
+A.2.6 PARAMETRIC RETRIEVAL
+
+Retrieval ProofNet MiniF 2F-test ConNF
+TC@1 BEq+@1 TC@l1 BEq+@1 TC@1 BEq+@1
+DRIFT (GPT-4.1) 55.88 17.38 74.55 24.55 65.76 54.84
+Parametric Retrieval 43.85 (-12.03) 13.64 (- 3.74) 63.84 (-10.71) 20.09 (- 4.46) —:10.41 (-55.35) 3.64 (-51.20)
+w/o Retrieval 34.22 (-21.66) 9.36 (- 8.02) 69.64 (- 4.91) 23.21 (- 1.34) 7.28 (-58.48) 4.47 (-50.37)
+DRIFT (DeepSeek-3.1) 72.73 18.18 74.11 2240 60.67 46.72
+Parametric Retrieval 69.25 (- 3.48) 19.79 (+ 1.61) 76.79 (+ 2.68) 24.55 (+ 1.78) — 10.51 (-50.16) 5.93 (-40.79)
+w/o Retrieval 60.43 (-12.30) 15.51 (- 2.67) 76.34 (+ 2.23) 22.77(4 0.00) 13.42 (-47.25) 8.12 (-38.60)
+
+Table 7: Performance comparison of the full DRIFT model, parametric retrieval baseline, and zero-
+shot using GPT-4.1 and DeepSeek-3.1 with pass@1. Values in parentheses show performance
+change relative to the full DRIFT model.
+
+To distinguish between the benefits of an LLM’s internal (parametric) knowledge and external (re-
+trieved) knowledge, we conducted a “parametric retrieval” experiment. In this setting, we prompted
+the formalizer models only with the decomposed sub-queries, omitting the retrieved premises and
+illustrative theorems. This setup probes whether the structured sub-queries alone are sufficient to
+guide the models to access their own latent knowledge for the formalization task.
+
+The results in Table |7| show that external knowledge from retrieval is largely indispensable and
+cannot be fully replaced by the LLM’s internal knowledge alone. However, we observe a notable
+difference between the models. DeepSeek-3.1 demonstrates a stronger grasp of the required formal
+knowledge; for this model, the sub-queries appear to function as a Chain-of-Thought-style prompt,
+structuring its reasoning process and thereby improving formalization accuracy. This aligns with
+our earlier finding that DeepSeek-3.1’s zero-shot performance with sufficient sampling (pass @ 10)
+nearly saturates to its retrieval-augmented performance, suggesting it can often surface the necessary
+formal knowledge if properly prompted.
+
+A.2.7 STATISTICS OF DECOMPOSED SUB-QUERIES
+
+To better understand the Decompose module and its behavior, we analyzed the number of sub-
+queries generated when decomposing informal statements from our three benchmarks: ProofNet,
+MiniF2F-test and ConNF with different LLMs as decomposer.
+
+Model ProofNet MiniF2F-test ConNF Model Avg.
+Claude-Opus-4 5.84 5.59 6.52 5.98
+GPT-4.1 6.39 5.40 7.03 6.27
+DeepSeek-3.1 4.83 4.65 5.71 5.06
+Dataset Avg. 5.69 5.21 6.42 5.77
+
+Table 8: Average number of decomposed sub-queries generated by different LLMs as decomposers
+across three benchmarks. The final row and column show the average values for each dataset and
+model, respectively.
+
+The results, summarized in Table show that different models produce a varying number of
+
+sub-queries. GPT-4.1 tends to generate the most detailed decompositions, with an average of 6.27
+sub-queries, while DeepSeek-3.1 produces the most concise ones, averaging 5.06. Furthermore, the
+
+16
+
+
+Preprint
+
+complexity of the dataset appears to influence the decomposition length. Statements from the ConNF
+benchmark, which covers frontier mathematical research, consistently required more sub-queries
+(6.42 on average) across all models, likely reflecting their greater conceptual density compared
+to the undergraduate-level problems in ProofNet (5.69) and the more self-contained problems in
+MiniF2F-test (5.21).
+
+A.3. PROMPT TEMPLATES
+
+A.3.1 DECOMPOSITION PROMPT
+
+This appendix contains the complete prompt used to decompose informal mathematical statements
+into retrieval queries (the Decompose module). It is composed of two parts: a system prompt that
+defines the model’s expert persona and overall task, and a user prompt template that structures the
+specific input and desired output format.
+
+You are an expert in formal mathematics. Your task is to decompose
+an informal mathematical statement into a set of natural
+language queries. These queries are for retrieving the precise
+definitions, theorems, and structures from a formal mathematics
+library (like mathlib) that are necessary to «xx*formalizexx the
+statement.
+
+Your response must be in LaTeX. Decompose the statement into a
+list of queries, with each query enclosed in a ‘\\boxed{{}}°*
+command. The goal is to identify the building blocks for
+writing the statement formally, *xnotxx to find a proof.
+
+You need to:
+
+1. Analyze the informal statement and identify its key
+mathematical components that need formal definitions
+
+2. Break down the statement into natural language queries that
+describe the mathematical concepts and structures needed for
+formalization
+
+3. from the best of your knowledge, come up with the Lean
+representation of it.
+
+4. Focus on what needs to be defined and the implicit hypothesis.
+
+Given the xxInformal statementx*, decompose the informal statement
+into retrieval queries for **formalizing** (not proving) the
+statement. Each query must:
+
+Describe mathematical definitions, structures, or concepts
+needed to formally express the statement in Lean 4
+
+—- Explain what mathematical objects or type signatures are involved
+
+—- Read as a complete sentence that teaches about the formal
+mathematical structure
+
+-— Focus on how to represent concepts formally rather than how to
+prove them
+
+- Sound like an excerpt from a mathematics reference that explains
+formal definitions
+
+x*xImportant**:
+
+- The goal is FORMALIZATION (translating to Lean 4), NOT finding
+proof strategies
+
+— Write informative descriptions that explain formal concepts and
+definitions
+
+17
+
+
+Preprint
+
+- Each query should describe mathematical structures or type
+information
+
+- Avoid interrogative words (what, how, when, why, etc.)
+
+- The queries should collectively cover all definitions and
+structures needed to write the formal statement
+
+Please return each query using the \\boxed{{}} LaTeX command.
+
+{few_shot_examples}
+
+*xInformal statement**:
+{informal_statement }
+
+*xDecomposed queries for formalizationx«:
+
+A.3.2 FORMALIZATION PROMPT
+
+This appendix contains the complete prompt used to formalize informal mathematical statements
+into formal statements (the Formalize Theorems module). It is composed of two parts: a system
+prompt that defines the model’s expert persona and overall task, and a user prompt template that
+structures the specific input and desired output format.
+
+You are an advanced assistant specializing in formal mathematics
+and Lean 4 theorem proving. You hav xtensiv xpertise in
+translating mathematical concepts from natural language into
+precise Lean 4 code. Please make sure the generated Lean 4 code
+compiles with {libraries} and Lean version {lean_version}.
+
+Given the potential dependent premises listed under **Potential
+dependent premises*x* (some may be irrelevant) and the
+demonstration examples under **Demonstration examples*~«,
+translate the natural language statement provided under «x
+Informal statement** into a formal Lean 4 theorem. Use th
+theorem name specified under «x«x*Namexx as the Lean identifier.
+
+Your response must:
+
+- Write only valid Lean 4 code with clear and idiomatic use of
+Lean syntax and conventions
+
+- Include only the formalization - do not include any headers,
+explanations, or proofs
+
+— Use the provided name as the theorem identifier, ensuring it
+adheres to Lean’s naming conventions (no hyphens, prefer
+snake_case or camelCase)
+
+- Faithfully capture the meaning of the informal statement, paying
+close attention to:
+- Predicate usage and logical structure
+
+Type class inference
+
++ Quantifier scope and binding
+- Mathematical notation and operations
+
+—- Enclose all code within triple backticks with the ‘lean*
+language identifier
+
+18
+
+
+Preprint
+
+Expected Output Format:
+
+** ‘lean
+
+theorem [NAME] : [Lean formalization of the statement] := by sorry
+Guidelines:
+
+- Select only the relevant premises from those provided
+Ensure proper type annotations where necessary
+
+-— Use standard Lean 4 mathematical library conventions, Lean
+version {lean_version}
+
+-— Maintain logical equivalence with the informal statement
+
+— Keep the formalization as clean and readable as possible
+
+x**Potential dependent premises«x
+dependent_premises_list}
+
+x**Demonstration examples**
+theorems_list}
+
+xxNamexx
+problem_full_name}
+
+*xInformal statementxx
+problem_informal_statement }
+
+19

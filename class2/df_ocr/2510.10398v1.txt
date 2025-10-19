@@ -1,0 +1,1584 @@
+arX1v:2510.10398v1 [cs.CL] 12 Oct 2025
+
+STEAM: A Semantic-Level Knowledge Editing Framework
+for Large Language Models
+
+Geunyeong Jeong, Juoh Sun, Seonghee Lee, Harksoo Kim*
+Konkuk University
+{jyjg7218, qssz1326, nlpshlee, nlpdrkim}@konkuk.ac.kr
+
+Abstract
+
+Large Language Models store extensive fac-
+tual knowledge acquired during large-scale pre-
+training. However, this knowledge is inherently
+static, reflecting only the state of the world at
+the time of training. Knowledge editing has
+emerged as a promising solution for updating
+outdated or incorrect facts without full retrain-
+ing. However, most existing locate-and-edit
+methods primarily focus on token-level likeli-
+hood optimization without addressing seman-
+tic coherence. Our analysis reveals that such
+edited knowledge is often encoded as isolated
+residual streams in the model’s latent space, dis-
+tinct from pre-existing knowledge and bypass-
+ing natural reasoning process. To address this,
+we propose STEAM, a semantic-level knowl-
+edge editing framework that enhances integra-
+tion of updated knowledge into the model’s
+knowledge structure. STEAM first identifies tar-
+get representations as semantic anchors for the
+updated factual association, then guides the in-
+ternal representation of the edited fact towards
+these anchors through an alignment loss dur-
+ing optimization. Experimental results demon-
+strate that STEAM improves model’s ability to
+reason with edited knowledge and enhances se-
+mantic coherence, underscoring the importance
+of latent-space alignment for reliable and coher-
+ent knowledge editing. The code is available at
+https: //github.com/GY-Jeong/STEAM.
+
+1 Introduction
+
+Large Language Models (LLMs) have achieved im-
+pressive performance in knowledge-intensive NLP
+tasks (Singhal et al., 2023; Wang et al., 2024c) by
+leveraging extensive factual knowledge acquired
+through large-scale pre-training (Akyurek et al.,
+2022; Wang et al., 2024a; Chang et al., 2024). How-
+ever, this knowledge is inherently static, reflecting
+only the state of the world at the time of training.
+This limitation necessitates efficient methods for
+
+“Corresponding author.
+
+updating LLMs when new information arises or
+existing facts become outdated.
+
+Knowledge editing! (De Cao et al., 2021; Zhang
+et al., 2024; Wang et al., 2024b) has emerged as
+a promising approach, enabling selective updates
+to specific factual information without the need
+for costly full retraining. This approach typically
+identifies a fact as a triple structure (s, 1,0), repre-
+senting (subject, relation, object), and aims to re-
+place the original object o with a new entity o*. For
+example, the outdated fact (UK, Prime Minister,
+Rishi Sunak) can be updated to the current fact
+(UK, Prime Minister, Keir Starmer).
+
+For knowledge editing to be reliable, it is cru-
+cial that updated facts are consistently integrated
+into the model’s knowledge structure. However,
+most existing methods primarily focus on token-
+level likelihood optimization (i.e., maximizing the
+generation probability of o*) without addressing
+semantic coherence. Consequently, these methods
+face challenges in tasks that require knowledge in-
+tegration, such as maintaining consistency across
+interconnected facts or supporting complex rea-
+soning tasks (Yao et al., 2023; Cohen et al., 2024;
+Zhong et al., 2023).
+
+To investigate this limitation, we examine how
+edited knowledge is represented within the latent
+semantic space of the edited model. Our analysis
+reveals that edited knowledge is often encoded as
+isolated residual streams -— sequences of hidden
+states propagated through the transformer layers —
+which are distinct from model’s pre-existing knowl-
+edge (§ 3.2). Building on this finding, additional
+interpretability-based analysis reveals that these
+residual streams reflect a direct activation for
+the generation of the target token o*, bypassing
+the model’s natural reasoning process (§ 3.3). This
+behavior exposes a fundamental shortcoming of
+
+‘Tn this paper, we focus on parameter-modifying knowl-
+edge editing methods, specifically locate-and-edit approaches.
+
+
+current editing strategies and underscores the need
+for approaches that promote semantic-level integra-
+tion for coherent and reliable knowledge editing.
+
+To address this challenge, we propose STEAM
+(Semantic-Level Knowledge Editing Framework),
+a novel approach that enhances knowledge
+integration and is easily compatible with existing
+locate-and-edit approaches. STEAM augments the
+conventional locate-and-edit approach through
+two main components: (1) Latent Positioning,
+which identifies semantic anchors for edited
+knowledge, and (2) Latent-Level Alignment,
+which guides the edited knowledge representation
+towards these anchors in the latent space. Our
+experimental results demonstrate that STEAM
+significantly improves the model’s reasoning
+ability with edited knowledge and enhances overall
+semantic consistency, supporting the advantages of
+semantic-level integration for reliable knowledge
+editing.
+
+We summarize our contributions as follows:
+
+¢ We systematically analyze conventional locate-
+and-edit methods and reveal that they encode
+edited knowledge separately from the model’s
+existing knowledge (§ 3).
+
+We propose STEAM, a semantic-level knowledge
+editing framework designed to enhance the se-
+mantic coherence of updated knowledge with the
+model’s internal knowledge representations (§ 4).
+
+¢ We empirically demonstrate that STEAM sig-
+nificantly improves reasoning with edited facts
+and enhances semantic coherence, across diverse
+baselines and editing settings (§ 5).
+
+2 Locate-and-Edit Approach
+
+Locate-and-edit approach consist of two stages: (1)
+Locating, which identifies the parameters where
+a fact (s,7,0) is stored, and (2) Editing, which
+modifies those parameters to encode the updated
+fact (s,7r, 0").
+
+2.1 Locating
+
+To identify the parameters responsible for encoding
+factual associations (i.e., (s,) — 0) within LLMs,
+prior work has employed knowledge analysis tech-
+niques such as causal tracing (Meng et al., 2022).
+These methods systematically perturb intermediate
+model representations to pinpoint the components
+that contribute to factual recall. Empirical findings
+
+suggest that factual associations are primarily en-
+coded in the MLP modules of the early-to-middle
+transformer layers (Meng et al., 2023).
+
+2.2 Editing
+
+Previous studies have identified MLP modules
+within LLMs function as key-value memory struc-
+tures (Geva et al., 2021). Specifically, the first
+layer Wf, functions as a key encoder, while the sec-
+ond layer W,,.; retrieves the corresponding value.
+In this context, the final subword of the subject s
+serves as the key k, and the relation—object pair
+(r, 0) is represented as the value v.
+
+As the first step of the editing phase, the updated
+fact (s, 7, 0*) is encoded into a new key-value pair
+(k*,u*). The key k* is computed by averaging hid-
+den states at the final subword position of s across
+multiple contexts augmented with prefix prompts
+x;. The value v* is obtained through an iterative
+optimization process that minimizes the following
+composite objective:
+
+ant A £(d) = Luzi (6) + Lx (9), (1)
+
+where 6 denotes a candidate vector for v*. The
+first term, LjiL(O), maximizes the likelihood of
+generating o* given a factual prompt p constructed
+from (s, 1):
+
+N
+
+1
+Lyi (0) = “Ny S "log P(o” | Lit+p; 6), (2)
+j=l
+
+where P(-) denotes the token generation probability
+of the model. The second term, £x1,(6), minimizes
+semantic drift by reducing the KL divergence be-
+tween the updated and original predictions for a
+generic prompt p’ (e.g., “subject is a”):
+
+L£x1(9) = Dei (P(2 | p's 6) | P(e |p). @)
+
+To incorporate the updated key—value pair (k*,
+v*) into the model, the original projection matrix
+Woroj (denoted as W for simplicity) is modified to
+produce an updated weight matrix W. This update
+is defined as:
+
+W=W+A(Clk*)?,
+u* — Wk* (4)
+
+A= (CRT
+
+where
+
+Here, C = KK captures the second-order statis-
+tics of existing keys kK, which encode preserved
+knowledge within the model. The edited model F'
+
+
+is obtained by replacing the original matrix W with
+the updated matrix W, thereby incorporating the
+new factual association into the model.
+
+While this minimal perturbation enables effec-
+tive knowledge updates, it operates by optimizing
+token-level generation probabilities (Eq. 2). This
+raises the question of how the model understands
+the edited knowledge: Is it hard-coded for output
+prediction or integrated into the model’s knowl-
+edge structure? In the following analysis, we
+address this question by analyzing how edited facts
+are represented and processed within the model’s
+latent space.
+
+3 Latent Space Analysis of Edited
+Knowledge
+
+Although an edited language model can generate
+the updated fact, this alone does not confirm its
+integration into the model’s knowledge structure.
+To investigate this, we conduct two complemen-
+tary analyses focusing on the residual stream, the
+sequence of hidden states propagated through the
+transformer layers:
+
+° We visualize how edited knowledge propagates
+through the model’s latent space (§ 3.2).
+
+¢ We interpret the semantic implications of these
+residual streams using the LogitLens technique
+
+(§ 3.3).
+
+For this analysis, we sample 1,000 instances
+from the COUNTERFACT (Meng et al., 2022)
+dataset, specifically focusing on cases where the
+factual association (s,r) — o is preserved in the
+model, and both the original target o and the edited
+target o* are single-token entities.
+
+3.1 Extracting Layer-wise Representations
+
+We first establish a baseline for how the base model
+encodes the target object o* given diverse factual
+contexts. For a given edit €: (s,r,0 — o*), we col-
+lect a set of reference triples T = {(s;,7;,0*)}*_,
+sourced from Wikidata’, a structured knowledge
+base. For instance, given an edit « : (Eiffel
+Tower, located in, Paris — London), the set T’
+may include related triples such as (River Thames,
+flows through, London) and (Big Ben, located
+in, London). Since the model may not have in-
+ternalized all facts in 7’, we filter out triples for
+which the model fails to accurately recall o*. Fol-
+lowing prior work (Zhong et al., 2023), we con-
+
+“https ://www.wikidata.org
+
+struct a cloze-style textual prompt p; for each pair
+(s;,7;) and feed it into the model F. For exam-
+ple, given (River Thames, flows through), we
+use the prompt “River Thames flows through __”.
+Through this filtering and sampling process, we
+construct 7” C T , a subset of reference knowl-
+edge that the model has internalized.
+
+For each prompt p; € T’, we extract the layer-
+wise hidden representations {h‘}/_, from all L
+layers of the base model J, at the final token po-
+sition where o* is predicted. This captures how
+the model represents pre-existing knowledge. Sim-
+ilarly, for the edited model F’, we input the edited
+prompt pz (e.g., “Eiffel Tower is located in __’’)
+and extract its hidden states {h£}/_, at the corre-
+sponding prediction position, reflecting how the
+model encodes the edited fact.
+
+3.2 Layer-wise Visualization of Edited
+Knowledge Flow
+
+Takeaway 1: Edited knowledge is repre-
+sented as a isolated residual stream in the
+latent space, indicating a fundamental issue
+with semantic integration.
+
+To better understand how edited knowledge is rep-
+resented and propagated within the model, we
+conduct a qualitative analysis based on residual
+stream visualization. Specifically, we compare
+the layer-wise hidden representations of the edited
+knowledge {h£}/_, and the reference knowledge
+{h{}4_, to examine differences in how their se-
+mantic representations evolve across layers. We
+begin by applying Principal Component Analysis
+(PCA) (Jolliffe and Cadima, 2016) to reduce the
+dimensionality of the hidden states. In Figure 1(a),
+we plot the hidden states corresponding to edited
+fact as red diamonds, and those corresponding to
+the reference knowledge as green circles. Addi-
+tional visualizations for other samples are provided
+in Appendix A.
+
+As shown in Figure 1(a), there is a clear distinc-
+tion between edited and reference knowledge in
+the model’s latent space. The representations of
+reference knowledge evolve progressively across
+layers, becoming more dispersed in the deeper lay-
+ers, which reflects their gradual integration into
+broader semantic contexts (Ju et al., 2024). In con-
+trast, the representations of edited knowledge fol-
+low a separate and isolated path. This divergence
+suggests that the model encodes edited knowledge
+
+
+(a) ROME
+[#279]
+
+x e
+
+20
++32. c
+eect? ;
+© ae 8°8| eg
+ooo ° 0
+$s egoeenne |
+e
+0
+10
+
+100
+
+[#955]
+
+[#899]
+
+| [#96]
+
+(b) STEAMgowe
+
+[#279]
+
+Edited Knowledge
+
+(Layers)g 510152025
+
+Reference Knowledge
+
+(Layers)o 5 10152025
+
+Figure 1: 3D visualization of residual stream across layers. Each subplot shows PCA-projected hidden states for a
+sample from the COUNTERFACT dataset (index in brackets). Red diamonds represent the residual stream of the
+edited knowledge, while green circles denote that of the reference knowledge. (a) shows the result after applying
+
+ROME, and (b) shows the result with STEAMRome:
+
+independently, rather than incorporating it into the
+its broader knowledge structure.
+
+Notably, this separation is apparent from the mid-
+layers, which are crucial for constructing knowl-
+edge associations (Geva et al., 2023; Ju et al., 2024).
+This observation raises concerns that the edited fac-
+tual association is formed in a manner inconsis-
+tent with the preserved knowledge. Since LLMs
+organize knowledge in an entity-centric manner,
+similar to structured knowledge bases (AlKhamissi
+et al., 2022; Hu et al., 2023), this discrepancy po-
+tentially leads to difficulties in leveraging related
+facts, thereby hindering complex reasoning.
+
+To complement the qualitative findings, we ad-
+ditionally perform a quantitative analysis using co-
+sine similarity between hidden states of edited and
+reference knowledge. This supplementary analy-
+sis supports our observations and is presented in
+Appendix B.
+
+3.3 Interpreting Reasoning Process of Edited
+Knowledge
+
+Takeaway 2: Edited knowledge triggers
+shortcut-like activations that prioritize the
+target token generation, bypassing the
+model’s natural reasoning process.
+
+To further investigate the distinction identified
+in the previous analysis (§ 3.2), we conduct an
+interpretability-based analysis. Specifically, we em-
+ploy LogitLens (nostalgebraist, 2020), a technique
+that approximates the token probability distribution
+at each transformer layer based on its hidden state.
+This approach enables us to trace how the model
+incrementally infers the edited knowledge (i.e., the
+object o*) as information flows through the layers.
+Formally, given a hidden state h € R¢ at a partic-
+ular layer, LogitLens applies the final projection
+matrix Wy € R'Y|*4 followed by a softmax over
+the vocabulary space V:
+
+LogitLens(h) = softmax(Wyh) € R'Y!. (5)
+
+We compute the layer-wise probability of generat-
+ing o* using two sets of hidden states : (1) {hE}4_,,
+which represent the reasoning process over the
+edited fact, and (2) {h£}/_,, which correspond to
+the reasoning process over the reference knowledge.
+The results in Figure 2 show clear differences in
+how the model processes edited knowledge (red
+line) versus reference knowledge (green line). For
+reference knowledge, the probability of predicting
+the target token increases gradually across layers,
+reflecting a progressive, context-driven reasoning
+process. In contrast, for edited knowledge, the
+probability rises sharply from the mid-layers and
+
+
+GPT-J (6B)
+
+5 10 15 20 25
+
+Edited Knowledge [a
+
+(Layers) (0) 10 20
+
+Reference Knowledge [a
+
+Figure 2: Layer-wise probability of generating the up-
+dated object o* in edited model F’ as computed by
+LogitLens. The x-axis indicates the transformer layer;
+y-axis shows the predicted probability for o*. Results
+are averaged over all samples in COUNTERFACT.
+
+quickly saturates.
+
+This contrast suggests that the model does not
+infer edited facts through its natural knowledge
+reasoning process. Instead, it relies on direct ac-
+tivation, particularly from the mid-layers, which
+acts as a shortcut to maximize the generation prob-
+ability of the target token o*. This behavior is a
+direct consequence of current editing strategies pri-
+oritizing token-level optimization, highlighting the
+need for approaches that achieve deeper semantic
+integration.
+
+4 Method
+
+To address the semantic isolation of edited knowl-
+edge observed in Section 3, we introduce STEAM,
+a framework designed to enhance the semantic co-
+herence of updated knowledge with the model’s
+internal knowledge representations. To achieve
+this, STEAM augments the standard locate-and-edit
+process, specifically enhancing the optimization of
+the value vector v* through two main components:
+(1) Latent Positioning, which identifies appropri-
+ate semantic anchors for edited knowledge in the
+model’s latent space, and (2) Latent-Level Align-
+ment, which incorporates an additional objective to
+steer the edited knowledge representation towards
+these anchors during the optimization process.
+
+4.1 Latent Positioning
+
+The Latent Positioning step aims to identify target
+representations for the updated factual association
+(s,r — o*), which we refer to as semantic anchors.
+These anchors approximate how the model would
+naturally encode the new object o* in the context of
+the subject—relation pair (s,7), assuming the fact
+had been acquired through the model’s standard
+knowledge acquisition process (e.g., pre-training).
+
+To construct these anchors for a given edit € :
+(s,r,o — o*), we start from the set of reference
+knowledge 7” obtained through the retrieval and fil-
+tering process described in Section 3.1. From this
+filtered set, we sample a balanced subset, denoted
+as T”, to mitigate relation-type biases and ensure
+the anchors reflect diverse relational contexts (de-
+tails in Appendix C). For each prompt p; € T”,
+we extract the layer-wise hidden states {hf}4_,
+from the base model at the final token position cor-
+responding to o*. These hidden states represent
+how the model internally encodes the target object
+o* when processing various subject—relation pairs
+(s;,7;). To obtain a generalized representation that
+abstracts away from specific contexts and captures
+the consistent semantics of o*, we compute the
+mean of these hidden states at each layer:
+
+|T’”"|
+
+=e 1,...,L. (6)
+
+The resulting set of vectors {y‘}4_, serves
+as our semantic anchors, representing context-
+independent features of o* derived from diverse,
+faithfully recalled factual contexts. In our frame-
+work, we focus on semantic anchors yp from the
+mid-layers. This choice is motivated by prior find-
+ings that these layers play a central role in encod-
+ing relational semantics and attribute-level infor-
+mation (Hernandez et al., 2023; Geva et al., 2023),
+making them suitable locus for integrating new fac-
+tual knowledge in a manner consistent with the
+model’s knowledge processing mechanism.
+
+4.2 Latent-Level Alignment
+
+The Latent-Level Alignment step guides the inter-
+nal representation of the edited fact (s,r,0*) to-
+wards its corresponding semantic anchors y within
+the model’s latent space. In the conventional locate-
+and-edit framework (as described in § 2), a new
+factual association (s,r — o*) is encoded into a
+key-value pair (k*, v*) within an MLP layer, where
+
+
+t
+River Thames '
+
+Eiffel
+
+Tower
+
+stands
+
+Si mi i
+
+(b) Extracting semantic anchor p 1
+1
+1
+
+River Thames flows through London
+
+Extract semantic
+anchor @ of
+“London”
+
+(a) Collecting Reference Triples 1 {(c) Latent-space Alignment
+
+———————— ona
+
+O Hidden state Attention aD MLP
+
+Mid-layers [scares Cena
+
+ee ee ae ern
+
+() ENLLO) +
+(2) LL a(6)+
+
+(1) LNLL©):
+Maximize P(0*)
+
+(2) LLA(O):
+Latent-level alignment loss
+
+Figure 3: Overview of the STEAM framework. (a) Relevant reference knowledge about the new target object o* (b)
+The model is used to verify and filter these facts; valid references are then used to construct the semantic anchor y
+that approximates the latent representation of o*. (c) During editing, STEAM introduces a latent-level alignment
+loss Lia, which guides the edited value vector v* to align with the semantic anchor across mid-layers, encouraging
+coherent integration of the new knowledge into the model’s latent space.
+
+the value vector v* encodes the information of
+the updated object o*. The optimization of v* is
+typically guided by two objectives: the negative
+log-likelihood loss Ly and the KL divergence
+loss Lx. While these objectives are effective
+for improving token-level accuracy and specificity,
+they do not explicitly promote semantic coherence
+within the latent space.
+
+To address this limitation, we introduce a latent-
+level alignment loss £4, which penalizes the dis-
+crepancy between the hidden representations of
+edited fact and its corresponding semantic anchors.
+Specifically, during the iterative optimization pro-
+cess, we compute the cosine distance between the
+hidden state hf (obtained from a forward pass with
+the current candidate vector 6), and anchor vy at
+selected mid-layers 2 € [&start, Zena]. The align-
+ment loss Ly is defined as the average of these
+distances across layers:
+
+il lend
+
+Lya(d) = 1 — cos(hf, o") , (7)
+
+Natign el
+
+=ELstart
+
+where Nalign = fend — &start + 1 denotes the number
+of layers included in the computation. We incor-
+porate Ly, into the overall objective, yielding the
+
+following composite loss:
+matt L(6) = Ln (0) + Lr(0) + ALLA(O), (8)
+
+where the hyperparameter \ controls the weight of
+the latent-level alignment loss term. By minimiz-
+ing £y4, edited knowledge is more effectively in-
+tegrated into the model’s latent semantic space and
+becomes organically connected to related knowl-
+edge, rather than exist as a standalone piece of
+information.
+
+5 Experiments
+
+5.1 Experimental Settings
+
+Baseline Models. We evaluate our approach us-
+ing GPT-J (6B) (Wang and Komatsuzaki, 2021),
+Qwen2 (7B) (Yang et al. 2024), Llama 3
+(8B) (Dubey et al., 2024) to ensure the robustness
+of our findings.
+
+Dataset. We utilize the COUNTERFACTPLUS (Yao
+et al., 2023) dataset, which contains more challeng-
+ing questions that require models to reason with
+edited knowledge. To construct robust semantic
+anchors, we exclude samples where the filtered ref-
+erence set JT’ contains fewer than 32 triples. Con-
+sequently, from the initial dataset of 1,031 samples,
+we utilized 816 for GPT-J, 927 for Qwen2, and 937
+
+
+Model Editor Edit. Effi. Para. Neigh. Port. Flu. Cons.
+ROME 62.9 100.0 99.5 79.1 32.4 619.7 46.4
+GPT-J STEAMRomE 67.1 44.2) 100.0 99.5 79.5 37.0 (+4.6) 620.0 47.1 (40.7)
+(6B) R-ROME 62.7 100.0 99.3 80.5 31.9 621.0 46.2
+STEAMR-romE 66.4 (+3.7) 100.0 99.4 80.5 36.0 (44.1) 620.6 47.0 (40.8)
+ROME 74.2 99.8 97.9 85.8 45.4 624.4 40.5
+Qwen2 STEAMRomE 75.5 (41.3) 99.8 98.0 85.8 47.4 (42.0) 624.9 40.9 (40.4)
+(7B) R-ROME 73.4 99.0 95.8 86.2 44.8 624.5 39.7
+STEAMR-rome 75.3 (41.9) 99.7 96.8 86.1 47.3 (42.5) 625.1 40.4 (40.7)
+ROME 72.6 100.0 99.0 85.9 42.8 626.2 43.3
+Llama3  STEAMRoME 74.9 (42.3) 99.6 99.2 87.2 45.9 (43.1) 622.7 42.7 (-06)
+(8B) R-ROME 71.9 100.0 98.4 86.9 41.7 625.4 42.4
+STEAMR-rome 76.0 (44.1) 99.9 99.1 87.5 47.4 (45.7) 622.8 42.2 (-0.2)
+
+Table 1: Single-editing results on COUNTERFACTPLUS for GPT-J (6B), Qwen2 (7B), and Llama3 (8B). Results are
+averaged over three runs. Values in parentheses indicate the improvement or decline relative to the baseline for Edit
+
+score, Portability, and Consistency.
+
+for Llama 3.
+
+Knowledge editing approaches. We evaluate our
+method under two scenarios: (1) Single editing,
+where each factual update is applied independently
+(i.e., the model is restored after each edit), and
+(2) Batch editing, where multiple edits are ap-
+plied simultaneously. For single editing, we ap-
+ply our framework to existing methods, including
+ROME (Meng et al., 2022) and R-ROME (Gupta
+and Anumanchipalli, 2024). For batch editing, we
+integrate our method with PMET (Li et al., 2024),
+a state-of-the-art batch editing method. Implemen-
+tation details are provided in Appendix E.
+Metrics. We evaluate all methods using several
+metrics: Efficacy Score (Effi.) measures whether
+the model accurately recalls the updated fact; Para-
+phrase Score (Para.) assesses the generalizability
+of the edit; Neighborhood Score (Neigh.) evalu-
+ates whether unrelated knowledge remains unaf-
+fected; and Portability Score (Port.) measures the
+model’s ability to apply the edited knowledge in
+multi-hop reasoning. Edit Score (Edit.) is the har-
+monic mean of these four metrics. Additionally,
+we report Fluency (Flu.), which reflects lexical di-
+versity of generated text, and Consistency (Cons.),
+which captures semantic coherence.
+
+5.2 Results
+5.2.1 Single Editing
+
+In the single editing scenario, we evaluate our
+STEAM framework by integrating it into both
+ROME and R-ROME, denoted as STEAMrome and
+STEAMR-RoMmeE: respectively. For all models, we set
+Lstart = 18, lena = 17, and A = 5, and provide a
+detailed hyperparameter analysis in Appendix G.
+
+As summarized in Table 1, STEAM demonstrates
+consistent improvements in editing quality across
+all evaluated models. Portability increases robustly
+in all cases, with the highest gain of +5.7 observed
+in Llama3 under STAKEr rome, indicating that
+edited knowledge is more effectively integrated
+and applied in multi-hop reasoning. Importantly,
+these gains are observed consistently across both
+baseline editors, ROME and R-ROME, underscor-
+ing the generality of our framework.
+
+Other metrics such as Efficacy, Paraphrase, and
+Neighborhood remain stable, with slight gains in
+some cases, showing that STEAM preserves the
+local accuracy and generalization ability of the
+baseline editors. These steady or improved results
+collectively contribute to an overall enhancement
+of the aggregated Edit score. Notably, GPT-J and
+Qwen2 show modest but consistent improvements
+in Consistency (up to +0.8 and +0.7, respectively),
+highlighting STEAM’s ability to enhance semantic
+coherence in edited knowledge.
+
+
+Model Edits Editor Edit. Effi. Para. Neigh. Port. Flu. Cons.
+1 PMET 63.5 100.0 97.0 82.2 32.8 620.7 45.3
+STEAMpmet 65.5 (42.0) 100.0 96.6 82.4 35.0 42.2) 619.0 46.4 (41.1)
+
+10 PMET 65.0 100.0 97.2 82.2 34.4 620.6 45.2
+
+GPT-J STEAMpmet 65.9 (40.8) 100.0 96.6 82.4 35.4 (41.0) 618.9 46.3 41.1)
+(6B) 109 PMET 64.1 999 9969 81.6 33.5 621.3 45.3
+STEAMpmert 66.0 (42.0) 99.9 96.6 81.9 35.7 (42.2) 619.2 46.3 (41.0)
+
+All PMET 63.7 100.0 96.4 T12 33.9 621.5 45.0
+STEAMpmer 65.0(41.3) 100.0 96.0 77.2 35.5 (41.6) 619.1 46.1 G41.1)
+
+Table 2: Batch-editing results on COUNTERFACTPLUS for GPT-J (6B). Results are averaged over three runs. Values
+in parentheses indicate improvements of STEAMpwer over the PMET baseline for Edit., Portability (Port.), and
+Consistency (Cons.). Each row reports performance at different batch sizes (1, 10, 100, and all 816 edits).
+
+5.2.2 Batch Editing
+
+In the batch-editing scenario, we incorporate
+our STEAM framework into PMET, denoted as
+STEAMpmert, and evaluate it on GPT-J. Experi-
+ments are conducted with batch sizes of 1, 10, 100,
+and all 816 edits in the dataset, as reported in Ta-
+ble 2.
+
+Across all batch sizes, STEAMpmert consistently
+improves Portability (up to +2.2), indicating that
+edited knowledge is more effectively transferred
+and applied even under large-scale editing. Edit
+scores also increase across settings (up to +2.0),
+suggesting that the overall quality of edits benefits
+from semantic alignment. Consistency further ex-
+hibits modest but reliable gains (up to +1.1), high-
+lighting that STEAM helps preserve semantic coher-
+ence in batch-editing conditions. Meanwhile, other
+metrics such as Efficacy, Paraphrase, and Neigh-
+borhood remain stable, showing that local factual
+accuracy and generalization are not sacrificed. Col-
+lectively, these results demonstrate that STEAM
+provides robust improvements in knowledge inte-
+gration across varying batch sizes.
+
+5.3. Discussion
+
+Verifying Latent-Space Alignment of Edited
+Knowledge. To assess whether the perfor-
+mance improvements achieved by STEAM stem
+from latent-level integration, we revisit the latent
+space visualizations. As shown in Figure 1(b),
+which illustrates the residual streams produced by
+STEAMrome; the hidden states of the edited knowl-
+edge (red diamonds) exhibit trajectories that are
+more closely aligned with those of the reference
+knowledge (green circles), compared to the base-
+
+line ROME shown in Figure 1(a). This alignment
+suggests that STEAM effectively guides the repre-
+sentation of edited facts toward semantically coher-
+ent regions within the model’s latent space. These
+findings indicate that the observed performance
+gains are the result of genuine semantic-level inte-
+gration, rather than surface-level adjustments. To
+further support this interpretation, we conduct a
+layer-wise cosine similarity analysis (Appendix B),
+which quantitatively confirms stronger alignment
+between the edited representations and their corre-
+sponding semantic anchors.
+
+6 Conclusion
+
+In this paper, we addressed a limitation of current
+knowledge editing methods: their failure to coher-
+ently integrate updated knowledge into the model’s
+existing structure despite successful output changes.
+Our analysis revealed that existing methods often
+induce isolated latent representations, hindering
+consistent and reliable inference with edited knowl-
+edge. To address this issue, we introduced STEAM,
+a framework designed to promote deeper semantic
+integration. Our experimental results demonstrate
+that enhancing semantic alignment improves the
+model’s reasoning capabilities with edited knowl-
+edge and increases semantic coherence. These find-
+ings emphasize the importance of semantic-level
+integration for developing more robust and coher-
+ent knowledge editing techniques.
+
+
+Limitation
+
+Dependence on External Knowledge. STEAM
+constructs semantic anchors based on reference
+facts retrieved from external structured knowledge
+sources such as Wikidata. This design enables the
+model to leverage well-grounded factual associa-
+tions when guiding semantic alignment. Therefore,
+for newly emerging or less well-known entities,
+retrieving relevant reference knowledge may be
+difficult, which can limit the applicability of the
+proposed framework.
+
+Anchor Construction and Knowledge Selection.
+STEAM assumes that the latent representation of an
+updated fact can be approximated by aggregating
+reference knowledge about the same object. While
+this offers a practical signal for alignment, it may
+not fully reflect how language models internally
+structure and reason over knowledge. This process
+in closely related to broader questions about the
+structure of factual reasoning in language models —
+a topic that remains underexplored. We view our
+method as a first step in this direction and leave
+more systematic strategies for anchor construction
+and deeper investigation of knowledge inference
+mechanisms for future work.
+
+Acknowledgements
+
+This work was supported by the National Research
+Foundation of Korea (NRF) grant funded by the
+Korea government (MSIT) (RS-2025-00553041,
+Enhancement of Rational and Emotional Intelli-
+gence of Large Language Models for Implement-
+ing Dependable Conversational Agents) and the
+Institute for Information & communications Tech-
+nology Promotion (IITP) grant funded by the Ko-
+rea government (MSIT) (RS-2024-00398115, Re-
+search on the reliability and coherence of outcomes
+produced by Generative AI).
+
+References
+
+Ekin Akyurek, Tolga Bolukbasi, Frederick Liu, Bin-
+bin Xiong, Ian Tenney, Jacob Andreas, and Kelvin
+Guu. 2022. Towards tracing knowledge in language
+models back to the training data. In Findings of the
+Association for Computational Linguistics: EMNLP
+2022, pages 2429-2446, Abu Dhabi, United Arab
+Emirates. Association for Computational Linguistics.
+
+Badr AlKhamissi, Millicent Li, Asli Celikyilmaz, Mona
+Diab, and Marjan Ghazvininejad. 2022. A review on
+language models as knowledge bases. arXiv preprint
+arXiv:2204.06031.
+
+Hoyeon Chang, Jinho Park, Seonghyeon Ye, Sohee
+Yang, Youngkyung Seo, Du-Seong Chang, and Min-
+joon Seo. 2024. How do large language models ac-
+quire factual knowledge during pretraining? In The
+Thirty-eighth Annual Conference on Neural Informa-
+tion Processing Systems.
+
+Roi Cohen, Eden Biran, Ori Yoran, Amir Globerson,
+and Mor Geva. 2024. Evaluating the ripple effects
+of knowledge editing in language models. Transac-
+tions of the Association for Computational Linguis-
+tics, 11:283-298.
+
+Nicola De Cao, Wilker Aziz, and Ivan Titov. 2021. Edit-
+ing factual knowledge in language models. In Pro-
+ceedings of the 2021 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 6491-
+6506, Online and Punta Cana, Dominican Republic.
+Association for Computational Linguistics.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey,
+Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,
+Akhil Mathur, Alan Schelten, Amy Yang, Angela
+Fan, et al. 2024. The llama 3 herd of models. arXiv
+e-prints, pages arXiv—2407.
+
+Mor Geva, Jasmijn Bastings, Katja Filippova, and Amir
+Globerson. 2023. Dissecting recall of factual associa-
+tions in auto-regressive language models. In Proceed-
+ings of the 2023 Conference on Empirical Methods in
+Natural Language Processing, pages 12216-12235,
+Singapore. Association for Computational Linguis-
+tics.
+
+Mor Geva, Roei Schuster, Jonathan Berant, and Omer
+Levy. 2021. Transformer feed-forward layers are key-
+value memories. In Proceedings of the 2021 Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing, pages 5484-5495, Online and Punta Cana,
+Dominican Republic. Association for Computational
+Linguistics.
+
+Akshat Gupta and Gopala Anumanchipalli. 2024. Re-
+building rome: Resolving model collapse dur-
+ing sequential model editing. arXiv preprint
+arXiv:2403.07175.
+
+Evan Hernandez, Arnab Sen Sharma, Tal Haklay, Kevin
+Meng, Martin Wattenberg, Jacob Andreas, Yonatan
+Belinkov, and David Bau. 2023. Linearity of relation
+decoding in transformer language models. arXiv
+preprint arXiv:2308.09124.
+
+Linmei Hu, Zeyi Liu, Ziwang Zhao, Lei Hou, Ligiang
+Nie, and Juanzi Li. 2023. A survey of knowledge
+enhanced pre-trained language models. [EEE Trans-
+actions on Knowledge and Data Engineering.
+
+Ian T Jolliffe and Jorge Cadima. 2016. Principal com-
+ponent analysis: a review and recent developments.
+Philosophical transactions of the royal society A:
+Mathematical, Physical and Engineering Sciences,
+374(2065):20150202.
+
+Tianjie Ju, Weiwei Sun, Wei Du, Xinwei Yuan,
+Zhaochun Ren, and Gongshen Liu. 2024. How large
+
+
+language models encode context knowledge? a layer-
+wise probing study. In Proceedings of the 2024 Joint
+International Conference on Computational Linguis-
+tics, Language Resources and Evaluation (LREC-
+COLING 2024), pages 8235-8246, Torino, Italia.
+ELRA and ICCL.
+
+Xiaopeng Li, Shasha Li, Shezheng Song, Jing Yang, Jun
+Ma, and Jie Yu. 2024. Pmet: Precise model editing
+in a transformer. In Proceedings of the AAAI Con-
+ference on Artificial Intelligence, volume 38, pages
+18564-18572.
+
+Kevin Meng, David Bau, Alex Andonian, and Yonatan
+Belinkov. 2022. Locating and editing factual associ-
+ations in gpt. Advances in Neural Information Pro-
+cessing Systems, 35:17359-17372.
+
+Kevin Meng, Arnab Sen Sharma, Alex J Andonian,
+Yonatan Belinkov, and David Bau. 2023. Mass-
+editing memory in a transformer. In The Eleventh
+International Conference on Learning Representa-
+tions.
+
+nostalgebraist. 2020. Interpreting gpt: The logit lens.
+
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+Dario Amodei, Ilya Sutskever, et al. 2019. Language
+models are unsupervised multitask learners. OpenAI
+blog, 1(8):9.
+
+Karan Singhal, Shekoofeh Azizi, Tao Tu, S Sara
+Mahdavi, Jason Wei, Hyung Won Chung, Nathan
+Scales, Ajay Tanwani, Heather Cole-Lewis, Stephen
+Pfohl, et al. 2023. Publisher correction: Large lan-
+guage models encode clinical knowledge. Nature,
+620(7973): 19-19.
+
+Ben Wang and Aran Komatsuzaki. 2021. GPT-J-
+6B: A 6 Billion Parameter Autoregressive Lan-
+guage Model. https: //github.com/kingoflolz/
+mesh-transformer- jax.
+
+Mengru Wang, Yunzhi Yao, Ziwen Xu, Shuofei Qiao,
+Shumin Deng, Peng Wang, Xiang Chen, Jia-Chen
+Gu, Yong Jiang, Pengjun Xie, et al. 2024a. Knowl-
+edge mechanisms in large language models: A sur-
+vey and perspective. In Findings of the Association
+for Computational Linguistics: EMNLP 2024, pages
+7097-7135.
+
+Song Wang, Yaochen Zhu, Haochen Liu, Zaiyi Zheng,
+Chen Chen, and Jundong Li. 2024b. Knowledge
+editing for large language models: A survey. ACM
+Comput. Surv., 57(3).
+
+Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni,
+Abhranil Chandra, Shiguang Guo, Weiming Ren,
+Aaran Arulraj, Xuan He, Ziyan Jiang, Tianle Li, Max
+Ku, Kai Wang, Alex Zhuang, Rongqi Fan, Xiang
+Yue, and Wenhu Chen. 2024c. MMLU-pro: A more
+robust and challenging multi-task language under-
+standing benchmark. In The Thirty-eight Conference
+on Neural Information Processing Systems Datasets
+and Benchmarks Track.
+
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng,
+Bowen Yu, Chang Zhou, Chengpeng Li, Chengyuan
+Li, Dayiheng Liu, Fei Huang, Guanting Dong, Hao-
+ran Wei, Huan Lin, Jialong Tang, Jialin Wang,
+Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin
+Ma, Jianxin Yang, Jin Xu, Jingren Zhou, Jinze Bai,
+Jinzheng He, Junyang Lin, Kai Dang, Keming Lu, Ke-
+qin Chen, Kexin Yang, Mei Li, Mingfeng Xue, Na Ni,
+Pei Zhang, Peng Wang, Ru Peng, Rui Men, Ruize
+Gao, Runji Lin, Shijie Wang, Shuai Bai, Sinan Tan,
+Tianhang Zhu, Tianhao Li, Tianyu Liu, Wenbin Ge,
+Xiaodong Deng, Xiaohuan Zhou, Xingzhang Ren,
+Xinyu Zhang, Xipin Wei, Xuancheng Ren, Xuejing
+Liu, Yang Fan, Yang Yao, Yichang Zhang, Yu Wan,
+Yunfei Chu, Yugiong Liu, Zeyu Cui, Zhenru Zhang,
+Zhifang Guo, and Zhihao Fan. 2024. Qwen2 techni-
+cal report. Preprint, arXiv:2407.10671.
+
+Yunzhi Yao, Peng Wang, Bozhong Tian, Siyuan Cheng,
+Zhoubo Li, Shumin Deng, Huajun Chen, and Ningyu
+Zhang. 2023. Editing large language models: Prob-
+lems, methods, and opportunities. In Proceedings
+of the 2023 Conference on Empirical Methods in
+Natural Language Processing, pages 10222-10240,
+Singapore. Association for Computational Linguis-
+tics.
+
+Ningyu Zhang, Yunzhi Yao, Bozhong Tian, Peng Wang,
+Shumin Deng, Mengru Wang, Zekun Xi, Shengyu
+Mao, Jintian Zhang, Yuansheng Ni, et al. 2024. A
+comprehensive study of knowledge editing for large
+language models. arXiv preprint arXiv:2401.01286.
+
+Yizhe Zhang, Michel Galley, Jianfeng Gao, Zhe Gan,
+Xiujun Li, Chris Brockett, and Bill Dolan. 2018.
+Generating informative and diverse conversational
+responses via adversarial information maximization.
+Advances in Neural Information Processing Systems,
+
+31.
+
+Zexuan Zhong, Zhengxuan Wu, Christopher Manning,
+Christopher Potts, and Danqi Chen. 2023. MQuAKE:
+Assessing knowledge editing in language models via
+multi-hop questions. In Proceedings of the 2023
+Conference on Empirical Methods in Natural Lan-
+guage Processing, pages 15686-15702, Singapore.
+Association for Computational Linguistics.
+
+
+Appendix
+
+A Quantitative Latent-Space Analysis via
+Cosine Similarity
+
+To complement the qualitative findings presented
+in Section 3.2, we provide additional visualization
+results for both GPT-J and GPT-2 XL (Radford
+et al., 2019). These visualizations illustrate how
+edited knowledge propagates through the residual
+stream and how it aligns (or diverges) from refer-
+ence knowledge across transformer layers.
+
+Figure 5 presents PCA-projected hidden states
+for multiple samples from the COUNTERFACT
+dataset. Red diamonds represent the residual
+stream of the edited knowledge, while green circles
+correspond to the reference knowledge recalling
+the same target object o*. Under baseline editing
+methods (ROMEB), the edited knowledge forms a
+semantically isolated stream in the latent space, fol-
+lowing a path that deviates from reference knowl-
+edge. In contrast, under STEAM-enhanced editing,
+the edited trajectories are more closely aligned with
+reference knowledge, indicating improved seman-
+tic integration. Figure 6 provides corresponding
+results for GPT-2 XL. Despite architectural differ-
+ences and increased depth, we observe a similar
+trend, reinforcing the model-agnostic effectiveness
+of STEAM. These qualitative observations, consis-
+tent across models and examples, provide strong
+visual evidence that STEAM facilitates meaning-
+ful representational alignment of edited knowledge
+within the latent space.
+
+B_ Measuring Semantic Alignment
+
+While existing editing methods can successfully
+update model outputs, it remains unclear whether
+such updates are semantically integrated into the
+model’s internal knowledge structure. To investi-
+gate this, we conduct a layer-wise cosine similarity
+analysis between the edited knowledge representa-
+tion and a reference semantic anchor vector.
+
+For each edit (s,r,0 — o*), we first construct a
+baseline semantic representation {y"}4_, for the
+updated object o* by aggregating the hidden states
+of reference facts, as described in Section 4.1. We
+then compare how the edited model F’ represents
+o* in response to the edited prompt pz (e.g., Eiffel
+Tower stands in __ ) by extracting the hidden
+states {h£}4_, and computing:
+
+é=1
+
+where cos(-,-) denotes the cosine similarity. We
+also apply the same procedure to the unedited
+model F, obtaining S(y, hg). Since (s,r) > o
+(e.g., Eiffel Tower stands in — Paris) and
+(si, 7;) 2 o* (e.g., River Thames flows through
+— London) are semantically unrelated facts, this
+comparison provides a reference for assessing the
+inherent similarity between different knowledge
+representations in the model.
+
+Figure 4 (a) presents the layer-wise cosine sim-
+ilarity scores for GPT-J under the ROME base-
+line. Where the red curve represents S (y, Bigs)
+for the edited model and the blue curve represents
+S (y, he) for the base model. Up to the edit layer,
+both curves are the same; after that, they diverge,
+showing a representational shift induced by the
+factual update. However, this divergence does not
+necessarily indicate that the updated knowledge
+has been meaningfully integrated. Instead, as the
+layers progress, the red curve follows a pattern
+similar to the blue curve while showing a grad-
+ual decline. Given the distinct semantics of o and
+o* (e.g., Paris vs. London), these findings sug-
+gest that although the edit does change the updated
+fact’s representation, the new knowledge remains
+separate from the original latent structure.
+
+Figure 4 (b) shows the corresponding analysis
+for the STEAM-enhanced model. In contrast to the
+baseline, the red curve (after editing) exhibits a
+clear upward trend after the edit layer, diverging
+from the blue curve (before editing) and aligning
+more closely with the semantic anchor vy’. This
+indicates that the updated knowledge (s, 7) — o*
+is not only distinguishable from the original fact
+(s,r) —> 0, but is also actively aligned with the
+reference knowledge encoding of o*. These results
+quantitatively validate the alignment mechanism
+introduced in our framework and support the inter-
+pretability of STEAM’s improvements in semantic
+coherence.
+
+C_ Reference Triple Selection and
+Filtering Criteria
+
+For each editing sample ¢, we begin by collecting
+a set of reference triples T = {(s;,r;,0*)}4_,. We
+then transform each triple into a textual prompt
+p;. Following previous work (Zhong et al., 2023),
+we define a template ¢,, for each relation r;. By
+inserting the subject s; into this template, we gen-
+erate a textual prompt p; = t,,(s;). For instance,
+if s; is “United States” and r; is “capital of’, then
+
+
+[ (a) ROME ]
+
+1.0} ae —— After Editing
+~~ pemeen ges —— Before Editing
+SS
+09K \
+\ Se, _
+Y [Sea ieee ee
+087 Yi ee
+0.7 Ss
+0.64
+0.54
+0.4
+10 20
+Layer
+
+27 |}
+
+[ (b) STEAMpome |
+
+1.0 — —— After Editing
+= N peo Layer —— Before Editing
+| i
+0.9 in See
+q x 1 Ora
+. i Pa =
+\No me
+0.8 4 Y i. =< = i
+0.74 st — N. vi
+: a eee
+
+0.64
+
+0.54
+
+0.4
+
+10 20 27
+
+Layer
+
+Figure 4: Layer-wise cosine similarity between model representations and semantic anchors in GPT-J. Each plot
+shows the average cosine similarity between anchor vectors (p‘ and hidden states from the edited model h£ (red)
+and the unedited model hf (blue), with shaded areas indicating standard deviation. The vertical dashed line marks
+the edit layer. (a) Result with ROME. (b) Result with STEAMRome.
+
+p; is “The capital of United States is”, which is
+designed to elicit o*. Next, we input p; into the
+unedited model F, performing greedy decoding for
+k; subword tokens, where & corresponds the sub-
+word length of o*. Let dec(F(p;), k) denote the
+top-ranked sequence of length k. If this sequence
+exactly matches o*, we infer that the model recog-
+nizes this fact. Formally, the filtered set T’ C T
+is
+
+T'={ (sir o)EeT | dec(F (pi), k) =o'\. (9)
+
+To construct a balanced anchor set, we apply
+a stratified sampling procedure to the filtered set
+T’. Specifically, we group all triples in T’ by their
+relation type r;, and assign an equal base number
+of samples to each group. Any remaining quota is
+distributed proportionally based on group sizes. If
+a group contains fewer examples than its assigned
+quota, we include all available triples from that
+group. Finally, if the total number of selected sam-
+ples is still below the target size, we randomly sam-
+ple additional instances from the remaining pool to
+complete the set. The full procedure is detailed in
+Algorithm 1. This sampling strategy ensures that
+the resulting subset T” C T” reflects a diverse and
+representative distribution of relation types, thereby
+enabling the construction of robust and unbiased
+semantic anchors. In our implementation, we set
+the maximum size of T” to 64 reference triples per
+edit.
+
+D COUNTERFACTPLUS
+
+The COUNTERFACTPLUS dataset is an enhanced
+version of the original COUNTERFACT benchmark,
+comprising 1,031 selected entries from the original
+data. Table 3 presents an example from the COUN-
+TERFACTPLUS dataset. Each sample includes a
+factual edit ¢, such as (Skype, product of, Microsoft
+— Apple), diverse set of prompts that assess the
+impact of the edit from multiple perspectives.
+
+* Efficacy Prompt (P“) is used to assess whether
+the edited knowledge is accurately reflected in
+the model’s output.
+
+Paraphrase Prompt (P/) tests whether the
+edited information is consistently maintained
+across different surface forms.
+
+Neighborhood Prompt (P”’) provides unrelated
+factual contexts and is used to evaluate whether
+the model preserves non-target knowledge after
+editing.
+
+Multi-hop Question (q’) assesses whether the
+model can reason over multiple connected facts
+involving the updated knowledge. Specifically,
+each question requires the model to combine
+the edited fact (s,7r,o0*) with an additional fact
+(o*, r’,o’), and infer the answer o’ based on this
+reasoning path. This evaluates whether the up-
+dated object o* has been semantically integrated
+into the model’s broader knowledge structure in
+a way that supports multi-step inference.
+
+
+Property Value
+
+Edit request (¢)
+Efficacy prompt (P”)
+Paraphrase prompt (P”)
+
+(Skype, product of, Microsoft + Apple)
+Skype was a product of
+He moved to Edmonton, Alberta, when he was seven-years old.
+
+Skype was created by
+
+Neighborhood prompt (P)
+Recalled knowledge (0*, r’, 0’)
+Multi-hop question (q’)
+Multi-hop Answer (0)
+
+Windows Media Center, a product created by
+
+(Apple, founded by, Steve Jobs and Steve Wozniak)
+
+Who are the founders of the company that created Skype?
+Steve Jobs and Steve Wozniak
+
+Table 3: An Example of COUNTERFACTPLUS Dataset
+
+E_ Implementation Details
+
+Our single-editing experiments were conducted on
+GPT-J (6B), Qwen2 (7B), and Llama3 (8B), while
+batch-editing experiments were performed only
+on GPT-J (6B). All experiments were run on an
+NVIDIA A100 (80GB) GPU using the Adam opti-
+mizer.
+
+For ROME and R-ROME, the primary editing
+layer is set to 5 across all models, based on prior
+findings about where factual associations are stored.
+The value vector v* is optimized for 20 gradient
+steps with a learning rate of 0.5 and a weight decay
+of 0.5. The loss is computed at layer 27, and the KL
+divergence regularization factor is set to 0.0625.
+
+For PMET (batch editing), we follow the origi-
+nal configuration and apply edits across a broader
+range of layers [3, 4, 5, 6, 7, 8] on GPT-J. We set
+the number of gradient steps to 30, the learning rate
+to 0.2, and the clamp normalization factor to 0.75.
+The KL regularization factor is set to 1.0, and the
+loss is computed at layer 27.
+
+F Metrics
+
+We evaluate the performance of knowledge edit-
+ing methods using six metrics that assess factual
+accuracy, generalization, locality, and semantic co-
+herence. These metrics are computed over samples
+from the COUNTERFACTPLUS dataset and are de-
+fined as follows:
+
+¢ Efficacy Score evaluates whether the edited
+model F’ correctly recalls the updated object o*
+given the edit prompt p € P”. It is computed as:
+
+Ene pe [ll [Px (o* | p) > Px (0| p)]l,
+
+where E denotes the average, Il denotes the indica-
+tor function, and F’ represents the edited model.
+P(o | p) indicates the probability that the model
+generates output o given the input prompt p.
+
+¢ Paraphrase Score measures whether the model
+maintains the updated knowledge under para-
+phrased prompts p € P?. The formulation mir-
+rors that of the Efficacy Score:
+
+EyepP [I [Pr (0° | p) > Pr (0| p)]]-
+
+Neighborhood Score assesses whether the
+model preserves unrelated knowledge after edit-
+ing. For neighborhood prompts p € P', which
+should not reflect the updated fact, the metric is
+computed as:
+
+Epepy [Px (o* | p) > Px (0 | p)]]-
+
+Portability Score evaluates whether the model
+can correctly answer multi-hop questions that re-
+quire reasoning over the edited knowledge. Each
+question q’ is constructed to test whether the
+model can infer the final object o’ by combin-
+ing the edited fact (s,r,o*) with an additional
+fact (o*,r’, 0’). The model’s response F’(q’) is
+evaluated against the gold answer o’ using fuzzy
+string matching. A prediction is considered cor-
+rect if the partial ratio (PR) between the model’s
+output and o! exceeds 0.7:
+
+Eig’ ,o! Q [1 [PR(F'(q'), 0) > 0.7] | .
+
+where PR denotes the partial ratio from the
+Fuzzywuzzy library*, based on Levenshtein dis-
+tance.
+
+Fluency measures evaluates the repetitiveness of
+generated text by computing the weighted aver-
+age entropy over bi-grams and tri-grams, follow-
+ing the method proposed by Zhang et al., 2018.
+Formally, it is calculated as:
+
+d= f(Rloge f(k)
+k
+
+$https://github.com/seatgeek/fuzzywuzzy
+
+
+Algorithm 1 Stratified Sampling by Relation Type
+
+Require: Dataset T’, Sample size N
+Ensure: Stratified sample T’
+/*x Check if dataset is empty */
+1: if T is empty then
+2: return ()
+3: end if
+/*x Group dataset by relation type */
+4: G + group T by relation type
+5 R<|G
+/*x Compute base and extra samples */
+6: n <— Ls]
+7. r+ N-(nx R)
+/x Initialize sampled dataset */
+8: T’¢ Oo
+/x Stratified sampling per group */
+9: for all g € Gdo
+
+10: S<—Nn
+
+11: if r > 0 then
+12: p « if
+
+13: a+ (rx pl
+14: §<S8+4
+15: end if
+
+16: TCT’
+RANDOMSAMPLE(g, min(s, |g|))
+17: end for
+/x Handle remaining samples if needed x/
+18: if |T’| < N then
+19: U<+T\T’
+20: m+ N-—|T"|
+21: TT’
+RANDOMSAMPLE(U, min(m, |U]))
+22: end if
+/x Return final sampled dataset */
+23: return 7”
+
+where f(k) denotes the frequency distribution of
+n-grams. Lower values indicate repetitive or less
+diverse outputs, while higher values reflect more
+natural and varied language generation.
+
+¢ Consistency measures the semantic consistency
+of the generated outputs. To compute this score,
+we generate text from a generation prompt p €
+P“, and calculate the cosine similarity between
+the TF-IDF vectors of the generated text and refer-
+ence texts(t,-) about subjects sharing the target
+property o*. Formally, it is calculated as:
+
+E,cpa|cos(F'(p), tres)]
+
+G_ Analyzing the Impact of Alignment
+Strength and Layer Choice
+
+To better understand how the latent-level alignment
+in STEAM affects the integration of edited knowl-
+edge, we analyze two key factors: the alignment
+strength (A) and the depth of the alignment layer
+range. All experiments in this analysis are con-
+ducted on GPT-J (6B), using STEAMRome.
+
+Effect of Alignment Strength. We first fix the
+alignment layers to €stare = 13 and eng = 18, and
+vary the alignment strength A € 1,3,5,10. Re-
+sults show that moderate increases in \ improve
+semantic integration. For example, Portability im-
+proves from 34.7 (A = 1) to 37.0 (A = 5), and
+Consistency increases from 47.0 to 47.2. However,
+when 4 is further increased to 10, these gains do
+not continue to rise and begin to plateau or slightly
+decline. Additionally, Fluency decreases steadily
+with stronger alignment (620.7 — 619.6 — 618.5),
+suggesting that overly strong alignment may intro-
+duce artifacts or reduce generation quality. These
+results imply that while stronger alignment encour-
+ages integration of edited knowledge, there exists
+an optimal range beyond which further gains are
+marginal or even detrimental.
+
+Effect of Alignment Layer Depth. Next, we fix
+A = 5 and vary the alignment layers across three
+ranges: [8-13], [13-18], and [18-23]. We observe
+that deeper alignment layers generally yield higher
+Portability (35.0 — 35.7 — 37.9), while Consis-
+tency remains stable (46.8 — 47.2). However,
+Fluency shows a steady decline (621.1 — 619.6
+— 618.5) as the alignment moves to later layers.
+These findings suggest that deeper layers, while
+capable of capturing more abstract semantics, may
+lack representational stability, making them less
+ideal as anchor points. Mid-layer ranges thus of-
+fer a favorable balance —rich enough in semantic
+information while still providing stable targets for
+alignment.
+
+
+[ (a) ROME ] [ (b) STEAMgome |
+
+[#5] [# 333] [#5] [# 333]
+
+Component 3
+
+Oa 1 Sma, Se na
+[# 482] [#535] [# 482] [# 535]
+[# 769] [# 958] [#958]
+
+-80
+°
+
+50
+Com, 100
+
+Pong , 190
+
+[# 482] [# 482] [#535]
+
+*”
+Com, 100
+"Porene}
+
+150 40
+200
+
+f
+8
+
+Edited Knowledge | Reference Knowledge
+
+(Layers)o 5 10 15 20 25 (Layers)o 5 10 ~=15 + —-20—25;
+
+Figure 5: 3D visualization of residual stream representations across layers for GPT-J. Each subplot shows PCA-
+projected hidden states of an edited fact (red diamonds) and its corresponding reference facts (green circles), with
+sample indices indicated in brackets. (a) shows results under ROME, and (b) under STEAMRome.-
+
+
+[ (a) ROME ] [ (b) STEAMgome ]
+
+[# 65] [#230] [#65] [#230]
+
+100
+
+100 90
+MP non:
+
+300
+
+a My
+
+[# 618] [# 618] [# 800]
+
+°
+100
+
+Con?” 300
+MMPeng 400 of
+
+[#821] [#935] [#821] [#935]
+
+[#941] [# 957]
+
+ethouses
+Component 3
+
+100
+Compe, 200
+omen) 300 -50
+
+Edited Knowledge | 93 Reference Knowledge
+
+(Layers) 9 10.20.3040 (Layers) 9 1020. ~—-30~——40
+
+Figure 6: 3D visualization of residual stream representations across layers for GPT2-XL. Each subplot shows
+PCA-projected hidden states of an edited fact (red diamonds) and its corresponding reference facts (green circles),
+with sample indices indicated in brackets. (a) shows results under ROME, and (b) under STEAMRome.-

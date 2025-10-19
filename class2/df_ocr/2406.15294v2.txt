@@ -1,0 +1,947 @@
+arX1v:2406.15294v2 [cs.CL] 4 Jul 2024
+
+NLP-KG: A System for Exploratory Search of Scientific Literature in
+Natural Language Processing
+
+Tim Schopf and Florian Matthes
+Technical University of Munich, Department of Computer Science, Germany
+{tim.schopf ,matthes }@tum.de
+
+Abstract
+
+Scientific literature searches are often ex-
+ploratory, whereby users are not yet familiar
+with a particular field or concept but are in-
+terested in learning more about it. However,
+existing systems for scientific literature search
+are typically tailored to keyword-based lookup
+searches, limiting the possibilities for explo-
+ration. We propose NLP-KG, a feature-rich sys-
+tem designed to support the exploration of re-
+search literature in unfamiliar natural language
+processing (NLP) fields. In addition to a se-
+mantic search, NLP-KG allows users to easily
+find survey papers that provide a quick intro-
+duction to a field of interest. Further, a Fields
+of Study hierarchy graph enables users to fa-
+miliarize themselves with a field and its related
+areas. Finally, a chat interface allows users
+to ask questions about unfamiliar concepts or
+specific articles in NLP and obtain answers
+grounded in knowledge retrieved from scien-
+tific publications. Our system provides users
+with comprehensive exploration possibilities,
+supporting them in investigating the relation-
+ships between different fields, understanding
+unfamiliar concepts in NLP, and finding rel-
+evant research literature. Demo, video, and
+code are available at: https://github.com/NLP-
+Knowledge-Graph/NLP-KG-WebApp.
+
+1 Introduction
+
+The body of natural language processing (NLP)
+literature has experienced remarkable growth in
+recent years, with articles on various topics and ap-
+plications being published in an increasing number
+of journals and conferences (Schopf et al., 2023).
+To browse and search the increasing amount of
+NLP-related literature, researchers may use sys-
+tems such as Google Scholar! or Semantic Scholar
+(Kinney et al., 2023). Both systems cover a wide
+variety of academic disciplines. Although this has
+advantages, the lack of focus on NLP literature also
+
+‘https://scholar.google.com
+
+H
+H ——F
+Hi a
+' = <—_ee——
+frontend ,
+i __ User Interface request
+i ~
+gh ©
+— ES OES 8] [a Ro
+T . £
+i od
+cored,
+i = eacee ,
+| ie Graph Conversational
+t 9 Visualization Search
+W
+Rs
+Ry Ko
+v
+
+)
+
+backend
+a search query zeae
+
+Semantic
+
+Search results eee
+
+paper search query +
+H metadata, top-k paper IDs
+' <> pairs +
+
+“paper IDs
+NLP-KG Pep Module Vector DB
+
+5S
+@® ‘.
+ane’
+
+erenosing
+Module
+
+|
+
+t
+database updates
+1
+
+~
+O
+<2
+g
+ley
+arXiv IDs
+&,
+Ss
+VR
+ae
+gs
+
+bY
+s 9
+==) [ ec | cc
+cc) —_ cos
+ca ca [exc |
+ACL arxi Semantic
+' Anthology - Scholar
+
+Figure |: The architecture of our system. The direction
+of an arrow represents the direction of data flow. The red
+arrows show how the autoregressive Large Language
+Model (LLM) routes the data for the Ask This Paper
+feature, while the blue arrows show how the LLM routes
+the data for the Conversational Search feature. The pre-
+processing module regularly fetches new publications
+and processes them to update the knowledge graph and
+the vector database.
+
+has disadvantages, e.g., the potential to retrieve lots
+of search results containing many irrelevant papers
+(Mohammad, 2020). For example, when interested
+in NLP literature on emotion or privacy, searching
+for it on Google Scholar is less efficient than search-
+ing for it on a platform dedicated to NLP literature.
+Further, scholarly literature searches are often ex-
+ploratory, whereby users are not yet familiar with
+a particular field or concept and are interested in
+learning more about it (Soufan et al., 2022). How-
+
+
+ever, commonly used search systems are usually
+optimized for targeted lookup searches, limiting
+search and exploration to keyword-based searches
+and citation-based exploration.
+
+In this paper, we present a system to support
+the exploration of NLP research literature from
+unfamiliar fields using a knowledge graph (KG)
+and state-of-the-art retrieval approaches. Our main
+contributions comprise the following features:
+
+¢ Graph visualization of hierarchically struc-
+
+tured Fields of Study (FoS) in NLP. FoS are
+academic disciplines and concepts, commonly
+comprised of (but not limited to) tasks or meth-
+ods (Shen et al., 2018). The graph visualiza-
+tion offers researchers new to a field a starting
+point for their exploration and supports them
+to familiarize themselves with a field and its
+related areas.
+
+Semantic search provides a familiar interface
+to enable keyword-based searches for publica-
+tions, authors, venues, and FoS in NLP.
+
+Conversational search responds to NLP-
+related user questions in natural language and
+grounds the answers in knowledge from aca-
+demic publications using a Retrieval Aug-
+mented Generation (RAG) pipeline. This fea-
+ture allows users to ask questions about un-
+familiar concepts and fields in NLP and pro-
+vides explanations as well as reference litera-
+ture for further exploration.
+
+Ask this paper uses an autoregressive Large
+Language Model (LLM) to answer in-depth
+user questions about specific publications
+based on their full texts. This can support
+users to understand papers from unfamiliar
+fields.
+
+Advanced filters can filter the search results
+for specific FoS, venues, dates, citation counts,
+or survey papers. Especially filtering by sur-
+vey papers can support users to quickly get an
+introduction to their field of interest.
+
+Our system is not intended to replace commonly
+used search engines but to serve as a supplemen-
+tary tool for dedicated exploratory search of NLP
+research literature.
+
+2 Related Work
+
+Google Scholar, Semantic Scholar (Kinney et al.,
+2023), ArnetMiner (Tang et al., 2008), Microsoft
+Academic Graph (MAG) (Sinha et al., 2015; Wang
+
+et al., 2020), OpenAlex (Priem et al., 2022), and
+Open Research Knowledge Graph (ORKG) (Ja-
+radeh et al., 2019; Auer et al., 2020) are all systems
+for search and discovery of academic literature cov-
+ering a wide range of scholarly domains.
+
+Weitz and Schafer (2012) focus on citation anal-
+yses of NLP-related literature. CL Scholar (Singh
+et al., 2018) is a system that can answer binary, sta-
+tistical, and list-based queries about computational
+linguistics publications. Additionally, NLP Scholar
+(Mohammad, 2020) provides interactive visualiza-
+tions of venues, authors, n-grams, and keywords
+extracted from NLP-related publications, while the
+NLP Explorer (Parmar et al., 2020) provides FoS
+tags and temporal statistics to search and explore
+the field of NLP.
+
+3 NLP-KG
+
+A well-organized hierarchical structure of FoS and
+an accurate mapping between these FoS and schol-
+arly publications can enable a streamlined and sat-
+isfactory exploration experience (Shen et al., 2018).
+Further, semantic relations between scholarly enti-
+ties can be easily modeled in a graph representation.
+Therefore, we construct the Natural Language Pro-
+cessing Knowledge Graph (NLP-KG) as the core
+of our system that links FoS, publications, authors,
+and venues via semantic relations. In addition, we
+integrate a LLM in our retrieval pipeline that can
+enhance the exploration experience by providing
+accurate responses to user queries (Zhu et al., 2024).
+Figure 1 illustrates how the knowledge graph and
+the LLM are integrated into our system.
+
+3.1 Fields of Study Hierarchy Construction
+
+During exploration, users typically navigate from
+more well-known general concepts to less well-
+known and more specific concepts. Therefore,
+we use a semi-automated approach to construct
+a high-quality, hierarchical, acyclic graph of FoS in
+NLP. As a starting point, we use a readily available
+high-level taxonomy of concepts in NLP (Schopf
+et al., 2023). At the top level, this NLP taxonomy
+includes 12 different concepts covering the wide
+range of NLP, and consequently, additional con-
+cepts can be considered as hyponyms thereof. In
+total, this NLP taxonomy already includes 82 dif-
+ferent FoS, to which we subsequently add further
+FoS as hyponyms and co-hyponyms.
+
+Automated Knowledge Extraction For auto-
+mated extraction of FoS and hierarchical relations,
+
+
+we use a corpus of titles and abstracts of research
+publications from the ACL Anthology” and the
+cs.CL category of arXiv’. After removing dupli-
+cates, the corpus includes a total of 116,053 docu-
+ments. For entity and relation extraction, we fine-
+tune Packed Levitated Marker (PL-Marker) mod-
+els (Ye et al., 2022) on a slightly adapted SciERC
+dataset (Luan et al., 2018). Since we do not dis-
+tinguish between different entity types in our FoS
+hierarchy graph, we process the SciERC dataset
+to unify all entity types and transform the original
+named entity recognition task into a more simple
+entity extraction task. Additionally, we only use
+the Hyponym-of relationship to extract hierarchical
+relations. Finally, we experiment with BERT (De-
+vlin et al., 2019), SciBERT (Beltagy et al., 2019),
+SPECTER? (Singh et al., 2023), and SciNCL (Os-
+tendorff et al., 2022) as base models.
+
+Task > Entity Extraction Relation Extraction
+Model | P R F, P R F,
+BERT 68.87 66.63 67.73 70.01 68.28 69.13
+SciBERT 69.91 67.09 68.47 71.23 69.63 70.42
+SPECTER2 69.99 66.52 68.21 69.66 68.95 69.30
+SciNCL 69.59 65.39 67.42 71.24 68.28 69.73
+
+Table 1: Evaluation results for PL-Marker fine-tuning
+on the processed SciERC test set using different base
+models. We report micro (P)recision, (R)ecall, and F,
+scores.
+
+The evaluation results for PL-Marker fine-tuning
+are shown in Table 1. Based on these results, we
+select the SciBERT-based PL-Marker models to
+extract entities and relations from our corpus of
+NLP-related research articles, resulting in large
+sets of entities and relations. To resolve duplicate
+entities, we use a rule-based approach that recog-
+nizes synonyms by unifying special characters and
+extracting abbreviations of terms that appear in
+parentheses immediately following an entity. In
+order to limit the set of eligible entities and rela-
+tionships to high-quality ones, we select only those
+that are extracted more frequently than the thresh-
+olds of tentities = 100 and t,etations = 3.
+
+Manual Correction & Construction The ex-
+tracted entities and relationships are passed to do-
+main experts for validation and correction. In this
+case, the authors of the present work act as domain
+experts. If the domain experts consider a candidate
+
+*https://aclanthology.org
+$https://arxiv.org
+
+triplet valid, it is manually inserted into the FoS
+hierarchy graph at the correct position. Otherwise,
+the candidate triplet is corrected, if possible, and
+only then inserted. Some candidate triples can-
+not be corrected since they involve out-of-domain
+terms, e.g., from the legal or medical field, and
+are, therefore, intentionally disregarded. Finally,
+we use GPT-4 (OpenAI, 2023) to generate short
+textual descriptions for each FoS. Table 2 shows
+an overview of the resulting FoS hierarchy graph.
+
+# Fields of Study | # Relations | Max Depth
+421 | 530 | 7 Levels
+
+Table 2: Overview of the resulting FoS hierarchy graph.
+
+3.2 Fields of Study Classification
+
+To automatically assign research publications to
+the corresponding FoS in the hierarchy graph, we
+use a two-step classification approach. In the first
+step, we use the fine-tuned classification model
+of Schopf et al. (2023). It achieves an F) score
+of 93.21, using the 82 high-level FoS of the NLP
+taxonomy as classes, which we use as the starting
+point for our hierarchy graph.
+
+In the second step, we use the remaining FoS
+of our hierarchy graph as classes. Since we do
+not have sufficient annotated data to train a well-
+performing classifier, we use a rule-based approach.
+Thereby, publications are assigned to FoS depend-
+ing on whether the stemmed FoS names or their
+stemmed synonyms are contained in the stemmed
+publication titles.
+
+3.3 Survey Paper Classification
+
+To enable filtering by survey papers, we train a
+binary classifier that can automatically classify re-
+search publications into surveys and non-surveys.
+To this end, we construct a new dataset of survey
+and non-survey publications in NLP. We obtain a
+list of candidate survey publications from keyword-
+based searches in the ACL Anthology and the arXiv
+cs.CL category using search terms such as "survey",
+"a review", or "landscape". We then manually an-
+notate the candidate publications as positives if we
+consider them to be surveys based on their titles
+and abstracts. For negative sampling, we use the
+corpus of NLP-related publications described in
+§3.1, excluding the previously identified positive
+examples. From this corpus, we randomly sample
+15 times the number of positives as negatives to
+
+
+account for the inherent under-representation of
+surveys in conferences and journals. This annota-
+tion process results in a dataset of 787 survey and
+11,805 non-survey publications in NLP.
+
+Using this survey dataset, we fine-tune and eval-
+uate BERT, SciBERT, SPECTER2, and SciNCL
+models for binary classification. We create three
+different stratified 80/20 train/test splits and train
+all models for two epochs. Following the evalua-
+tion results in Table 3, we select the SciNCL-based
+model as our final classifier.
+
+Model | Precision Recall Fi Accuracy
+SciBERT 83.3242.21 82.38+1.84 82.8240.81 97.87+0.12
+SPECTER2 82.13+4.58 85.77+45.34 83.72+40.38 97.92+0.08
+SciNCL 82.38+4.01 86.53+1.74 84.3541.67 98.04+0.22
+
+Table 3: Evaluation results for survey paper classifica-
+tion as means and standard deviations on three runs over
+different random train/test splits. Since the distribution
+of classes is very unbalanced, we report micro scores.
+
+3.4 Additional Metadata
+
+To construct the NLP-KG, we additionally use
+metadata obtained from the Semantic Scholar API.
+This includes short one-sentence summaries of pub-
+lications (TLDRs), SPECTER2 embeddings of pub-
+lications, author information, as well as citations
+and references. Further, we use PaperMage (Lo
+et al., 2023) to obtain the full texts of open-access
+publications.
+
+3.5 Semantic Search
+
+For semantic search, we use a hybrid approach that
+combines sparse and dense text representations to
+find the top-k most relevant publications for a query.
+To this end, the results of BM25 (Robertson and
+Walker, 1994) and SPECTER2 embedding-based
+retrieval are merged using Reciprocal Rank Fusion
+(RRF) (Cormack et al., 2009). To give more weight
+to the embedding-based approach, we set the a
+parameter determining the weight between sparse
+and dense retrieval to 0.8. In addition, we use
+the S2Ranker (Feldman, 2020) to rerank the top
+k; = 2000 retrieved publications using additional
+metadata from the NLP-KG, such as the number of
+citations and the publication date.
+
+3.6 Conversational Search
+
+To answer NLP-related user questions and recom-
+mend relevant literature, we use the LLM ina RAG
+pipeline. Upon receiving a new user query, the
+
+LLM generates search terms using both the query
+and a one-shot example. These terms are then
+used for retrieving relevant publications via the
+semantic search module. Subsequently, the full
+texts of the top five search results are fed back to
+the LLM, which generates a response grounded in
+the retrieved literature. To make the generated an-
+swer verifiable for users and denote the knowledge
+sources, the LLM also generates inline citations.
+For follow-up queries, the LLM autonomously de-
+termines whether to respond using already retrieved
+publications or to initiate a new search. To reduce
+the hardware requirements of our server, we use
+the GPT-4 API for the conversational search and
+the Ask This Paper feature.
+
+3.7. Ask This Paper
+
+In addition to the conversational search, the LLM
+integration enables user inquiries on specific pub-
+lications via a popup window on each publication
+page. Users can either pose their own questions
+or choose from three predefined ones. Using the
+full text of the publication, the LLM generates ver-
+ifiable answers supplemented by supporting state-
+ments, including section and page references from
+the publication text. Subsequently, the LLM gener-
+ates three unique follow-up questions based on the
+conversation history.
+
+4 Demonstration
+
+Figure 2: Screenshot showing the semantic search and
+filtering features.
+
+Our web application is built with Next.js+ and
+uses Python? for the semantic search and prepro-
+cessing modules. The NLP-KG is stored in Neo4j°
+and the embeddings are stored in Weaviate’. Our
+
+“https://nextjs.org
+
+Shttps://www.python.org
+
+Shttps://neo4j.com
+Thttps://weaviate.io
+
+
+Figure 3: Screenshot of the FoS view and the hierarchy
+graph visualization.
+
+databases encompass publications from the entire
+ACL Anthology and the arXiv cs.CL category, en-
+riched with metadata from Semantic Scholar. As
+illustrated in Figure 1, the preprocessing module
+regularly fetches new publications, classifies them,
+and updates our databases.
+
+Figure 2 shows the semantic search interface,
+allowing users to search for publications, authors,
+venues, and FoS using keywords via the top search
+bar. The central area shows retrieved publications,
+while relevant authors are listed on the right-hand
+side. Additionally, the top right corner showcases
+the annual publication count among the search re-
+sults. On the left-hand side, users can access vari-
+ous filtering options, including the ability to filter
+by survey publications. Further, a list of FoS re-
+lated to the search results is displayed at the top of
+the page, enabling users to navigate to dedicated
+FoS pages.
+
+Figure 3 shows the FoS page, featuring a brief
+description of the respective FoS at the top, along
+with statistics on the annual publication count. The
+top right corner showcases a relevant section of
+the FoS hierarchy, enabling exploration of related
+
+Figure 4: Screenshot of the conversational search fea-
+ture.
+
+fields. At the bottom of the page, users can explore
+and filter relevant authors and articles published on
+this topic.
+
+Figure 4 shows the conversational search feature.
+Users can pose NLP-related questions to the LLM,
+which generates responses utilizing knowledge ob-
+tained from retrieved publications, accompanied
+by reference information. To enhance usability, the
+web application provides clickable links to refer-
+enced papers. Additionally, users can conveniently
+access their conversation history on the left-hand
+side.
+
+Figure 5: Screenshot of the publication view and the
+Ask This Paper feature.
+
+Figure 5 shows the Ask This Paper feature, en-
+abling users to inquire about a specific publication.
+Accessible via a popup window at each publication
+page, users can choose from predefined questions
+or ask custom questions using the input field at the
+bottom of the chat window.
+
+5 Evaluation
+
+5.1 Fields of Study Hierarchy Graph
+
+To evaluate the correctness of the FoS hierarchy
+graph, we conduct a user study involving ten NLP
+researchers at the PhD level. Participants list five
+NLP concepts related to their expertise while we
+ensure their presence in our graph. Subsequently,
+participants are presented with a visual representa-
+tion of the constructed graph, initially showing only
+the first level of FoS in the hierarchy. This requires
+participants to expand the view by clicking to show
+the related FoS. Participants are then tasked with
+locating their provided FoS in the fewest steps pos-
+sible, with each click or view extension counting as
+one step. Since the participants selected the FoS for
+the search themselves, we ensure their familiarity
+with the target field and related fields. We observe
+and count every step of the participants throughout
+
+
+their search process. Upon locating their FoS, par-
+ticipants evaluate the correctness of the relations
+utilized during their navigation and determine po-
+tential missing relations. Based on this assessment,
+we compute Precision, Recall, and F; scores, as
+shown in Table 4, to evaluate the correctness of the
+traversed relations.
+
+Furthermore, we use Mean Absolute Percentage
+Error (MAPE) to measure the percentage of errors
+or extra steps that participants make as they navi-
+gate the graph to reach their target FoS. We adopt
+the MAPE metric as follows:
+
+_1 Total #Steps - Ideal #Steps
+MAPE > Ideal #Steps »
+where n = 50 denotes the number of FoS
+
+searches over all participants. In this context, a
+lower score means that, on average, users were
+able to find their target FoS with fewer extra steps.
+For example, a score of zero would mean that each
+user was able to find their target FoS with the opti-
+mal number of steps. Table 4 shows the evaluation
+results that demonstrate the high quality of the FoS
+hierarchy graph.
+
+Recall F,
+99.65 | 99.80
+
+MAPE
+0.478
+
+Precision
+99.95
+
+Table 4: Results for evaluating the correctness of rela-
+tions in the FoS hierarchy graph.
+
+5.2 RAG Performance
+
+To evaluate the conversational search feature, we
+use the RAGAS framework (Es et al., 2024), focus-
+ing on the Faithfulness and the Answer Relevance
+of generated responses. Faithfulness evaluates if
+the generated answer is grounded in the given con-
+text, which is important to avoid hallucinations.
+Answer relevance evaluates if the generated answer
+actually addresses the provided question. We use
+GPT-4 to generate 50 random questions related to
+NLP, such as "Define perplexity in the context of
+language models". Subsequently, we utilize GPT-
+3.5 (OpenAI, 2022) and GPT-4 in our conversa-
+tional search pipeline described in $3.6 to generate
+grounded answers from retrieved publications. Fi-
+nally, we use RAGAS to evaluate the generated
+responses. As shown in Table 5, both LLMs ex-
+hibit high faithfulness and answer relevance scores,
+indicating their ability to retrieve relevant publica-
+tions from the RAG pipeline to effectively answer
+user queries based on provided contexts.
+
+Model Faithfulness Answer Relevance
+gpt-3.5-turbo-0125 0.9661 0.8479
+gpt-4-0125-preview 0.9714 0.8670
+
+Table 5: Evaluation results of our conversational search
+pipeline. Metrics are scaled between 0 and 1, whereby
+the higher the score, the better the performance.
+
+5.3. Comparison of Scholarly Literature
+Search Systems
+
+We compare NLP-KG with other publicly acces-
+sible systems for scholarly literature search, in-
+cluding Google Scholar, Semantic Scholar, ORKG,
+
+NLP Explorer, and NLP Scholar. A feature com-
+parison is shown in Table 6.
+sane nae ORKE Eaploiké Scholar NLE:KG
+Keyword-based Search ov v v v v v
+NLP specific x x v v v
+Fields of Study Tags x v v v x ov
+Fields of Study Hierarchy x x v x x ov
+Survey Filter v x x x x v
+Ask This Paper x v x x x v
+Conversational Search x x x x x v
+
+Table 6: Feature comparison of scholarly literature
+search systems.
+
+The comparison shows that NLP-KG offers an
+extensive set of features providing users with a
+wide range of options to explore NLP research lit-
+erature. Unlike popular systems such as Google
+Scholar and Semantic Scholar, NLP-KG is tailored
+specifically for NLP research, ensuring an accurate
+and efficient exploration experience. Moreover,
+NLP-KG is not limited to keyword-based searches,
+providing users with advanced search and retrieval
+features to explore the field of NLP.
+
+6 Conclusion
+
+This paper introduces NLP-KG, a system for
+search and exploration of NLP research literature.
+NLP-KG supports the exploration of unfamiliar
+fields by providing a high-quality knowledge graph
+of FoS in NLP and advanced retrieval features such
+as semantic search and filtering for survey papers.
+In addition, a LLM integration allows users to ask
+questions about the content of specific papers and
+unfamiliar concepts in NLP and provides answers
+based on knowledge found in scientific publica-
+tions. Our model evaluations demonstrate strong
+classification and retrieval performances, making
+our system well-suited for literature exploration.
+
+
+Limitations
+
+The construction of the FoS hierarchy graph de-
+pends on the personal choices of the domain ex-
+perts, which may bias the final result. The hier-
+archy graph may not cover all possible FoS and
+offers potential for discussions as domain experts
+have inherently different opinions. As a counter-
+measure, we automatically extracted entities and
+relations from a corpus of NLP-specific documents
+and aligned the opinions of domain experts during
+the manual construction process.
+
+We have limited the database of our system to
+papers published in the ACL Anthology and the
+arXiv cs.CL category. However, NLP research is
+also presented at other conferences such as AAAI,
+NeurIPS, ICLR, or ICML, which may not be in-
+cluded in our system.
+
+Ethical Considerations
+
+NLP-KG supports the search and exploration of
+NLP research literature in unfamiliar fields. To en-
+able an intuitive user experience, the application
+integrates LLM-based features. However, LLMs
+(e.g., GPT-4, used in this work) are computation-
+ally expensive and require significant compute re-
+sources. Additionally, although we aim to mini-
+mize model hallucinations by grounding the model
+responses in knowledge retrieved from scientific
+publications, the integrated LLM can nevertheless
+make mistakes. Therefore, users should always
+check important information provided by our LLM-
+based features.
+
+Acknowledgements
+
+Many thanks to Matthias ABenmacher for his much
+appreciated proofreading efforts. We also thank
+Nektarios Machner, Phillip Schneider, Stephen
+Meisenbacher, Mahdi Dhaini, Juraj Vladika, Oliver
+Wardas, Anum Afzal, and Wessel Poelman for help-
+ful discussions and valuable feedback. In addi-
+tion, we thank Ferdy Hadiwijaya, Patrick Kufner,
+Ronald Ernst, Furkan Yakal, Berkay Demirtas, and
+Cansu Doganay for their contributions during the
+implementation of our system. Finally, we thank
+the anonymous reviewers for their useful com-
+ments.
+
+References
+
+S6ren Auer, Allard Oelen, Muhammad Haris, Markus
+Stocker, Jennifer D’Souza, Kheir Eddine Farfar,
+
+Lars Vogt, Manuel Prinz, Vitalis Wiens, and Mo-
+hamad Yaser Jaradeh. 2020. Improving access to
+scientific literature with knowledge graphs. Biblio-
+thek Forschung und Praxis, 44(3):516-529.
+
+Iz Beltagy, Kyle Lo, and Arman Cohan. 2019. SciB-
+ERT: A pretrained language model for scientific text.
+In Proceedings of the 2019 Conference on Empirical
+Methods in Natural Language Processing and the
+9th International Joint Conference on Natural Lan-
+guage Processing (EMNLP-IJCNLP), pages 3615—
+3620, Hong Kong, China. Association for Computa-
+tional Linguistics.
+
+Gordon V. Cormack, Charles L A Clarke, and Stefan
+Buettcher. 2009. Reciprocal rank fusion outperforms
+condorcet and individual rank learning methods. In
+Proceedings of the 32nd International ACM SIGIR
+Conference on Research and Development in Infor-
+mation Retrieval, SIGIR ’09, page 758-759, New
+York, NY, USA. Association for Computing Machin-
+ery.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume I (Long and Short Papers), pages
+4171-4186, Minneapolis, Minnesota. Association for
+Computational Linguistics.
+
+Shahul Es, Jithin James, Luis Espinosa Anke, and
+Steven Schockaert. 2024. RAGAs: Automated evalu-
+ation of retrieval augmented generation. In Proceed-
+ings of the 18th Conference of the European Chap-
+ter of the Association for Computational Linguistics:
+System Demonstrations, pages 150-158, St. Julians,
+Malta. Association for Computational Linguistics.
+
+Sergey Feldman. 2020. Building a better search engine
+for semantic scholar.
+
+Mohamad Yaser Jaradeh, Allard Oelen, Kheir Ed-
+dine Farfar, Manuel Prinz, Jennifer D’Souza, Gabor
+Kismihok, Markus Stocker, and Soren Auer. 2019.
+Open research knowledge graph: Next generation
+infrastructure for semantic scholarly knowledge. In
+Proceedings of the 10th International Conference
+on Knowledge Capture, K-CAP ’ 19, page 243-246,
+New York, NY, USA. Association for Computing
+Machinery.
+
+Rodney Kinney, Chloe Anastasiades, Russell Authur,
+Iz Beltagy, Jonathan Bragg, Alexandra Buraczyn-
+ski, Isabel Cachola, Stefan Candra, Yoganand Chan-
+drasekhar, Arman Cohan, Miles Crawford, Doug
+Downey, Jason Dunkelberger, Oren Etzioni, Rob
+Evans, Sergey Feldman, Joseph Gorney, David Gra-
+ham, Fangzhou Hu, Regan Huff, Daniel King, Se-
+bastian Kohlmeier, Bailey Kuehl, Michael Langan,
+Daniel Lin, Haokun Liu, Kyle Lo, Jaron Lochner,
+Kelsey MacMillan, Tyler Murray, Chris Newell,
+Smita Rao, Shaurya Rohatgi, Paul Sayre, Zejiang
+
+
+Shen, Amanpreet Singh, Luca Soldaini, Shivashankar
+Subramanian, Amber Tanaka, Alex D. Wade, Linda
+Wagner, Lucy Lu Wang, Chris Wilhelm, Caroline Wu,
+Jiangjiang Yang, Angele Zamarron, Madeleine Van
+Zuylen, and Daniel S. Weld. 2023. The semantic
+scholar open data platform.
+
+Kyle Lo, Zejiang Shen, Benjamin Newman, Joseph
+Chang, Russell Authur, Erin Bransom, Stefan Candra,
+Yoganand Chandrasekhar, Regan Huff, Bailey Kuehl,
+Amanpreet Singh, Chris Wilhelm, Angele Zamar-
+ron, Marti A. Hearst, Daniel Weld, Doug Downey,
+and Luca Soldaini. 2023. PaperMage: A unified
+toolkit for processing, representing, and manipulat-
+ing visually-rich scientific documents. In Proceed-
+ings of the 2023 Conference on Empirical Methods
+in Natural Language Processing: System Demon-
+strations, pages 495-507, Singapore. Association for
+Computational Linguistics.
+
+Yi Luan, Luheng He, Mari Ostendorf, and Hannaneh
+Hajishirzi. 2018. Multi-task identification of entities,
+relations, and coreference for scientific knowledge
+graph construction. In Proceedings of the 2018 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 3219-3232, Brussels, Belgium.
+Association for Computational Linguistics.
+
+Saif M. Mohammad. 2020. NLP scholar: An interac-
+tive visual explorer for natural language processing
+literature. In Proceedings of the 58th Annual Meet-
+ing of the Association for Computational Linguistics:
+System Demonstrations, pages 232-255, Online. As-
+sociation for Computational Linguistics.
+
+OpenAI. 2022. Chatgpt: Optimizing language models
+for dialogue. OpenAl.
+
+OpenAL. 2023. Gpt-4 technical report.
+
+Malte Ostendorff, Nils Rethmeier, Isabelle Augenstein,
+Bela Gipp, and Georg Rehm. 2022. Neighborhood
+contrastive learning for scientific document represen-
+tations with citation embeddings. In Proceedings
+of the 2022 Conference on Empirical Methods in
+Natural Language Processing, pages 11670-11688,
+Abu Dhabi, United Arab Emirates. Association for
+Computational Linguistics.
+
+Monarch Parmar, Naman Jain, Pranjali Jain, P. Jayakr-
+ishna Sahit, Soham Pachpande, Shruti Singh, and
+Mayank Singh. 2020. Nlpexplorer: Exploring the
+universe of nlp papers. In Advances in Information
+Retrieval, pages 476-480, Cham. Springer Interna-
+tional Publishing.
+
+Jason Priem, Heather Piwowar, and Richard Orr. 2022.
+Openalex: A fully-open index of scholarly works,
+authors, venues, institutions, and concepts.
+
+S. E. Robertson and S. Walker. 1994. Some simple
+effective approximations to the 2-poisson model for
+probabilistic weighted retrieval. In Proceedings of
+the 17th Annual International ACM SIGIR Confer-
+ence on Research and Development in Information
+Retrieval, SIGIR ’94, page 232-241, Berlin, Heidel-
+berg. Springer-Verlag.
+
+Tim Schopf, Karim Arabi, and Florian Matthes. 2023.
+Exploring the landscape of natural language process-
+ing research. In Proceedings of the 14th Interna-
+tional Conference on Recent Advances in Natural
+Language Processing, pages 1034-1045, Varna, Bul-
+garia. INCOMA Ltd., Shoumen, Bulgaria.
+
+Zhihong Shen, Hao Ma, and Kuansan Wang. 2018.
+A web-scale system for scientific knowledge explo-
+ration. In Proceedings of ACL 2018, System Demon-
+strations, pages 87-92, Melbourne, Australia. Asso-
+ciation for Computational Linguistics.
+
+Amanpreet Singh, Mike D’ Arcy, Arman Cohan, Doug
+Downey, and Sergey Feldman. 2023. SciRepEval: A
+multi-format benchmark for scientific document rep-
+resentations. In Proceedings of the 2023 Conference
+on Empirical Methods in Natural Language Process-
+ing, pages 5548-5566, Singapore. Association for
+Computational Linguistics.
+
+Mayank Singh, Pradeep Dogga, Sohan Patro, Dhiraj
+Barnwal, Ritam Dutt, Rajarshi Haldar, Pawan Goyal,
+and Animesh Mukherjee. 2018. CL scholar: The
+ACL Anthology knowledge graph miner. In Proceed-
+ings of the 2018 Conference of the North American
+Chapter of the Association for Computational Lin-
+guistics: Demonstrations, pages 16-20, New Orleans,
+Louisiana. Association for Computational Linguis-
+tics.
+
+Arnab Sinha, Zhihong Shen, Yang Song, Hao Ma, Dar-
+rin Eide, Bo-June (Paul) Hsu, and Kuansan Wang.
+2015. An overview of microsoft academic service
+(mas) and applications. In Proceedings of the 24th
+International Conference on World Wide Web, WWW
+*15 Companion, page 243-246, New York, NY, USA.
+Association for Computing Machinery.
+
+Ayah Soufan, Ian Ruthven, and Leif Azzopardi. 2022.
+Searching the literature: An analysis of an ex-
+ploratory search task. In Proceedings of the 2022
+Conference on Human Information Interaction and
+Retrieval, CHIIR ’22, page 146-157, New York, NY,
+USA. Association for Computing Machinery.
+
+Jie Tang, Jing Zhang, Limin Yao, Juanzi Li, Li Zhang,
+and Zhong Su. 2008. Arnetminer: Extraction and
+mining of academic social networks. In Proceedings
+of the 14th ACM SIGKDD International Conference
+on Knowledge Discovery and Data Mining, KDD ’08,
+page 990-998, New York, NY, USA. Association for
+Computing Machinery.
+
+Kuansan Wang, Zhihong Shen, Chiyuan Huang, Chieh-
+Han Wu, Yuxiao Dong, and Anshul Kanakia. 2020.
+Microsoft Academic Graph: When experts are not
+enough. Quantitative Science Studies, 1(1):396—413.
+
+Benjamin Weitz and Ulrich Schafer. 2012. A graph-
+ical citation browser for the ACL Anthology. In
+Proceedings of the Eighth International Conference
+on Language Resources and Evaluation (LREC’12),
+pages 1718-1722, Istanbul, Turkey. European Lan-
+guage Resources Association (ELRA).
+
+
+Deming Ye, Yankai Lin, Peng Li, and Maosong Sun.
+2022. Packed levitated marker for entity and relation
+extraction. In Proceedings of the 60th Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume I: Long Papers), pages 4904-4917, Dublin,
+Ireland. Association for Computational Linguistics.
+
+Yutao Zhu, Huaying Yuan, Shuting Wang, Jiongnan
+Liu, Wenhan Liu, Chenlong Deng, Haonan Chen,
+Zhicheng Dou, and Ji-Rong Wen. 2024. Large lan-
+guage models for information retrieval: A survey.

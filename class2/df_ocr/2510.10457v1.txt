@@ -1,0 +1,1280 @@
+2510.10457v1 [cs.CL] 12 Oct 2025
+
+e
+e
+
+arXiv
+
+Preprint. Under review.
+
+RETHINKING LLM EVALUATION: CAN WE EVALUATE
+LLMS WITH 200 LESS DATA?
+
+Shaobo Wang '*':?:> Cong Wang *' Wenjie Fu *'** Yue Min *’° Mingquan Feng 7 Isabel Guan ° Xuming Hu °°
+
+Conghui He ’ Cunxiang Wang ® Kexin Yang ® Xingzhang Ren * Fei Huang * Dayiheng Liu * Linfeng Zhang
++ EPIC Lab, SITU * SJTU ®* AlibabaGroup “FDU ° HKUST ° HKUST (GZ)
+” Shanghai AI Lab ° ZhipuAI * Equal contribution tb Corresponding author + Project Head
+
+ABSTRACT
+
+As the demand for comprehensive evaluations of diverse model capabilities steadily
+increases, benchmark suites have correspondingly grown significantly in scale.
+Despite notable advances in redundancy reduction and subset-level performance
+prediction, a systematic framework that effectively integrates these methods to
+ensure both prediction accuracy and ranking consistency is still largely elusive.
+In this paper, we first perform a sample-level analysis of benchmark redundancy
+and identify several highly similar samples that can be eliminated. Besides, we
+frame benchmark compression as an optimization problem with the aim of score
+reconstruction. Building on these, we then propose EssenceBench, a coarse-to-
+fine framework utilizing an iterative Genetic Algorithm (GA), which takes the
+advantages of fitness-based subset search and attribution-based sample search.
+Compared to previous methods, our approach yields superior compression results
+with lower reconstruction error and markedly higher efficiency. In particular, on
+the HellaSwag benchmark (10K samples), our method preserves the ranking of all
+models shifting within 5% using 25x fewer samples, and achieves 95% ranking
+preservation shifting within 5% using only 200 fewer samples.
+
+GSM8K HellaSwag ARC WinoGrande
+s é rT a 1.0 J rl U 1.0 4
+G LJ
+Ee 0.8 - 08
+G 2 2 Lin 2 I.
+
+S im 06 06
+
+> 5 ry 4 4
+
+cS st ==
+
+o 1 0.4 0.4
+
+Y «6 7 | 6 ; 6
+
+2 “ + cl il 0.2 3 7 + 0.2 a
+
+—— =
+id _ 3 4 6 8 00 oO 2 4 6 8
+
+1.0
+
+i in| :
+0 et 4 6 8
+1.0 0. é
+08
+0.8 2 Fi
+0.6 06
+4 4
+0.4 0.4
+6. 6
+0.2 0.2
+8. 8
+0.0 0.0
+i) 2 4 6 8
+
+0 2 4 6 8 0 2 4 6 8
+
+b
+Ranking Redundancy
+
+Figure 1: Prevalent redundancy across widely used benchmark datasets. Based on 10 randomly
+sampled instances per dataset, panel (a) depicts the text embedding similarity (Definition 3) , re-
+flecting semantic overlap among instances, and panel (b) presents the ranking embedding similarity
+(Definition |4}, measured through consistency of model performance rankings across sampled subsets.
+
+1 INTRODUCTION
+
+In recent years, large language models (LLMs) have advanced rapidly with the release of models such
+
+as GPT-4 (Achiam et al.||2023). This swift progress has led to a shift in increasingly sophisticated
+
+LLM benchmark design, moving from traditional natural language processing (NLP) tasks to more
+comprehensive, multidimensional evaluation suites. Prominent benchmarks have been released
+
+ma1,2
+
+
+Preprint. Under review.
+
+HS MetaBench [ EssenceBench
+HellaSwag 3.0]
+€ 25
+vo
+WinoGrande fe
+20 Larger Datasets
+& ‘ Bring Greater Acceleration 6.2K
+ae
+GSM8K é
+= 1.07
+io)
+ARC 0 os ia t 24x 1.9x
+1 + 0.0
+05 04 0.3 0.2 0.1 0.3 0.4 08 ARC GSM8K WinoGrande HellaSwag
+(a) Ranking Redundancy (b) Text Redundancy (c) Method Efficiency
+
+Figure 2: Comparison of existing benchmark compression approaches and our EssenceBench. (a)
+ranking and (b) text redundancy comparison and (c) compression time comparison.
+
+Zhao et al.), long-context reason-
+
+to evaluate LLMs in areas such as multilingual understanding
+
+ing (Kuratov et al.|/2024), instruction following 2023), mathematical reasoning
+2024), code comprehension and generation (Nam et al.||2024), multidisciplinary knowledge
+
+acquisition (Zhang et al.|/2025), and tool integration 2024b). However, as the scope and
+
+granularity of evaluation expand, so does the scale and computing cost of the benchmarking process.
+For instance, OpenCompass integrates over 60 subtasks across more than 25
+capability dimensions. Evaluating Qwen2. HP Tasmual laeross all these tasks often takes about 1k
+GPU hours, consuming millions to tens of millions of tokens. Consequently, the question of how
+to efficiently reduce the sample size of benchmark datasets while preserving the reliability of
+evaluation has become a critical challenge in the current phase of LLM.
+
+We first revisit the foundations of LLM benchmark evaluation, focusing on a critical yet _under-
+examined phenomenon: sample redundancy in the Open LLM Leade Snoaue evamies eval
+(2024). Our analysis quantifies redundancy through two complementary dimensions: (1) Text-level
+redundancy: Defined as lexical and semantic overlap between evaluation instances (Definition[3)
+and (ii) Ranking-level redundancy: Measured through consistency of model performance rankings
+across sampled subsets (Definition|4). As shown in Figure[I] we systematically evaluate redundancy
+across benchmark datasets by randomly sampling 10 instances per dataset. Our analysis reveals
+significant redundancy patterns that persist across diverse benchmark configurations and model
+architectures, manifesting in both textual content and performance ranking dimensions.
+
+Recent studies have explored benchmark compression. Methods such as LLM-based annotation
+
+2024), active sample querying (Kossen et al.| |2021 2024), and psychological
+approaches (Polo et al.|/2024 2025) have been employed to reduce benchmark dataset
+
+size while maintaining evaluation quality. Notably, MetaBench (Kipnis et al.||2025) uses Generalized
+Additive Models (GAM) 2017) to model the relationship between subset scores and full set
+
+performance, and it employs root mean square error (RMSE) as an index to guide sampling policies.
+Despite their contributions, previous works have two significant limitations:
+
+1. Neglect of Sample Interactions: Conventional approaches treat test samples as independent
+entities, ignoring semantic relationships. Specifically, when two samples exhibit high similarity,
+their evaluation outcomes often correlate strongly, suggesting a redundancy that warrants sys-
+tematic elimination. Developing robust metrics and principled approaches for identifying such
+redundancies remains an open challenge.
+
+2. Inefficient Search Mechanisms: Existing compression techniques rely on statistical or heuristic
+methods (e.g., GAM, LLM scoring, active querying) that suffer from high computational overhead
+or suboptimal convergence.
+
+To tackle the challenge of redundant and costly LLM benchmark evaluations, as shown in Fi gure[2] we
+introduce EssenceBench, a coarse-to-fine, iterative compression framework that preserves evaluation
+fidelity while reducing dataset size. As illustrated in Figure[3] (i) we first extract each benchmark’s
+score matrix from the Open LLM Leaderboard. To weight the interactions between samples and
+eliminate the first limitation, we quantify text-level and ranking-level redundancies via embedding
+
+"https://huggingface.co/Qwen/Qwen2.5-7B-Instruct
+*https://huggingface.co/datasets/open-llm-leaderboard-old/results
+
+
+Preprint. Under review.
+
+2
+Pa
+¢ ‘N
+1 @ Step 1: Coarse GSM8K text Filtered GSM8K \
+| Filtering Redundancy threshold 7, 1
+QQ Qn Qe I
+1 ae, Duplication Qn,
+o . ie e1e@) - 1
+! Extraer %|@ e R(G, @) = (Emb(Q), Emb(@)) Filtering @ 1
+! na 3 W|O|8|- = 0 I
+~ : 3 |
+=F I
+! Open LLM @|@| - Bork o |
+! Leaderboard Redun an) I
+(Lots of Benchmarks) _ M<N I
+i, i
+Tr rrr rr ee ee ee ee
+I 2] Step 2: Subset Fitness Evaluation (for each subset) . I
+! Selection Adjustment Ending i
+I a) @ Average Score Predicted Score \
+a
+1 typ 73% Mutation !
+1 (2) BE Fitness= 1
+1 te Ww: 62% -RMSE( 9 , ¢) 1
+1 « |. Predictor Crossover 1
+I ies pon TopK
+I
+1 ™) S| 98% Accuracy On Tournament Fitness Subset I
+! Ri “Generate " Corresponding Acc. on Predicted Acc. On | Whole Dataset Selection I
+! ANE OM SUDSEIS Subset Subset (i) Whole Dataset I
+1 (Each represents a Repeat
+I choice of all questions)
+——_ ee ee ee Leo
+I (3) Step 3: Sample — a Top Fitness '
+I Selection Attribution Estimation (for each subset) Calculate Avg. P| Compressed
+1 Saree Attribution GSM8K I
+I | Whole Dataset Attributor Best Group Q@ = @ I
+! ps 1
+! Fai g = FulQ.) +. + fulQu) ar %| 9) - |@ i
+! Attribution set _ TITness 20 I
+I Evaluation zg 1
+t Topk | Attribution 4 =
+Groupi I
+I Fitness Subset Wn scores ae for each B\| - !
+“ Attribution(Qi) = If(Q)I group /
+PM o¢
+ier eS en ae —
+
+Figure 3: The pipeline of EssenceBench. (I) Coarse Filtering. By extracting the binary score matrix
+for each benchmark and computing both text-level and ranking-level redundancies, samples that
+exceed thresholds are removed. (II) Subset Selection. Genetic Algorithm (GA) is applied beginning
+with generating random subsets. With fitness evaluated by the error of predicted accuracy, subsets are
+optimized via fitness-based tournament selection, crossover, mutation, and adjustment. (III) Sample
+Selection. Attribution of each sample is estimated from the top-performing subsets by utilizing
+weights when training a model. According to that, samples are divided into groups. GA is then
+reapplied within each group to identify the most representative and informative subset.
+
+similarities and ranking correlations, then eliminate duplicate samples. (ii) On this filtered set, we
+launch an iterative Genetic Algorithm (GA) to identify compact yet representative subsets: in each
+GA run, candidate subsets are evaluated by a predictor model to minimize the prediction error
+against full-dataset accuracy, guiding the search toward subsets that faithfully reconstruct overall
+performance. (iii) Finally, to resolve the inefficiency of search mechanisms, we refine our selection
+through sample-level attribution, using the weights learned during model training to partition instances
+into high, low, and random attribution groups; we reapply GA within each group and choose the
+top-performing samples from the best group as our compressed benchmark for that round. This
+further searching step introduces sample-level diversity thus alleviating suboptimal convergence.
+By combining redundancy-aware filtering with iterative GA optimization, EssenceBench delivers
+benchmarks that are both lean and reliable, enabling rapid, cost-effective evaluation of cutting-edge
+LLMs. Our contributions are as follows:
+
+¢ We systematically analyze redundancy problems in LLM benchmarks and observe that all bench-
+marks in Open LLM Leaderboard share a sample redundancy phenomenon, which causes
+evaluation inefficiency.
+
+¢ We frame benchmark compression as an optimization problem and tackle with it effectively by
+combining redundancy-based coarse filtering and iterative Genetic Algorithm. The proposed
+framework, EssenceBench, efficiently addresses this problem while ensuring scalability.
+
+¢ Experimental results demonstrate that EssenceBench achieves significant reductions while effi-
+ciently maintaining rankings. Notably, on HellaSwag (10K samples), our method preserves the
+ranking of all models shifting within 5% using 25 x fewer samples.
+
+
+Preprint. Under review.
+
+2 RELATED WORKS
+
+Large Language Model Evaluation. Benchmarks are indispensable for measuring LLM capabilities
+and catalyzing research. Standard NLU and reading comprehension tasks include GLUE (Wang et al.)
+and SQuAD (Rajpurkar et al.); mathematical reasoning is tested by GSM8K (Cobbe et al}
+MATH (Hendrycks et al.) and Mathqa eae (2019); coding ability via HumanEval (
+
+.| (2021) and MBPP (Austin et al.| /2021); instruction following by IFEval (Zhou et al.
+2023b); and multiple-choice and commonsense reasoning by MMLU (Hendrycks et al.|/2020), ARC-
+
+e
+Challenge (Clark et al.|/2018) and HellaSwag (Zellers et al.}|2019). Platforms such as Open
+LLM Leaderboard (Fourrier et al.| (2024) and OpenCompass (Contributors| |2023) provide
+
+unified pipelines and live leaderboards, but rarely consider the cost and efficiency.
+
+LLM Benchmark Compression. As benchmarks scale up, compact evaluation suites are critical
+
+2024). TinyBenchmark (Polo et al.|/2024) combines statistical selection with Item Response
+Theory (IRT) to pick 100 representative items; MetaBench (Kipnis et al.||2025) uses IRT and
+
+Fisher information over 5000 LLM outputs to select discriminative examples, achieving an average
+RMSE of 1.5%. However, metaheuristic search techniques such as Genetic Algorithms have not
+
+been explored, and the redundancy phenomenon highlighted in (Zhang et al.||2025} 2025)
+
+remains insufficiently addressed. For a broader survey of recent advances in LLM data selection and
+compression, we refer readers to Appendix
+
+3. METHODOLOGY
+
+3.1 PRELIMINARIES: BENCHMARK COMPRESSION
+
+The benchmark compression problem can be framed as selecting a k-element subset (a coreset) from
+the universal set (the benchmark). If the goal is to reconstruct the score of the benchmark, finding
+the subset requires searching over an exponentially large, discrete space of candidate subsets, which
+makes it a classic NP-hard combinatorial optimization task. Formally, it can be defined as:
+
+Definition 1 (Benchmark Compression). Let D = {x1,...,«n} be a benchmark dataset, and let
+g : 2? > R be an aggregate scoring function that assigns a performance score to any subset of
+D. Given a budget k < N, the compression problem seeks a k-element subset D © D that best
+reconstructs the full-dataset score:
+
+D* = argmin L(g(D), g(D)), (1)
+DCD,|D|=k
+
+where L(-,-) represents a suitable error measure.
+
+However, Definition[I]relies on a function to impractically traverse all subsets of the whole dataset.
+To effectively overcome this limitation, we leverage the fact that public leaderboards
+report a binary correctness (right or wrong) for each model on each benchmark sample. By
+systematically organizing these outcomes into a score matrix, we simplify the scoring function into
+column selection and accuracy computation. Let D be the benchmark and Nitm denote the number
+of LLMs tested on it. The score matrix is denoted as: S € {0,1}%*=™*, where S; ; explicitly
+denotes the score of LLM, on sample x,, 1 for right and 0 for wrong. Let y € Rt denote
+the accuracy of LLMs on D, where y; = x St S;,; is the accuracy of LLM;. The concrete
+formulation of benchmark compression is then defined in Definition [2]
+
+Definition 2 (Concrete Formulation of Benchmark Compression). Let a binary mask represents
+the selection of a k-element subset: m € {0,1}%  s.t. Yi m,; = k. By indexing the mask, the
+matching columns of S can be got, which is denoted as Sm. The aggregate scoring function g in
+Definition [7|can be concretized as: g(D) = g(Sm). Therefore, the optimization problem is as:
+
+me€{0,1}%
+
+N
+min L(y, g(Sm)) s.t. Sm; =k. (2)
+j=l
+
+4
+
+
+Preprint. Under review.
+
+3.2 A CLOSER LOOK AT THE SAMPLE REDUNDANCY PHENOMENON IN LLM BENCHMARKS
+
+As illustrated in Figure [I] many LLM benchmarks exhibit high overlap both in the text of their
+prompts and in the models’ performance rankings in our quantification of sample redundancy, i.e. text
+redundancy (Definition [3) and ranking redundancy (Definition{4). Intuitively, when two examples
+share similar wording or contain nearly identical behavior across some models, retaining both adds
+little new information while doubling evaluation costs.
+
+Definition 3 (Sample Redundancy from Text Perspective). Let D = {x1,X2,...,un} be a bench-
+mark dataset where each x, denotes the textual input. Let Emb : x ++ Re» denote an embedding
+mapping of the input. The redundancy of a specific sample pair is defined as:
+Rtext (7,7) = (Emb(x;), Emb(z;)). (3)
+The redundancy of a sample is then defined as:
+4 (Emb(x;), Emb(x;))
+
+The overall redundancy of the benchmark is defined as the average redundancy across all samples:
+N F
+ Rtext (4
+
+Ryoxe(D) = Dist Reese) a ae (5)
+
+Definition 4 (Sample Redundancy from Ranking Perspective). Let D = {x1,22,...,un} bea
+
+benchmark dataset. Suppose we are given a set of responses from several LLMs, and for each sample
+x;, we define a ranking score r;, © R indicating the model’s confidence or correctness on that sample.
+For example, 1; could be a binary indicator (e.g., correct/incorrect) or a continuous score (e.g.,
+answer log-likelihood). We define the redundancy between two samples x; and x; in terms of their
+ranking correlation as:
+
+Rranking (2, J) = Pris r;) (6)
+where p(-,-) denotes the correlation coefficient, which can be Pearson, Spearman or R?. The
+one-sample and overall redundancy are defined the same way as:
+
+igi PUT 9)
+N-1 ”
+
+N
+Bagaleine(D) = Dini lori rs)| (7)
+
+Reatine(?) = N
+
+These two definitions are intuitively derived from both human and LLM perspectives. Specifically,
+textual redundancy quantifies semantic similarity, while ranking redundancy assesses behavioral
+similarity. When combined, they reveal complementary overlaps that each alone would overlook,
+facilitating more systematic redundancy elimination and benchmark pruning.
+
+3.3 ESSENCEBENCH
+
+Step1: Coarse Filtering. On the basis of text redundancy (Definition 3) and ranking redundancy
+(Definition (4). The benchmark D with size N can be filtered through the threshold 7.x; and
+Tranking to size M as shown in Figure}3] We examine the dataset in its original order and decide
+for each sample x; whether to keep or discard it. For each sample «,, if either Rtext (5,4) > Text
+or Rranking (j,t) > Tranking» then x; is discarded; otherwise, it is retained. This ensures that among
+any highly redundant pair, the sample encountered first is always kept. Let €; be the flag indicating
+whether x; should be discarded, formalized as:
+i-1
+
+= II 1(Rtext (, a) < Ttext A Rranking (J; i) < Tranking) , (8)
+j=l
+where 1(-) denotes the indicator function. Therefore, the filtered benchmark is Dgjterea = { 2: |
+
+€; = 1} with size M. In this process, we strip away the most redundant examples to yield a compact
+yet representative filtered set, lightening our evaluation load and making compression faster.
+
+Step2: Fitness-based Subset Selection. To shrink the filtered benchmark while preserving its ability
+
+to approximate the benchmark score, we employ an iterative genetic algorithm (Lambora et al.|/2019
+Mirjalili & Mirjalili}|2019 2012} |Mitchell||1998) as a heuristic search over the space of
+
+possible subsets. As Figure|3|shows, starting from a randomly initialized population of k-element
+masks, we repeatedly evaluate each mask’s fitness, select parents via tournament selection, generate
+offspring through crossover and mutation, and then adjust each child to enforce the k-element
+
+
+Preprint. Under review.
+
+Table 1: Prediction Error (|) of selected subsets with different sizes.
+
+Coreset Size
+
+Dataset Method
+50 100 150 200 250 300 350 400 450 500
+Random 3.6894 2.8531 2.2934 9454 1.6267 1.4013 1.3432 1.2279 1.1487 1.0400
+PPL 4.1941 2.6987 2.3007 9218 1.719 1.5153 1.3588 =-1.3002 1.1988 1.1301
+GSM8K GraNd 3.8516 2.8929 2.3725 2.0956 1.8256 1.5994 1.4442 1.2719 1.1568 1.0692
+
+MetaBench 3.5283 2.4335 2.0673 7597 = 1.5529 1.3873 1.2631 =—-1.1301 =: 1.0333. 0.9579
+EssenceBench | 2.7685 1.6671 1.1516 0.8635 0.7181 0.6101 0.5588 0.5037 0.4561 0.3769
+
+Random 3.1528 2.4463 2.1646 .7307 1.4499 1.3194 1.1533 1.0976 0.9341 0.9015
+PPL 5.3343 3.1191 2.1166 -8187 1.5459 1.4156 1.2165 1.0875 1.0053 0.9168
+ARC GraNd 5.3343 2.9467 2.1475 8400 1.6018 1.3504 1.1566 1.0438 1.0004 0.9432
+MetaBench 2.7413 2.0771 1.6838 4471 2477 1.1103 0.9767 0.9493 0.8626 0.7490
+EssenceBench | 2.3990 1.4293 1.1653 0.8023 0.7192 0.6045 0.5053 0.4803 = 0.4326 = 0.3699
+
+Random 2.5738 1.8071 1.4658 1984 1.1569 1.0196 0.9751 0.8933 0.7973 0.8342
+PPL 2.9751 1.9949 1.6428 2980 1.0798 0.9306 0.9162 0.8333 0.7944 0.7466
+HellaSwag GraNd 2.9223 2.0102 1.5892 2572 1.0425 0.9603 0.8844 0.8241 0.8423 0.7825
+MetaBench 2.4339 1.6940 1.4675 3135 -1683 1.0668 0.9926 0.9120 0.8707 0.8220
+EssenceBench | 2.2639 1.5717 = 1.2323 11.0638 = 0.8906 = 0.7483 0.6679 ~=—-0.6150 = 0.5332 —-0.5111
+
+Random 3.4995 2.8713 = 2.1483 9490 1.5938 1.5314 1.2768 1.1537 1.1279 0.9854
+PPL 4.2685 2.7479 = 2.3403 9352 1.7909 1.7748 = 1.5706 1.4714 1.3994 1.3176
+WinoGrande GraNd 4.2685 2.6562 2.3045. 2.0138 «1.7775. 1.7665 1.6155 1.5049 1.4037: 1.2726
+MetaBench 2.7834 2.1219 1.7515 5297 1.2893 1.2030 «1.0722 0.9578 0.8658 0.7850
+EssenceBench | 2.5086 1.3994 0.9791 0.7772 0.6307 0.5580 0.5098 0.4521 0.4134 0.3905
+
+Random 3.5048 = 2.2881 2.1036 9096 1.5779 1.5901 1.4984 1.3357 1.3357 1.1699
+PPL 8.0290 9.7627 10.4998 8.5047 8.0146 7.8817 7.6781 7.2748 7.2060 6.7814
+MMLU GraNd 8.9996 10.0913 10.4750 8.7332 8.1563 7.9034 7.7453 7.2225 7.5776 6.8507
+MetaBench 2.4268 2.0925 1.7382 5292 1.3617 1.2872 = 1.1992 1.1401 1.0626 0.9941
+EssenceBench | 2.4117 1.8293 1.3951 —-11.1126 1.0220 0.8460 0.7667 0.6906 0.6406 0.5966
+
+constraint. Over successive generations, this process converges toward high-quality subsets that
+minimize reconstruction error. The whole process is illustrated in Algorithm [T]in Appendix
+Detailed descriptions of each step are provided below.
+
+Individual and Population. An individual is a mask m € {0,1}™ s.t. ye m,; = k, which is
+also called a subset. The population is denoted as a group of individuals: P = {m), — pm(NP)},
+where Vp is the number of the individuals in the population. The final top-NV¢ best subsets are also
+denoted as a set: € = {m“),..., m(Ne)}.
+
+Fitness Evaluation. The process of fitness evaluation is the same as minimizing £ in Equa-
+tion To calculate, a general additive model (GAM) is trained to act as the
+aggregate scoring function g in Definition The training data 7 and validation data V are
+denoted as {5;, y:}ie7 and {s;, y;}iey, which constructs a map from subset accuracy to whole
+dataset accuracy. Let the score matrix and the accuracy of LLMs on Deiterea is denoted as:
+Sriterea € {0,1}4™*™ yotterea € RN"M. Therefore, y; can be directly obtained from y,
+
+s; can be calculated as: s; = i > = Ssitereqm ). Since RMSE is used as the error measure, given
+an individual m, its fitness is calculated as:
+
+fitness(m) = —RMSE (v. a(S) ) = lm Gi a yj) (9)
+jev
+
+where 7j; = g(s;) is the GAM-predicted accuracy for the j-th individual based on its subset score s,.
+
+Tournament Selection. In this process, we aim to choose an individual from P as a parent according
+to fitness (Equation|9). Let m‘®, m°) denote the two parents chosen in this process.
+
+Crossover. In this process, the goal is to get a new individual by combining the information of the
+two parents. Let €; denote a flag which parent the new individual should follow, the crossover process
+
+generates a new individual m by:
+
+mi?) = (m\ A &) v(m)? A>6)), (10)
+where €; ~ Bernoulli(0.5), 7 € [1, /].
+Mutation. In this process, the aim is to introduce randomness into the new individual m©), let A; be
+a flag which sample of an individual should mutate:
+
+(c) (¢)
+mi" — mM, @ Aj, (11)
+
+where A; ~ Bernoulli (¢) , 7 € [1,4].
+
+
+Preprint. Under review.
+
+Adjustment. To guarantee m) has k-ones, the adjustment process is implemented by randomly
+setting superfluous ones to zeros, vice versa.
+
+Step 3: Attribution-based Sample Selection. To maximize reconstruction fidelity while preserving
+representational diversity during dataset compression, we train an Explainable Boosting Machine
+(EBM) (Nori et al. on the elite mask set € = {m“,...,m©)} from Step 2, assigning
+each sample in Déiterea = {¥1,---, Ua} a data-specific attribution score; these scores are used to
+stratify samples into groups, upon which a genetic algorithm (GA) performs optimized selection to
+balance signal strength and coverage. The result is a compressed dataset Deompressea Of size P < M,
+which retains high-impact instances while preserving underrepresented patterns — achieving efficient,
+robust, and generalizable compression without compromising reconstruction performance.
+
+To quantify how much each sample contributes to reconstruction accuracy in the predictor model,
+we first define the attribution of each sample within a mask. For a mask m € €, define the selected
+index set Z(m) = {j|mj = 1}. ANEBM gm(Daiterea) = Do je7(m) S7° (xj) learns the training
+data T’. Let Sgiterea,; denote the i-th row of Sgiterea, then the form of 7’ is: {Sgitered.i, Yi }ieT’s
+which constructs a map from sample score matrix to whole dataset accuracy. The component norm
+|| f7"|l2 in gm is defined as the attribution of sample j in a mask. Aggregating over all attributions of
+each mask in € yields the global attribution of sample j, denoted as A;:
+dimee 115 € T(m)} [FP lho
+Mimee1{GET(m)}
+
+where j € Z(Deiterea). According to the attributions, a tri-partition of the samples can be imple-
+mented. With a retention ratio a € (0,1), set g = Jo! ] = P < M and create three groups of
+equal size q: Ghigh, Glow, Grand, Where Gigh contains the g samples with the largest A;, Gjow the
+smallest ones, and Gana the random ones. The grouping operation deliberately forces subsequent
+GAs to search in regions of different attributions so that information neglected by the current top-Ne¢
+subsets can be rediscovered, while the information that is really significant can be boosted. For every
+group G € {Ghigh, Glow, Grana}, GA is used to judge the best group to get Deompressed-
+
+A; = (12)
+
+To increase diversity of pruned dataset, we iteratively repeat Step 2 and Step 3, at each round the
+globally best mask m* is updated whenever a lower error is observed. The details of the entire
+process are provided in Algorithm{T]in Appendix
+
+4 EXPERIMENTS
+
+4.1 EXPERIMENTAL SETUP
+
+Baseline Methods. We compared our method with other benchmark compression approaches,
+including MetaBench. In addition, we also conducted comparisons with several classic methods,
+including Random Selection, GraNd (Paul et al.|/2021), and Perplexity (PPL) (Bengio et al.|[2003).
+The total score of all selected subsets from a given dataset is predicted using a GAM trained on the
+dataset, and RMSE is computed. The subset with the lowest RMSE is selected as the optimal subset.
+Please refer to Appendix [D-I]for more details.
+
+Dataset Construction. We constructed our dataset using data from the Open LLM Leader-
+
+board 2024) and conducted extensive evaluations of our method and the baselines.
+The datasets include GSM8K (Cobbe et al.}/2021) (1K samples), ARC (Clark et al.}/2018) (400 sam-
+
+ples), HellaSwag (Zellers et al.|/2019) (LOK samples), WinoGrande (Sakaguchi et al.||2021)
+(44K samples), and MMLU (Hendrycks et al.) |2020) (15K samples). For data preprocessing, the
+
+protocols proposed in MetaBench 2025) were adopted, which involved the removal
+of low-performing models and items with low variance. For both the training and testing sets, the
+dataset is first ranked by score and then partitioned into ten equipotent strata. Within each stratum,
+10% of the instances are randomly sampled and subsequently pooled to constitute the test set; the
+remaining 90% are retained as the training set. Please refer to the Appendix for more details.
+
+4.2 MAIN RESULTS
+
+Better Performance with the Same Compression Ratios. For the results on five benchmarks in
+Table [I] compared with previous methods, EssenceBench achieves state-of-the-art (SOTA) results
+
+
+Preprint. Under review.
+
+@
+°
+|
+
+Gl EssenceBench ll EssenceBench ll EssenceBench
+HE who Coarse Filtering || 3-9 GE wio Attribution HE Highest Only
+3.0 l= Lowest Only
+
+ny
+a
+|
+
+14 _ Random Only
+
+Predication Error (RMSE)
+
+100 200 300 400 500
+
+100 200 300 400 500 100 200 300 400 500
+
+(a) Effect of Coarse Filtering (b) Effect of Attribution (c) Effect of grouping
+
+Figure 4: Ablation results on GSM8K, evaluating the effect of (a) coarse filtering, (b) attribution-based
+selection, and (c) grouping strategies.
+
+across all datasets. Notably, on GSM8K with a subset size of 500, EssenceBench achieves a 60.7%
+reduction in RMSE compared to MetaBench, demonstrating its consistently superior capability to
+preserve performance under highly constrained data regimes.
+
+Comparable Performance with Smaller Compression Ratios. EssenceBench achieves comparable
+or superior performance while using significantly smaller subset sizes, indicating improved data
+efficiency. For instance, on GSM8K, EssenceBench surpasses the performance of MetaBench using
+only 200 examples, whereas MetaBench requires 500. A similar trend is observed on the WinoGrande
+dataset, where EssenceBench outperforms MetaBench with the same reduced subset size of 200,
+again highlighting its effectiveness under tighter data budgets.
+
+4.3 ABLATION STUDY
+
+Parameter Sensitivity Analysis. To evaluate how hyperparameters influence the effectiveness of
+EssenceBench, we analyze two factors: (1) the number of generations (gens) used in the genetic
+algorithm to evolve candidate subsets within each iteration, and (2) the number of iterative refinement
+rounds combining subset search (Step 2) and attribution-based grouping (Step 3), as shown in Figure[3]
+This analysis aims to reveal the tradeoff be-
+tween search depth and multi-round refinement
+in achieving low reconstruction error. Experi- Gen
+mental results in Table [2|show that increasing
+the number of refinement rounds consistently 1000
+improves performance, regardless of gens. For sen
+example, with gens fixed at 1000, extending §=.-——2222T_______———_
+from 2 to 5 rounds reduces RMSE from 2.77 to 2.47. When rounds are sufficient (e.g. 5), higher gens
+provides steady improvements, demonstrating that deeper search becomes valuable only when paired
+with adequate downstream selection. This empirical observation confirms the consistent effectiveness
+of repeated attribution-guided filtering and recompression in progressively reducing error. On the
+other hand, increasing gens under a small number of rounds (e.g. 2) yields marginal gains or even
+degrades performance, likely due to over-exploration in a limited refinement context. All results are
+reported on GSM8K using a fixed 50-sample training set.
+
+Table 2: Performance over Generations and Rouns.
+
+Round
+z 3 + 5
+
+2.7685 2.8940 2.7050 2.4731
+2.8295 2.7727 2.5338 2.4186
+3.0065 2.7494 2.5900 2.4015
+
+The impact of coarse filtering. To isolate the effect of coarse filtering, we compare the full
+EssenceBench pipeline with a variant that skips redundancy-based filtering and retains only basic
+outlier removal (Raw EssenceBench). As shown in Figure fa), applying coarse filtering significantly
+reduces RMSE, confirming its effectiveness in removing redundant samples that otherwise degrade
+reconstruction quality. This performance benefit is most pronounced especially when the subset size
+is small. As the subset grows, this gain diminishes, likely because the genetic algorithm is more
+likely to include informative examples regardless of filtering.
+
+The impact of attribution. To investigate the impact of attribution, which is the base of sample
+selection (Step 3), we compare EssenceBench with merely GA without attribution-based sample
+selection. As shown in Figure [4{b), when the subset size is below 400, attribution-based sample
+
+
+Preprint. Under review.
+
+Ranking Changing Ratio (Percentage)
+
+Still Out of 5%
+
+(c) k = 500
+
+[\ Within 5%
+
+EssenceBench MetaBench
+
+(a) k = 200
+Figure 5: Comparison of ranking change distributions between MetaBench and EssenceBench on the
+HellaSwag dataset, where k denotes the subset size.
+
+(b) k = 400
+
+selection outperforms selection without attribution. However, this notable performance advantage
+largely disappears once the subset size exceeds 400.
+
+The impact of grouping. To assess the role of grouping in Step 3, we compare EssenceBench against
+three variants: selecting only the top-attribution group (Highest Only), the lowest-attribution group
+(Lowest Only), or a randomly sampled group (Random Only). All experiments are conducted on
+GSM8K. As shown in Figure [4{c), EssenceBench consistently outperforms the alternatives when the
+subset size is small, indicating that attribution-guided diversity effectively enhances compression
+quality. However, when the subset size exceeds 400, all grouping strategies yield similar RMSE,
+suggesting diminishing returns from fine-grained selection under larger data budgets.
+
+4.4 CASE STUDY
+
+Text and Ranking Redundancy. To assess the effectiveness of the coarse _filter-
+ing strategy, we present representative samples with high text and ranking redundancy.
+As clearly illustrated in Table [3] the pro-
+posed filtering mechanism successfully and
+consistently identifies semantically equiv-
+
+Table 3: The most similar text (left) and the highest-
+ranked similar text (right).
+
+alent items across various cases. In the
+text redundancy case, two questions dif-
+fer in phrasing but share the same arith-
+metic structure. In the ranking redundancy
+case, two problems with different narra-
+tives yield similar model scores because
+both problems require multi-step numer-
+ical reasoning that includes proportional
+calculations, intermediate variable deriva-
+tion, and aggregation of weighted quanti-
+ties. These representative cases provide
+clear evidence that EssenceBench effec-
+tively captures and distinguishes both su-
+
+Zack’s locker is half as big
+as Timothy’s locker. Peter’s
+locker is 1/4 as big as Zack’s
+locker. If Peter’s locker is 5
+cubic inches, how big is Timo-
+thy’s locker in cubic inches?
+
+Axel has 50 silver pesos and 80 gold pesos. He
+visits her friend Anna who has twice as many
+silver pesos as he has and 40 more gold pesos.
+What’s the total number of pesos they have
+together?
+
+Timothy’s locker is 24 cu-
+bic inches. Zack’s locker
+is half as big as Timothy’s
+locker.Peter’s locker is 1/4 as
+big as Zack’s locker. How
+big is Peter’s locker in cubic
+inches?
+
+Amy is taking a history test. She correctly
+answers 80% of the multiple-choice questions,
+90% of the true/false questions, and 60% of the
+long-answer questions. The multiple-choice and
+true/false questions are worth | point each, and
+the long answer questions are worth 5 points
+each. How many points does Amy score if
+there are 10 multiple-choice questions, 20 true/-
+false questions, and 5 long answer questions?
+
+perficial and deeper structural redundancies.
+
+Ranking Distribution. To comprehensively evaluate how well the predicted accuracies preserve
+the original model rankings, we computed several ranking metrics, detailed in the Appendix [C]and
+Tables [4] 5] and|6| In particular, we primarily focus on the ranking error metric (also referred to as
+ranking changing), which measures the proportion of models whose predicted rank deviates from
+their true rank by no more than a specified percentage of the total number of models (e.g., within
+5% or 10% rank positions). Notably, we found that selecting just 200 less samples preserves 95%
+of rankings changing within 10%. Furthermore, as shown in Figure[5| EssenceBench consistently
+outperforms MetaBench in maintaining ranking fidelity. With only 200 samples, all ranking shifts
+remain within 10%, and with 400 samples, within 5%, offering significantly tighter preservation
+compared to the deviations observed under MetaBench.
+
+
+Preprint. Under review.
+
+5 CONCLUSION
+
+In this paper, we identified sample redundancy in LLM benchmark evaluation. To address this
+problem, we introduced EssenceBench, a coarse-to-fine benchmark compression framework that
+combines redundancy-aware filtering with an iterative genetic algorithm optimized for accurate
+reconstruction. Extensive experiments on five standard benchmarks show that EssenceBench achieves
+a 200 reduction in benchmark size while preserving ranking fidelity.
+
+10
+
+
+Preprint. Under review.
+
+REFERENCES
+
+Amro Abbas, Kushal Tirumala, Daniel Simig, Surya Ganguli, and Ari S Morcos. Semdedup: Data-
+efficient learning at web-scale through semantic deduplication. arXiv preprint arXiv:2303.09540,
+2023.
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman,
+Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report.
+arXiv preprint arXiv:2303.08774, 2023.
+
+Aida Amini, Saadia Gabriel, Peter Lin, Rik Koncel-Kedziorski, Yejin Choi, and Hannaneh Hajishirzi.
+Mathqa: Towards interpretable math word problem solving with operation-based formalisms.
+arXiv preprint arXiv: 1905.13319, 2019.
+
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten Bosma, Henryk Michalewski, David Dohan,
+Ellen Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. Program synthesis with large language
+models. arXiv preprint arXiv:2108.07732, 2021.
+
+Yoshua Bengio, Réjean Ducharme, Pascal Vincent, and Christian Jauvin. A neural probabilistic
+language model. Journal of machine learning research, 3(Feb):1137—1155, 2003.
+
+Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, and Zheng Liu. Bge m3-embedding:
+Multi-lingual, multi-functionality, multi-granularity text embeddings through self-knowledge
+distillation. arXiv preprint arXiv:2402.03216, 2024a.
+
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde De Oliveira Pinto, Jared
+Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, et al. Evaluating large
+language models trained on code. arXiv preprint arXiv:2107.03374, 2021.
+
+Sijia Chen, Yibo Wang, Yi-Feng Wu, Qing-Guo Chen, Zhao Xu, Weihua Luo, Kaifu Zhang, and
+Lijun Zhang. Advancing tool-augmented large language models: Integrating insights from errors
+in inference trees. In The Thirty-eighth Annual Conference on Neural Information Processing
+
+Systems, 2024b. URL https://openreview.net/forum?id=ZIpdu0cHYu
+
+Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and
+Oyvind Tafjord. Think you have solved question answering? try arc, the ai2 reasoning challenge.
+arXiv preprint arXiv: 1803.05457, 2018.
+
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve
+math word problems. arXiv preprint arXiv:2110.14168, 2021.
+
+OpenCompass Contributors. Opencompass: A universal evaluation platform for foundation models.
+
+https://github.com/open-compass/opencompass, 2023.
+
+Clémentine Fourrier, Nathan Habib, Alina Lozovskaya, Konrad Szafer, and Thomas Wolf. Open
+
+Ilm leaderboard v2. https: //huggingface.co/spaces/open-11lm-leaderboard/
+open_llm_leaderboard, 2024.
+
+Trevor J Hastie. Generalized additive models. Statistical models in S, pp. 249-307, 2017.
+
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn
+Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. In
+Thirty-fifth Conference on Neural Information Processing Systems Datasets and Benchmarks Track
+(Round 2).
+
+Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob
+Steinhardt. Measuring massive multitask language understanding. 2020.
+
+Hamish Ivison, Yizhong Wang, Valentina Pyatkin, Nathan Lambert, Matthew Peters, Pradeep Dasigi,
+Joel Jang, David Wadden, Noah A Smith, Iz Beltagy, et al. Camels in a changing climate:
+Enhancing Im adaptation with tulu 2. arXiv preprint arXiv:2311.10702, 2023.
+
+11
+
+
+Preprint. Under review.
+
+Alex Kipnis, Konstantinos Voudouris, Luca M. Schulze Buschoff, and Eric Schulz. metabench — a
+sparse benchmark of reasoning and knowledge in large language models, 2025. URL|ht tps:
+
+//arxiv.org/abs/2407.12844
+
+Jannik Kossen, Sebastian Farquhar, Yarin Gal, and Tom Rainforth. Active testing: Sample-efficient
+model evaluation. arXiv: Machine Learning,arXiv: Machine Learning, Mar 2021.
+
+Yury Kuratov, Aydar Bulatov, Petr Anokhin, Ivan Rodkin, Dmitry Sorokin, Artyom Sorokin, and
+Mikhail Burtsev. Babilong: Testing the limits of Ilms with long context reasoning-in-a-haystack.
+Advances in Neural Information Processing Systems, 37:106519-106554, 2024.
+
+Annu Lambora, Kunal Gupta, and Kriti Chopra. Genetic algorithm-a literature review. In 2019 inter-
+national conference on machine learning, big data, cloud and parallel computing (COMITCon),
+pp. 380-384. IEEE, 2019.
+
+Chunyi Li, Xiaozhe Li, Zicheng Zhang, Yuan Tian, Ziheng Jia, Xiaohong Liu, Xiongkuo Min, Jia
+Wang, Haodong Duan, Kai Chen, et al. Information density principle for mllm benchmarks. arXiv
+preprint arXiv:2503.10079, 2025.
+
+Tianle Li, Wei-Lin Chiang, Evan Frick, Lisa Dunlap, Tianhao Wu, Banghua Zhu, Joseph E Gonzalez,
+and Ion Stoica. From crowdsourced data to high-quality benchmarks: Arena-hard and benchbuilder
+pipeline. arXiv preprint arXiv:2406.11939, 2024.
+
+Wei Liu, Weihao Zeng, Keqing He, Yong Jiang, and Junxian He. What makes good data for
+alignment? a comprehensive study of automatic data selection in instruction tuning. arXiv preprint
+arXiv:2312.15685, 2023.
+
+Max Marion, Ahmet Ustiin, Luiza Pozzobon, Alex Wang, Marzieh Fadaee, and Sara Hooker.
+When less is more: Investigating data pruning for pretraining Ilms at scale. arXiv preprint
+arXiv:2309.04564, 2023.
+
+Tom V Mathew. Genetic algorithm. Report submitted at IT Bombay, 53:18-19, 2012.
+
+Seyedali Mirjalili and Seyedali Mirjalili. Genetic algorithm. Evolutionary algorithms and neural
+networks: Theory and applications, pp. 43-55, 2019.
+
+Melanie Mitchell. An introduction to genetic algorithms. MIT press, 1998.
+
+Daye Nam, Andrew Macvean, Vincent Hellendoorn, Bogdan Vasilescu, and Brad Myers. Using
+an Ilm to help with code understanding. In Proceedings of the IEEE/ACM 46th International
+Conference on Software Engineering, pp. 1-13, 2024.
+
+Harsha Nori, Samuel Jenkins, Paul Koch, and Rich Caruana. Interpretml: A unified framework for
+machine learning interpretability. arXiv preprint arXiv:1909.09223, 2019.
+
+Mansheej Paul, Surya Ganguli, and Gintare Karolina Dziugaite. Deep learning on a data diet: Finding
+important examples early in training. Advances in neural information processing systems, 34:
+20596-20607, 2021.
+
+Felipe Maia Polo, Lucas Weber, Leshem Choshen, Yuekai Sun, Gongjun Xu, and Mikhail Yurochkin.
+tinybenchmarks: evaluating Ilms with fewer examples. arXiv preprint arXiv:2402. 14992, 2024.
+
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena, Yanqi
+Zhou, Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a unified text-to-text
+transformer. Journal of machine learning research, 21(140): 1-67, 2020.
+
+Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and Percy Liang. Squad: 100,000+ questions for
+machine comprehension of text.
+
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An
+adversarial winograd schema challenge at scale. Communications of the ACM, 64(9):99-106,
+2021.
+
+12
+
+
+Preprint. Under review.
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang,
+Mingchuan Zhang, YK Li, Y Wu, et al. Deepseekmath: Pushing the limits of mathematical
+reasoning in open language models. arXiv preprint arXiv:2402.03300, 2024.
+
+Alex Wang, Amanpreet Singh, Julian Michael, Felix Hill, Omer Levy, and Samuel R Bowman. Glue:
+A multi-task benchmark and analysis platform for natural language understanding. In International
+Conference on Learning Representations.
+
+Yizhong Wang, Hamish Ivison, Pradeep Dasigi, Jack Hessel, Tushar Khot, Khyathi Chandu, David
+Wadden, Kelsey MacMillan, Noah A Smith, Iz Beltagy, et al. How far can camels go? exploring
+the state of instruction tuning on open resources. Advances in Neural Information Processing
+Systems, 36:74764—74786, 2023.
+
+Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. Less:
+Selecting influential data for targeted instruction tuning. arXiv preprint arXiv:2402.04333, 2024.
+
+Wenpeng Yin, Qinyuan Ye, Pengfei Liu, Xiang Ren, and Hinrich Schiitze. Llm-driven instruction
+following: Progresses and concerns. In Proceedings of the 2023 Conference on Empirical Methods
+in Natural Language Processing: Tutorial Abstracts, pp. 19-25, 2023.
+
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi. Hellaswag: Can a machine
+really finish your sentence? arXiv preprint arXiv:1905.07830, 2019.
+
+Susan Zhang, Stephen Roller, Naman Goyal, Mikel Artetxe, Moya Chen, Shuohui Chen, Christopher
+Dewan, Mona Diab, Xian Li, Xi Victoria Lin, et al. Opt: Open pre-trained transformer language
+models. arXiv preprint arXiv:2205.01068, 2022.
+
+Zicheng Zhang, Xiangyu Zhao, Xinyu Fang, Chunyi Li, Xiaohong Liu, Xiongkuo Min, Haodong
+Duan, Kai Chen, and Guangtao Zhai. Redundancy principles for mllms benchmarks. arXiv preprint
+arXiv:2501.13953, 2025.
+
+Yiran Zhao, Wenxuan Zhang, Guizhen Chen, Kenji Kawaguchi, and Lidong Bing. How do large
+language models handle multilingualism? In The Thirty-eighth Annual Conference on Neural
+Information Processing Systems.
+
+Chunting Zhou, Pengfei Liu, Puxin Xu, Srinivasan Iyer, Jiao Sun, Yuning Mao, Xuezhe Ma, Avia
+Efrat, Ping Yu, Lili Yu, et al. Lima: Less is more for alignment. Advances in Neural Information
+Processing Systems, 36:55006-55021, 2023a.
+
+Jeffrey Zhou, Tianjian Lu, Swaroop Mishra, Siddhartha Brahma, Sujoy Basu, Yi Luan, Denny
+Zhou, and Le Hou. Instruction-following evaluation for large language models. arXiv preprint
+arXiv:2311.07911, 2023b.
+
+13
+
+
+Preprint. Under review.
+
+A ADDITIONAL RELATED WORKS
+
+To contextualize our benchmark compression setting within the broader literature, we briefly supple-
+ment here the main lines of work on data selection for large language models (LLMs).
+
+Existing methods can be roughly divided into two categories. The first focuses on large-scale data
+filtering, aiming to eliminate low-quality, toxic, or duplicated samples from pretraining corpora (Raffel
+
+2020 2023} |Zhang et al.|{2022}|Abbas et al.|[2023). These approaches typically
+
+prioritize data cleanliness and safety rather than sample representativeness.
+
+The second category explores subset selection strategies that retain model performance with fewer
+examples. Notably, several works leverage heuristics or Item Response Theory (IRT)-based scoring
+
+to select informative subsets (Zhou et al.|/2023a 2023 2023). More recent
+r ran
+
+studies also explore the use of LLMs themselves to score 0 data (Xia et al.[/2024
+2023), though most of these focus on task-specific learning efficiency rather than benchmark-level
+
+score reconstruction or ranking consistency.
+
+Our setting differs in that we explicitly aim to preserve evaluation integrity across LLMs under
+compression, a goal not typically prioritized in prior work. This highlights the unique focus of our
+proposed method in balancing compression with benchmarking fidelity.
+
+B PSEUDO CODE OF ESSENCEBENCH
+
+To enhance the reproducibility and clarity of our method, we provide detailed pseudo-code for the
+core components of EssenceBench. The algorithm consists of two main stages: a single-round
+Genetic Algorithm for subset selection (Algorithm[I), and a multi-round coarse-to-fine compression
+framework that iteratively refines sample selection through attribution-based grouping (Algorithm[2).
+
+Algorithm|I} Genetic Algorithm for Subset Selection. This module performs evolutionary search
+over binary masks that represent subsets of size k from the filtered benchmark. In each generation,
+the population undergoes fitness evaluation based on RMSE error, followed by tournament selection,
+crossover, mutation, and adjustment. The top-performing subsets (elites) are retained for both
+optimization and attribution calculation.
+
+Algorithm 2} Iterative GA with Attribution-Guided Refinement. Building on Algorithm[I] this
+procedure incorporates sample-level attributions to enhance selection diversity and convergence. In
+each round, attribution scores are computed from the top-NV¢ elites using an Explainable Boosting
+Machine (EBM). Samples are then partitioned into three equally sized groups—High, Low, and
+Random—and GA is applied to each. The group achieving the lowest error becomes the new
+candidate pool for the next iteration. The process repeats until convergence or until the size of the
+pool falls below the desired subset size k.
+
+Key Notations. We briefly summarize the main symbols used throughout our method. The score
+matrix after coarse filtering is denoted by Sfiltered, while y represents the ground-truth accuracies
+of all LLMs on the full benchmark. The target coreset size is given by k. In the genetic algorithm
+(GA) procedure, NP refers to the population size, and Ne denotes the number of top-performing
+(elite) candidates retained in each generation. Each GA round runs for N@ generations. The outer
+coarse-to-fine loop terminates after at most R,,, iterations. During attribution-based grouping, a
+controls the proportion of samples retained in each candidate group, and 6 denotes the sampling
+temperature that introduces stochasticity in Step 3.
+
+14
+
+
+Preprint. Under review.
+
+Algorithm 1: Genetic Algorithm (Subset Selection)
+
+Require: Sgiterea € {0, 1} 4™*™”, y ER™™, k, Np, Ne, Na, g(-)
+Ensure: Best mask m*, errore*, and final top E subsets €
+
+1: Initialize population P = {m  }V? with random k-masks
+
+2: m* + 0, e* + +00
+
+3: for t = 1 to Ne do
+
+4: foreach m € P do
+5 Compute accuracy 3; = + SsiltereaM
+6: Predict 7 = g(§;)
+7 Compute error e(m) = Jim Yiev (Gi — yi)?
+8 Set fitness F(m) = — ¢(m)
+9: end for
+10: Select the top Ne masks by fitness into €
+ly Pee
+12: while |P’| < Np do
+13: m, p) — tournament(P)
+14: m° < crossover(m‘, m())
+15: m(°) < mutate(m))
+16: Adjust m° to have exactly k ones
+17: PEP’ U {m}
+18: end while
+19: PoP
+20: if minmep ¢(m) < e* then
+21: e* + minm €(m)
+22: m* + arg min, €(m)
+23: end if
+24: end for
+25:
+
+26: return m*, «*, €
+
+Algorithm 2: ITERATIVE GA ( SUBSET SELECTION + SAMPLE SELECTION)
+
+Require: Sgiterea € {0, 1} *™,y © R™™™! ky Rinaxs a 3
+Ensure: best mask m”, error €*
+
+1: T+ {1,...,M}, m*<+ 0, e*+ co
+
+2: for r = 0 to Ryax — 1 do
+
+3: (m,e,€) + GA_SEARCH(S(:,Z), y, k)
+
+4: ife < «* then
+
+5: update (m”, €*)
+
+6: endif
+
+7 if |Z|<korr = Ryax — 1 then
+
+8: break
+
+9: end if {attributions aggregation}
+
+10: | compute attributions {4;},<z from the top-N¢ subsets €
+
+ll: sort Aj; let q = Ja: |Z||
+
+12: Ghigh + top-q samples, Giow <— bottom-g samples, Gyang + random-g samples
+13: forGe {Ghign, Ghow; Giana} do
+
+14: (_,€G, -) + GA_SEARCH(S(:,G), y,k; 8)
+15: end for
+
+16: Z<cargming €g
+
+17: end for
+
+18:
+
+19: return m*,<«*
+
+15
+
+
+Preprint. Under review.
+
+C DETAILS OF RANKING DISTRIBUTION
+Metrics. Each table compares MetaBench and EssenceBench on eight well-defined statistics that
+together quantify how faithfully a small subset reproduces the full leaderboard.
+
+RMSE (J). Let y; be the true accuracy of model 7 on the full benchmark, and 7; the accuracy
+estimated from the compressed subset. With nm models,
+
+so a lower value indicates more accurate prediction of overall scores.
+
+Rank correlations ({). We report three correlation metrics: Pearson’s r, Spearman’s p, and Kendall’s
+7. Pearson correlation is computed on raw scores (y;) and (¥;), reflecting linear agreement. Spearman
+and Kendall are based on rankings rank(y;) and rank(g;), capturing monotonic consistency even
+when score magnitudes differ.
+
+Rank Stability (+). We define average positional deviation 5; = |rank(y;) — rank(g;)|, normalised
+
+over all models:
+
+1 6;
+Stability = 1— — y —.
+ability n dwn
+This ranges from | (perfect ranking match) to 0 (completely disordered).
+
+Pair Accuracy ({). This measures the fraction of model pairs that preserve their relative ranking:
+
+PairAce = Bl Yi Uys > 9) & Ge > HL
+
+Top-tier retrieval (+). NDCG@SO0 is the Normalized Discounted Cumulative Gain over the top-50
+predicted models, computed using the ground-truth order as ideal ranking. Top-50 Accuracy measures
+the intersection-over-union between true and predicted top-50 sets.
+
+Ranking Error within {1,2,5,10} % (?). For a given tolerance p € {1,2,5,10}, this reports the
+proportion of models whose predicted rank deviates from the ground-truth rank by at most [pn/100]
+positions. Higher values mean better rank preservation under tighter constraints.
+
+Together, these metrics assess both absolute score accuracy and ranking quality, from overall correla-
+tion down to local ordering and top-model retrieval fidelity.
+
+Table organisation. Each block of rows corresponds to the metrics just defined, while the columns
+enumerate subset sizes from 50 to 500 test items. Within every cell the lower (for RMSE) or higher
+(for the seven ranking metrics) value is emboldened so that the superior method-MetaBench or
+EssenceBench-is visible at a glance.
+
+Key findings. On all three representative benchmarks EssenceBench achieves the lowest RMSE,
+with the margin especially large when only 50-250 examples are retained. Correlation metrics
+(Pearson, Spearman, Kendall) and top-50 retrieval scores are likewise higher for EssenceBench,
+indicating much closer alignment to the full-set leaderboard. In GSM8K and ARC, for example,
+EssenceBench attains the same ranking stability with roughly 150-200 samples that MetaBench
+needs 400-500 samples to reach, underscoring the efficiency of our coarse-to-fine search.
+
+Comprehensive numbers are reported in Tables and|6|
+
+D_ DETAILS OF EXPERIMENTS
+
+D.1 BASELINE METHODS FOR DATA SELECTION
+
+For baseline comparisons, we include the following widely used methods. Random Selection selects
+subsets by randomly sampling from the original data. GraNd selects the top-k data points based on
+
+16
+
+
+Preprint. Under review.
+
+Table 4: MetaBench vs. EssenceBench on GSM8K dataset (+ larger is better, | smaller is better)
+
+Method & Metric GSMB8K Coreset Size
+
+50 100 150 200 250 300 350 400 450 500
+MetaBench
+RMSE} 3.508 2.563 2.053 1.765 1.535 1.388 1.209 1.146 1.047 0.960
+Pearson} 0.991 0.995 0.997 0.998 0.998 0.999 0.999 0.999 0.999 0.999
+Spearmant 0.984 0.989 0.994 0.994 0.996 0.996 0.997 0.997 0.998 0.998
+Kendallt 0.888 0.912 0.934 0.937 0.949 0.950 0.956 0.960 0.964 0.967
+Rank Stability 0.018 0.028 0.033 0.033 0.041 0.039 0.043 0.049 0.056 0.059
+Pair Accuracy? 0.930 0.948 0.960 0.963 0.970 0.971 0.975 0.977 0.979 0.981
+NDCG@S0T 0.976 0.990 0.995 0.991 0.994 0.995 0.996 0.995 0.998 0.998
+Top50 Accuracy} 0.720 0.820 0.880 0.840 0.880 0.900 0.860 0.840 0.920 0.940
+Ranking Error within 1% 0.185 0.245 0.298 0.358 0.386 0.406 0.488 0.517 0.504 0.597
+Ranking Error within 2% 0.357 0.457 0.556 0.596 0.660 0.681 0.741 0.755 0.786 0.841
+Ranking Error within 5% 0.684 0.794 0.887 0.897 0.941 0.943 0.953 0.966 0.984 0.984
+Ranking Error within 10%T 0.953 0.959 0.987 0.984 0.997 0.993 0.998 0.998 1.000 1.000
+EssenceBench
+RMSE} 2.900 1.525 1.131 0.857 0.682 0.597 0.543 0.454 0.426 0.375
+Pearson} 0.994 0.998 0.999 0.999 1.000 1.000 1.000 1.000 1.000 1.000
+Spearmant 0.987 0.995 0.997 0.998 0.999 0.999 0.999 0.999 0.999 1.000
+Kendallt 0.905 0.943 0.955 0.968 0.973 0.976 0.978 0.980 0.982 0.985
+Rank Stability 0.023 0.033 0.046 0.074 0.097 0.093 0.100 0.116 0.128 0.165
+Pair Accuracy} 0.939 0.963 0.972 0.979 0.983 0.984 0.986 0.987 0.988 0.990
+NDCG@S50t 0.983 0.993 0.996 0.998 0.998 0.999 0.999 1.000 0.999 1.000
+Top50 Accuracy} 0.780 0.860 0.860 0.940 0.880 0.940 0.900 0.920 0.940 0.920
+Ranking Error within 1% 0.237 0.383 0.457 0.609 0.661 0.727 0.730 0.792 0.813 0.864
+Ranking Error within 2% 0.416 0.637 0.727 0.822 0.879 0.902 0.912 0.923 0.944 0.964
+Ranking Error within 5% 0.774 0.917 0.946 0.982 0.990 0.990 0.995 0.997 0.995 1.000
+Ranking Error within 10% 0.956 0.989 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000
+
+Table 5: MetaBench vs. EssenceBench on HellaSwag dataset (+ larger is better, | smaller is better)
+
+Method & Metric HellaSwag Coreset Size
+
+50 100 150 200 250 300 350 400 450 500
+MetaBench
+RMSE| 2.397 1.734 1.495 1.318 1.166 1.076 0.961 0.929 0.880 0.836
+Pearsont 0.992 0.996 0.997 0.998 0.998 0.998 0.999 0.999 0.999 0.999
+Spearman? 0.979 0.989 0.992 0.994 0.995 0.996 0.997 0.997 0.997 0.997
+Kendall 0.879 0.915 0.928 0.937 0.942 0.946 0.955 0.954 0.957 0.959
+Rank_Stabilityt 0.024 0.024 0.021 0.030 0.045 0.032 0.054 0.044 0.062 0.042
+Pair_Accuracy} 0.921 0.949 0.957 0.963 0.967 0.970 0.974 0.974 0.976 0.977
+NDCG@SOT 0.990 0.996 0.997 0.997 0.997 0.997 0.998 0.999 0.999 0.999
+Top50_Accuracyt 0.920 0.940 0.960 0.940 0.900 0.960 0.900 0.960 0.940 0.980
+Ranking_Error_within 1% 0.200 0.265 0.278 0.355 0.377 0.395 0.418 0.435 0.492 0.466
+Ranking_Error_within 2% 0.370 0.487 0.537 0.586 0.621 0.629 0.705 0.683 0.717 0.725
+Ranking_Error_within 5% 0.660 0.812 0.854 0.889 0.905 0.928 0.959 0.949 0.961 0.974
+Ranking_Error_within 10% 0.902 0.961 0.983 0.989 0.991 1.000 0.998 1.000 0.998 1.000
+EssenceBench
+RMSE| 2.153 1.453 1.038 0.863 0.706 0.635 0.504 0.461 0.409 0.419
+Pearsont 0.994 0.997 0.999 0.999 0.999 0.999 1.000 1.000 1.000 1.000
+Spearmant 0.985 0.993 0.997 0.997 0.998 0.998 0.999 0.999 0.999 0.999
+Kendall 0.899 0.931 0.951 0.959 0.966 0.967 0.973 0.974 0.978 0.978
+Rank _Stabilityt 0.032 0.050 0.062 0.062 0.068 0.069 0.107 0.095 0.129 0.102
+Pair_Accuracy} 0.932 0.958 0.970 0.975 0.980 0.981 0.984 0.985 0.987 0.987
+NDCG@S50t 0.992 0.996 0.996 0.998 0.999 0.999 0.999 0.999 0.999 0.999
+Top50_Accuracyt 0.960 0.920 0.940 0.940 0.940 0.980 0.960 0.960 0.960 0.980
+Ranking_Error_within 1%{ 0.257 0.337 0.392 0.492 0.520 0.552 0.620 0.645 0.666 0.677
+Ranking Error_within 2% 0.432 0.535 0.645 0.725 0.788 0.818 0.865 0.871 0.910 0.913
+Ranking_Error_within 5% 0.738 0.869 0.964 0.974 0.989 0.988 0.997 1.000 1.000 1.000
+Ranking_Error_within 10% 0.946 0.988 0.998 1.000 1.000 1.000 1.000 1.000 1.000 1.000
+
+the gradient norms of the final token in the prediction task, ranking samples in descending order of
+gradient magnitude. PPL (Perplexity) is a standard metric for evaluating language models, defined as
+the exponential of the average negative log-likelihood over the predicted tokens, and is computed
+over the full predicted sequence for each question in the dataset. To compute the gradients for
+GraNd-based selection, we use the Llama-3.1-8B-Instruc{*]model as the scoring backbone.
+
++https://huggingface.co/meta-lama/Llama-3.1-8B-Instruct
+
+17
+
+
+Preprint. Under review.
+
+Table 6: MetaBench vs. EssenceBench on ARC dataset (* larger is better, | smaller is better)
+
+Method & Metric ARC Coreset Size
+
+50 100 150 200 250 300 350 400 450 500
+MetaBench
+RMSE 2.968 2.082 1.690 1.511 1.332 1.186 1.077 0.961 0.890 0.836
+Pearsont 0.986 0.993 0.995 0.996 0.997 0.998 0.998 0.998 0.999 0.999
+Spearmant 0.976 0.984 0.991 0.992 0.994 0.995 0.996 0.997 0.997 0.998
+Kendall 0.870 0.898 0.922 0.928 0.936 0.942 0.949 0.955 0.959 0.961
+Rank_Stabilityt 0.014 0.021 0.026 0.027 0.041 0.035 0.038 0.050 0.044 0.044
+Pair_Accuracy} 0.918 0.940 0.954 0.959 0.963 0.967 0.972 0.974 0.977 0.978
+NDCG@S50t 0.987 0.992 0.995 0.994 0.997 0.998 0.998 0.999 0.999 0.998
+Top50_Accuracyt 0.900 0.880 0.900 0.900 0.880 0.880 0.920 0.920 0.900 0.960
+Ranking_Error_within 1% 0.150 0.236 0.274 0.317 0.368 0.361 0.412 0.459 0.456 0.492
+Ranking_Error_within 2% 0.328 0.442 0.492 0.552 0.597 0.615 0.669 0.704 0.753 0.767
+Ranking_Error_within 5% 0.653 0.756 0.844 0.853 0.887 0.902 0.952 0.956 0.974 0.970
+Ranking_Error_within 10% 0.881 0.929 0.973 0.985 0.985 0.992 0.998 1.000 1.000 0.998
+EssenceBench
+RMSE| 2.045 1.104 0.841 0.703 0.612 0.529 0.501 0.422 0.368 0.347
+Pearsont 0.993 0.998 0.999 0.999 0.999 1.000 1.000 1.000 1.000 1.000
+Spearmant 0.988 0.996 0.997 0.998 0.998 0.999 0.999 0.999 0.999 0.999
+Kendallt 0.907 0.947 0.958 0.964 0.969 0.973 0.974 0.978 0.981 0.983
+Rank _Stabilityt 0.035 0.047 0.063 0.071 0.077 0.096 0.084 0.120 0.147 0.149
+Pair_Accuracyt 0.939 0.965 0.973 0.977 0.980 0.983 0.983 0.986 0.988 0.989
+NDCG@S50t 0.986 0.995 0.999 0.999 0.999 0.999 1.000 0.999 1.000 0.999
+Top50_Accuracyt 0.900 0.940 0.960 0.920 0.960 1.000 0.960 0.980 0.960 0.940
+Ranking_Error_within 1% 0.233 0.408 0.444 0.498 0.550 0.630 0.639 0.696 0.737 0.771
+Ranking_Error_within 2% 0.433 0.641 0.735 0.768 0.823 0.869 0.871 0.901 0.937 0.955
+Ranking_Error_within 5% 0.788 0.928 0.965 0.986 0.991 0.997 0.997 0.998 1.000 1.000
+Ranking_Error_within 10% 0.949 0.997 1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000
+
+D.2. DETAILS OF DATASET CONSTRUCTION
+
+Following the initial collection of benchmark data, we performed a coarse filtering step to remove
+redundant or uninformative items before subset selection. This stage was guided by two primary
+criteria: textual similarity and ranking consistency.
+
+To mitigate redundancy in the benchmark, we applied coarse filtering using both semantic and
+behavioral criteria. For semantic overlap, we used the bge—m3 model to embed
+each item and computed pairwise similarities across all examples. Items with high embedding
+similarity were removed to ensure lexical and conceptual diversity. In parallel, we identified items
+with redundant behavioral signals by examining their ranking patterns over LLMs. Items that
+yielded highly correlated rankings were pruned, as they offered limited additional insight into model
+differences. Together, these two filters reduced both surface-level and functional redundancy, yielding
+a more informative candidate pool for downstream compression.
+
+In the case of the MMLU dataset, we observed that many items exhibited naturally high textual and
+behavioral similarity due to the curriculum-style structure of the benchmark. To avoid over-pruning,
+we adapted the filtering thresholds to be more lenient for MMLU.
+
+18

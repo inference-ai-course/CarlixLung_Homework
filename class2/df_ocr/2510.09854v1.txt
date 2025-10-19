@@ -1,0 +1,1961 @@
+arX1v:2510.09854v1 [cs.CL] 10 Oct 2025
+
+NG-Router: Graph-Supervised Multi-Agent Collaboration
+for Nutrition Question Answering
+
+Kaiwen Shi'*, Zheyuan Zhang’, Zhengqing Yuan’, Keerthiram Murugesan’,
+
+Vincent Galassi, Chuxu Zhang’, Yanfang Ye''
+
+‘University of Notre Dame, University of Connecticut, IBM Research,
+
+“Equal Contribution ‘Corresponding Author
+{kshi3, yye7}@nd.edu,
+
+Abstract
+
+Diet plays a central role in human health. Nu-
+trition Question Answering (QA) has emerged
+as a promising paradigm to deliver personal-
+ized dietary guidance and prevent diet-induced
+chronic conditions, yet despite recent progress,
+existing approaches struggle with two key limi-
+tations: 1) the limited capacity of single agents
+for domain-specific reasoning and the inherent
+design complexity of multi-agent systems; 2)
+the overload of contextual information that di-
+lutes downstream decision-making. In this pa-
+per, we introduce Nutritional-Graph Router
+(NG-Router), a framework that formulates
+nutritional QA as a supervised, knowledge-
+graph—guided multi-agent collaboration prob-
+lem. Our approach integrates agent nodes into
+knowledge graphs and employs a graph neu-
+ral network to learn task-aware routing distri-
+butions over agents, leveraging soft supervi-
+sion derived from empirical agent performance.
+To further mitigate contextual overload, we in-
+corporate a gradient-based subgraph retrieval
+mechanism that identifies salient evidence dur-
+ing training, thereby enhancing reasoning in
+multi-hop and relational settings. Extensive
+experiments across multiple benchmarks and
+backbones demonstrate that NG-Router con-
+sistently surpasses both single-agent and en-
+semble baselines, achieving robust and general-
+izable improvements. By embedding collabo-
+ration schemes directly into graph-supervised
+signals, our method offers a principled path to-
+ward domain-aware multi-agent reasoning for
+complex nutritional health tasks. Our code repo
+can be found here.
+
+1 Introduction
+
+Diet is one of the most influential determinants
+of human health, shaping both disease prevention
+and long-term well-being. Yet, unhealthy eating
+remains widespread despite extensive public aware-
+ness of the benefits of proper nutrition (WHO,
+
+2021). In the United States, for instance, an esti-
+mated 42.4% of adults are classified as obese (CDC,
+2020). Globally, poor dietary patterns were asso-
+ciated with more than 11 million deaths in 2017,
+alongside millions of disability-adjusted life-years
+(DALYs), often linked to factors such as excessive
+sodium intake (Afshin et al., 2019; WHO, 2023).
+These figures highlight the pressing need for large-
+scale interventions that foster healthier eating be-
+haviors (Figure 1 (a)). To address the challenges in
+personalized nutritional health, Nutrition Question
+Answering (QA) has gained traction as a practical
+solution due to its accessibility, low entry barrier,
+and interactive nature (Min et al., 2022; Bondevik
+et al., 2024). Advances in LLMs further strengthen
+this direction by enabling more sophisticated rea-
+soning over personalized dietary guidance (Zhang
+et al., 2025c). Although recent datasets and tasks
+(Bolz et al., 2023; Zhang et al., 2025b) have ad-
+vanced the field from a data-centric perspective,
+the effective use of these benchmarks remains con-
+strained by two major research gaps:
+
+Complexity of Domain-Specific Reasoning. Sim-
+ple single-agent reasoning is usually insufficient
+for handling the medical and nutritional complexity
+required in personalized dietary guidance. While
+standalone LLM agents can perform well in gen-
+eral domains, growing evidence shows that coor-
+dinated systems of multiple agents often yield su-
+perior outcomes (Hong et al., 2024; Zhong et al.,
+2024; Ma et al., 2025). Multi-agent frameworks
+(MAS) leverage diverse and complementary roles
+to improve reasoning accuracy, exploratory depth,
+and robustness (Shinn et al., 2023; Qian et al., 2025;
+Wang et al., 2025a). However, designing such sys-
+tems is far from trivial. A pervasive challenge lies
+in determining which agents should participate in
+collaboration, as literature consistently shows that
+the performance of different agents and backbones
+varies substantially across tasks, and there is no uni-
+versally optimal solution (Feng et al., 2025). This
+
+
+=
+
+rs (Obesity)
+j Danish pastry =a ayy —
+with fruit & User
+cre eee A 6 —7~ has
+cE contains | has ( Dia >
+High >} contradict
+
+odium ) (Hypertension) )
+
+| ee
+
+Diet-related
+
+Diseases
+
+mii i i i io,
+
+a) The Impact of Poor Diet & An Example of Nutrition QA
+
+@ xvvd
+o vx?
+@ xxv
+
+N81.J UlJO1A
+
+Single agents perform poorly & |
+Q1 Q2 Q3_ = No Universal Optimal Single Agent |
+
+b) Current Major Research Gaps in Nutrition QA Tasks
+
+Figure 1: Illustration of Nutrition QA challenges.
+
+(a) Poor dietary habits lead to health risks and complex
+
+user—food—condition interactions, as shown in a personalized QA example. (b) Two key research gaps emerge: (i)
+domain-specific reasoning requires multiple complementary agents, with no single model performing optimally
+across queries; and (ii) excessive and unstructured contextual information hampers accurate retrieval and reasoning.
+
+limitation becomes especially problematic in do-
+mains like healthcare, where domain knowledge is
+required for delicate reasoning (Figure 1 (b)).
+
+Overload of Contextual Information. Health-
+aware dietary reasoning typically involves an over-
+whelming volume of domain-specific information,
+such as medical conditions, nutritional profiles,
+food attributes, and condition-specific constraints
+(Zhang et al., 2025b). When this context is pre-
+sented in full to an LLM or multi-agent system,
+the reasoning process can become diluted or mis-
+directed, leading to inefficiency and factual errors
+(Jin et al., 2024; Jiang et al., 2024; Peng et al.,
+2024). Effective personalized guidance therefore
+depends not only on reasoning ability but also on
+accurately retrieving and prioritizing the most rel-
+evant information from the broader context (Guo
+et al., 2024; Wen et al., 2023). Without mecha-
+nisms to filter, structure, and surface key evidence,
+model performance degrades, and the quality of
+generated answers suffers accordingly (Figure 1
+(b)).
+
+To tackle the two aforementioned challenges,
+we adopt the Graph QA setting from the NGQA
+benchmark (Zhang et al., 2025b) and _ intro-
+duce Nutritional-Graph Router (NG-Router),
+a framework that casts nutritional question answer-
+ing as a supervised, knowledge-graph guided multi-
+agent collaboration problem. To address the first
+challenge, we integrate agent nodes into the KG
+and design a heterogeneous graph neural network
+(GNN) that propagates information across node
+types and produces task-aware routing distribu-
+tions over agents. Rather than assigning agents
+deterministically, the router leverages soft super-
+
+vision derived from empirical agent performance
+to learn dynamic probability distributions, and it
+generates final answers via weighted aggregation
+of agent outputs. To address the second challenge,
+we extend the pipeline with a gradient-based sub-
+graph retrieval mechanism. During training, gra-
+dient signals supervise the retrieval of salient sub-
+graphs, effectively filtering away irrelevant context.
+This design is motivated by prior findings showing
+that such retrieval strategies are especially advanta-
+geous for complex multi-hop reasoning (Jin et al.,
+2024; Jiang et al., 2024; Peng et al., 2024).
+
+Overall, our method departs from heuristic vot-
+ing or LLM-based judging by learning collabora-
+tion schemes directly from supervised graph sig-
+nals. This enables the incorporation of domain
+structure into agent coordination without requiring
+handcrafted prior knowledge, while the gradient-
+guided retrieval substantially reduces contextual
+overload for downstream reasoning. Extensive
+experiments demonstrate that NG-Router consis-
+tently surpasses single-agent and ensemble base-
+lines and generalizes well across both benchmarks
+and model backbones. Our contributions can be
+summarized as follows:
+
+¢ KG-Driven Agent Collaboration. In this
+paper, we present a novel framework that
+converts multi-agent question answering into
+domain-specific knowledge graphs, where
+nodes represent not only queries and agents
+but also fine-grained entities and contextual
+interactions. We further train the graphs to
+learn adaptive collaboration strategies tailored
+to heterogeneous agent capabilities.
+
+¢ Graph-Supervised Subgraph Retrieval. To
+
+
+enhance downstream reasoning, we propose
+a retrieval mechanism that leverages gradient-
+based supervision during KG training. By
+identifying important nodes, the method ex-
+tracts the most relevant subgraphs, enabling
+more precise and context-aware QA.
+
+Extensive Empirical Validation. Compre-
+hensive experiments in the Nutritional QA
+domain demonstrate that our collaboration
+framework consistently surpasses both the
+strongest single-agent models and state-of-the-
+art baselines across multiple tasks.
+
+2 Related Works
+
+2.1 Task-Adaptive Agent Selection.
+
+With the rapid development of LLMs and agentic
+frameworks, a growing body of work shows that no
+single model consistently dominates across tasks;
+instead, agents exhibit complementary strengths.
+Multi-agent systems such as AgentVerse demon-
+strate collaborative gains over individual agents
+(Chen et al., 2024c), while ReConcile shows that
+organizing diverse LLMs into rounds of discus-
+sion with consensus voting improves reasoning
+(Chen et al., 2024a). These findings motivate input-
+conditioned selection and coordination—i.e., rout-
+ing or assembling specialized agents per query.
+Early efforts used static ensembling or binary
+collaboration (e.g., self-consistency (Wang et al.,
+2022)) to exploit diversity, but these approaches
+predefine model sets and lack input adaptivity,
+offering limited guidance on agent prioritization
+(Jiang et al., 2023a). More recent work trains
+learned routers that select LLMs based on query
+characteristics. RouteLLM learns routing from
+human preference data (Ong et al., 2025), Rou-
+terDC uses dual contrastive learning to assemble
+multiple LLMs (Chen et al., 2024b), and MixLLM
+treats routing as a contextual bandit problem for
+dynamic adaptation (Wang et al., 2025b). Other
+methods focus on coordinating multiple agents
+rather than selecting a single one: TO-Router and
+BEST-Route determine which experts to involve
+based on query difficulty instead of fixed pipelines
+(Stripelis et al., 2024; Ding et al., 2025). How-
+ever, many of these approaches still rely on heuris-
+tic rules or shallow controllers and rarely model
+richer inter-dependencies among tasks, queries, and
+agents. A newer line of work frames routing as a
+structured learning problem (Zhang et al., 2025d).
+GRAPHROUTER, for example, formulates routing
+
+as link prediction on a heterogeneous graph and
+uses GNNs to model query—model and inter-model
+relations (Feng et al., 2025). Although this marks
+progress beyond simple heuristic methods , it still
+struggles to integrate fine-grained task semantics or
+supervised graph signals that more directly guide
+adaptive collaboration across diverse agent designs.
+More can be seen in Appendix A
+
+2.2. Prior Works in Nutrition Personalization.
+
+With growing awareness of the importance of di-
+etary health, various studies have sought to in-
+corporate health metrics into applications such as
+food recommendation systems (Tian et al., 2022a,b,
+2021). These approaches can be grouped into three
+primary categories. First, some research empha-
+sizes single indicators like calorie or fat content, as
+highlighted in works by Ge et al. (Ge et al., 2015)
+and Shirai et al. (Shirai et al., 2021), though such
+metrics often fail to represent the multifaceted na-
+ture of a balanced diet. Second, simulated health
+data has been utilized, as demonstrated by Wang
+et al. (Wang et al., 2021), but these methods often
+diverge from real-world data distributions. Finally,
+recent studies have applied global health guidelines
+to develop composite health scores, such as (B6lz
+et al., 2023; Zhang et al., 2024a). However, foods
+deemed healthy by general standards can still neg-
+atively affect certain individuals (Yue et al., 2021;
+Zhang et al., 2024c), highlighting the absence of a
+universal solution. Beyond this, there is yet an ef-
+fective solution to address the overload contextual
+information this domain challenge brings.
+
+3 Preliminary
+
+3.1 NGQA Benchmark Extension
+
+Nutritional Graph Question Answering (NGQA)
+benchmark is a set of graph-based question an-
+swering datasets for personalized nutritional health,
+constructed from the National Health and Nutrition
+Examination Survey (NHANES) and the Food and
+Nutrient Database for Dietary Studies (FNDDS)
+data, which evaluates whether a food is healthy for
+a specific user by linking medical conditions, di-
+etary behaviors, and nutritional profiles. It supports
+a variety of reasoning tasks across varying question
+complexities and establishes a comprehensive eval-
+uating system for nutritional question answering
+task. In NGQA benchmark, each question has a
+context knowledge graph G = (V, €), where V in-
+cludes different types of nodes such as food items,
+
+
+user profile, health conditions and nutrition tags. In
+this paper, we further extend query node Vg and
+agent nodes V4 into the knowledge graph. Specifi-
+cally, agent nodes V4 represent candidate agents,
+each defined by its prompts and strategy descrip-
+tion, while query nodes vg € Vg are initialized
+by a contextual encoder. As such, all nodes are
+embedded into the shared textual space to make
+message passing meaningful.
+
+To further capture both the static semantic struc-
+ture of the domain and the dynamic preferences of
+agent routing, we define: 1) Query—entity edges,
+which connect each query to the entities it explicitly
+mentions, thereby grounding the question within its
+evidential context. 2) Agent—entity edges, which
+capture the perspectives of different agents. By
+prompting each agent to identify the entities it
+finds most relevant, we encode how distinct agents
+selectively attend to contextual information. 3)
+Query—agent edges, which are not fixed but remain
+trainable. These edges carry the routing signal that
+the model learns to optimize; their existence and
+weights determine which agents are activated for
+collaboration and how their contributions are com-
+bined. In this formulation (Figure 2), the frozen
+edges ensure contextual grounding, while the adap-
+tive query—agent edges provide a mechanism for
+dynamic and task-specific routing.
+
+3.2 Problem Formulation
+
+Formally, we study the problem of designing an
+optimized LLM-based agent collaboration scheme
+for a fixed graph QA task. Let A = {a1,...,an}
+denote the pool of available agents (each agent de-
+fined by a backbone LLM and an interaction strat-
+egy/prompting style), V the input/query space, G
+the context graphs of the queries, and V the output
+space. For x € ¥, each agent a € A produces a
+candidate y_(x,G) € Y. Our overarching goal is
+to learn an optimal weighted combination of agents
+in A that maximizes task-level performance in the
+fixed downstream setting. Specifically, within this
+KG, the problem reduces to learning a function
+fo that scores query—agent pairs by propagating
+signals along graph edges:
+
+s(q,a) =
+
+where s(q,qa) estimates the utility of including
+agent a when solving query q for the given task
+and G here represents the corresponding context
+graph. The model then computes a weighted com-
+
+bination of agents:
+
+I(q) = OL yal), Walg) : a © A}),
+
+with weights wa(q) « exp(s(q,a)), and ¢ denot-
+ing an aggregation rule such as voting, reranking,
+or learned fusion. Framing the problem in this way
+refines the high-level goal of "finding the best col-
+laboration scheme" into the concrete task of learn-
+ing graph-supervised scores for query—agent pairs,
+which in turn yield optimized weightings of agents
+for a fixed downstream task.
+
+It is worth noting our formulation builds on the
+assumption that no single agent or backbone uni-
+formly dominates; rather, their strengths and weak-
+nesses are task- and backbone-dependent. This
+premise is supported by extensive prior works
+(Chen et al., 2024c,a) and later in our experiments,
+which consistently shows that different LLMs or
+prompting strategies excel in different scenarios.
+
+4 Methodology
+4.1 Agent Collaboration Training
+
+Given the constructed knowledge graph, the cen-
+tral challenge is to train a router that can decide
+which agents are most valuable for solving a given
+query. Prior approaches often depend on manually
+crafted rules or the use of LLMs as external judges.
+Such heuristics lack adaptability and fail to capture
+complex contextual signals. In contrast, we frame
+routing as a supervised learning problem, allowing
+the model to discover fine-grained dependencies
+among queries, entities, and agents, rather than
+relying on rigid voting schemes.
+
+Our solution employs a heterogeneous Graph
+Neural Network designed for type-sensitive mes-
+sage passing. Each node is first mapped into a uni-
+fied latent representation through a type-specific
+projection Proj,;,). For an edge (uw an v) of rela-
+tion type w, the propagated message is computed
+as
+
+mb) = Proj. (Wy. nl) ,
+
+and neighbor messages of the same type are aggre-
+gated by averaging. The contributions of different
+edge types are then merged with learnable gates,
+yielding the ress
+) nll”)),
+(2)
+
+A?) =U, (ag | a wy
+pev(v
+where 7 (v) indicates node type, w,,” is a trainable
+
+coefficient per edge type, UY, is a type-dependent
+
+
+Question: ... report the nutrient
+tags to judge if the food is ...
+
+agent & query
+embedding
+
+i
+
+a) Context Graph Extension
+
+context graph
+embedding ,,
+
++
+
+b) Router Training w/t Guided Subgraph Retrieval
+
+Subgraph
+
+«C) Retrieval
+
+eS =
+| Refined Context |
+
+1
+!
+1
+!
+1
+1
+1
+i]
+I
+]
+]
+i]
+co |
+1
+!
+]
+i]
+]
+i]
+i]
+]
+]
+i]
+]
+i]
+
+| Learned Weights |
+IOO O..!
+10.24 0.17 0.08 — |
+
+Proj. Softmax
+
+Lx.
+
+BUISSD ASDSSaP asDMv-adA],
+
+Edge
+Scoring
+
+Downstream
+Reasoning
+4
+
+Figure 2: Overview of our proposed framework. (a) shows the KG extension process, where QA instances are
+extended into context graphs with query and agent nodes linked to nutritional entities. (b) shows our type-aware
+GNN router, which propagates contextual signals and guides gradient-based subgraph retrieval, refining the graph
+and producing agent importance weights for downstream collaboration and reasoning.
+
+update operator, and || denotes concatenation. This
+mechanism enables each node to refine its embed-
+ding by combining its prior state with heteroge-
+neous relational evidence.
+
+After DL layers, the query representation ni)
+incorporates contextual information, while agent
+embeddings nw) encode their relative competence
+for the query. A routing score is then assigned by
+
+(qa) = MLP (Af || hi),
+which is normalized over all agents with a softmax:
+
+po(a| 4,9) = softmaxaes(s(q, )).
+
+Supervision is provided by empirical agent per-
+formance. For each query, agents are evaluated and
+their F1 scores converted into a target distribution
+p*(a | g) using a temperature-scaled softmax. This
+produces smoother guidance than one-hot labels,
+emphasizing not only the best agent but also sec-
+ondary contributors. Training minimizes the KL
+divergence
+
+p*(a| q)
+pola ba, GY
+
+Lei(q
+
+= So p*(a| q) log
+
+acA
+
+KL divergence is particularly well-suited here:
+unlike cross-entropy, which concentrates solely on
+the top class, or mean squared error, which poorly
+models probability distributions, KL captures the
+full relative structure among agents and maintains
+informative gradients. This encourages the router
+
+to learn balanced allocation across complementary
+agents, stabilizing training and promoting collabo-
+rative diversity.
+
+During inference, the router outputs the distribu-
+tion pe(a|q,G) over agents. Final predictions are
+assembled by weighted ensembling:
+
+I(q) = O({ yal), Pola | 9,9) :a € A}),
+
+where yq(q) denotes agent a’s answer and ¢ is
+a weighted aggregation rule such as probabilistic
+voting. Thus, the learned distribution directly de-
+termines how much influence each agent exerts in
+producing the final answer, yielding a principled,
+context-aware collaboration strategy.
+
+4.2 Graph-Supervised Subgraph Retrieval
+
+A critical challenge in nutritional QA is the ex-
+cessive volume of contextual information, where
+presenting the full graph to the router dilutes rea-
+soning and introduces noise. To address this, we
+further propose a subgraph retrieval module that
+leverages training signals to identify and retain the
+most salient entities for each query.
+
+Let Vz denote entity nodes and h; the last layer
+of the embeddings of entity v; € Vz. For a given
+query q, we obtain the agent scores s(q,a) and
+routing distribution pg(a | g,G) as defined in the
+previous subsection. To measure the contribution
+of each entity, we compute gradients of the routing
+objective with respect to h;. Specifically, we define
+the salience of entity v; as
+
+- | Vn; £KL(q) |
+
+’
+2
+
+
+Method Sparse Standard Complex
+Accuracy Precision Fl Accuracy Precision Fi Accuracy Precision Fl
+
+KAPING 17.53 20.75 33.94 45.93 46.24 62.72 68.83 71.29 80.93
+
+ToG 24.39 29.86 43.33 61.89 67.93 74.64 61.53 81.19 73.03
+Raw 29.34+0.74 32.5140.59 49.41+0.91 64.1140.31 79.29+0.47 82.40+0.42 72.0340.23 72.96+0.24 81.86+0.18
+CoT 29.21+1.43 32.54+1.12 48.1041.49 62.9140.86 76.51+0.97 80.27+0.64 72.4040.16 72.9340.16 82.05+0.18
+MAD 27.10+1.32 30.59+1.24 46.3941.14 61.7340.54 76.05+0.50 80.34+0.34 71.8040.27 72.7740.36 81.88+0.27
+React-Reflect 25.14+1.39 28.8141.37 47.724£0.53 66.6740.59 82.36+40.56 84.89+0.27 71.92+0.34 72.80+0.03 81.73+0.19
+SC 25.7140.29 29.64+0.38 45.52+0.10 68.764£0.20 85.81+0.32 86.3640.19 72.75+0.39 73.43+0.39 82.45+0.28
+Summary 27.45+0.77 31.2340.76 47.12+1.25 66.72+0.19 84.00+0.31 85.45+0.17 71.28+0.65 72.5640.35 81.60+0.36
+Majority Vote 22.61+0.13  25.58+0.17 44.59+0.28 57.35+0.43 61.79+0.33 75.26+0.20 52.43+0.77 77.50+0.61 71.73+0.29
+HybridLLM 28.02+0.59 30.9140.42 47.76+0.74 34.4540.12 34.45+0.12 49.25+0.22 72.75+0.29 73.19+0.14 82.31+0.21
+LLM-Blender 21.20+0.98 24.26+0.95 46.7341.43 45.72£0.55 50.90+0.32 68.32+0.83 51.7940.17 72.02+0.21 75.50+0.69
+NG-Router w/o SR 29.11+0.32 32.24+0.40 49.71+0.65 76.33+1.17 78.21+1.01 89.14+0.59 74.63+0.19 77.58+0.12 85.95+0.06
+NG-Router w/SR = 57.49+0.25  61.5840.28 75.29+0.17 94.10+2.58 97.6541.71 97.7341.24 88.19+1.92 95.04+0.18 92.5341.24
+
+Table 1: Performance comparison across Sparse, Standard, and Complex settings. We report both the version with
+and without the subgraph retrieval (SR). Additionally, we report the mean and standard deviation for all results for
+three runs. Best results are in bold, second best are underlined.
+
+Type Metric Sparse Standard Complex
+Original 26.60 27.85 30.89
+Neds Retrieval 7.87 9.71 13.67
+Drop (%) — 70.41 65.13 55.75
+Original 51.09 55.56 67.60
+Edge Retrieval 10.78 19.95 30.24
+Drop (%) 78.90 64.09 55.27
+Original 16.40 27.70 31.60
+SNR Retrieval 50.83 70.44 70.80
+Raise (%) 209.94 154.30 124.05
+
+Table 2: Graph size reduction before and after applying
+subgraph retrieval. Node and edge statistics are shown
+for Sparse, Standard, and Complex settings. Signals-to-
+Noise Ratio (SNR) indicates the proportion of useful
+nodes in the context graph.
+
+which quantifies how strongly the training loss de-
+pends on v;. Entities with higher a; exert greater
+influence on agent routing and are therefore more
+informative. At inference, we evaluate qa; for all
+entities in Vg associated with q and filter out the
+entities that are not important enough, in our case
+the threshold 7 is 0.01:
+
+V* = {o({(vj,a;): 0; EVE}, O>7).
+
+We then construct the induced subgraph G* over V*,
+preserving their original edges. The downstream
+reasoning at inference time will use G* instead of
+G as the context graph, therefore y,(x,G*). This
+ensures that downstream reasoning attends to the
+most critical contextual evidence while filtering out
+redundant information. The final output will be the
+weighted vote result of the full agent set A.
+
+—— medium
+
+—— complex
+
+sparse
+
+12 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24
+Top-k
+
+Figure 3: Percentage change (A) in F1 relative to k=24,
+used as the base (0%). Curves show how performance
+varies with the top k agent clipped across datasets.
+
+5 Experiments
+
+5.1 Experiment Setup
+
+For benchmark, we evaluate the label generation
+task on three datasets from the NGQA benchmark
+(Zhang et al., 2025b), namely sparse, standard, and
+complex, designed for nutrition question reasoning.
+We follow the evaluation settings and evaluation
+metrics of the NGQA benchmark. The detailed
+description of the benchmark and dataset, as well
+as training settings, are provided in Appendix B.
+
+For baselines, we consider three categories: (1)
+the original baselines reported in NGQA, namely
+KAPING (Baek et al., 2023) and ToG (Sun et al.,
+2024); (2) the best-performing single-agent and
+multi-agent designs across several LLM back-
+bones. Specifically, we include Raw (the basic
+LLM method), Chain-of-Thought (CoT) (Wei et al.,
+2022), Self-Consistency (SC) (Wang et al., 2023b),
+ReAct-Reflection (Yao et al., 2023; Shinn et al.,
+2023), Multi-Agent Debate (MAD) (Du et al.,
+2024), and Multi-Agent Summary. Our method
+
+
+Setting Backbone CoT MAD Raw ReAct-Reflect SC Summary _ Best Agent
+GPT-40-mini 48.10+1.49 46.39+1.14 49.41+0.91 47.09+1.39 45.52+0.10  47.12+1.25 78.40
+Sparse Llama-3.2-3B 45.87+0.68  45.33+0.72 46.46+0.93 47.72+0.53 45.38+0.13 46.330.07 56.90
+Pars Mistral-7B-Instruct 46.73+1.43 44.70+0.43  47.29+0.27 44.23+0.88 42.42+0.50  47.10+0.53 54.38
+Qwen2.5-7B-Instruct 43.03+0.14 40.42+0.33 42.86+0.21 42.52+0.03 42.29+0.03 42.20+0.32 81.70
+GPT-40-mini 52.25+3.79 58.54+6.41 52.11+4.47 53.02+2.71 52.3544.61 54.67+3.85 51.09
+Standard Llama-3.2-3B 64.02+0.78  70.3140.16 64.78+1.65 71.66+£1.18 66.3041.02 72.65+1.31 74.09
+Mistral-7B-Instruct 68.32+0.83  79.40+0.76 66.97+0.21 73.95+1.22 67.85+£0.73 76.98+0.78 79.71
+Qwen2.5-7B-Instruct 80.27+0.64 80.34+0.34  82.40+0.42 84.89+0.27 86.3640.19  85.45+0.17 86.47
+GPT-40-mini 82.0540.18  81.88+0.27 81.86+0.18 81.7340.19 82.4540.28  81.60+0.36 82.29
+Complex Llama-3.2-3B 66.9741.21 59.79+0.37  64.97+0.04 61.54+0.12 62.0140.33 59.23+0.58 67.67
+P Mistral-7B-Instruct 75.50+0.69  68.80+0.50 75.59+0.06 73.12+0.02 75.01+0.13 70.58+0.13 75.90
+Qwen2.5-7B-Instruct 74.37+13.48 69.95+9.80 74.37412.72  72.30+11.20 71.13410.68 71.59+11.71 82.15
+
+Table 3: Performance of different agent designs across Sparse, Standard, and Complex settings on four LLM
+backbones. We report mean F1 with standard deviation. The last column shows the best-performing agent within
+
+each backbone.
+
+also draws from these six agent designs as its
+candidate pool; (3) Strong ensembling method
+such as Majority Vote and the state-of-the-art
+LLM routing baselines, including LLM-Blender
+(Jiang et al., 2023a) and HybridLLM (Ding et al.,
+2024). For experiments, we use four widely
+adopted LLM backbones of comparable scale but
+from different providers: Llama-3.2-3B-Instruct
+(MetaAI, 2024), Qwen2.5-7B-Instruct-Turbo (AI-
+ibaba, 2025), Mistral-7B-Instruct-v0.2 (MistralAI,
+2024), and GPT-40-mini (OpenAI, 2024). All base-
+lines are evaluated under the same settings, and
+results are averaged over three consecutive runs to
+mitigate randomness. Additional implementation
+details of the baselines are provided in Appendix C.
+
+5.2 Main Result
+
+We present the main results of NG-Router against
+baseline methods in Table 1. Across all three bench-
+mark settings, our approach consistently achieves
+superior performance, demonstrating the effec-
+tiveness of the proposed routing framework. Be-
+yond the overall gains, several noteworthy insights
+emerge. First, the integration of subgraph retrieval
+yields substantial improvements. In contrast, tradi-
+tional rule-based retrieval methods such as KAP-
+ING and ToG perform markedly worse. This high-
+lights the advantage of our approach: by leverag-
+ing message-passing signals, the retrieval process
+can identify informative nodes even at longer dis-
+tances, whereas heuristic methods tend to overem-
+phasize immediate neighbors and thus overlook
+critical evidence. Second, the impact of subgraph
+retrieval varies across benchmarks. On the sparse
+setting, performance improves by more than 50%,
+whereas on the complex dataset the gains are closer
+to 10%. Table 2 sheds light on this phenomenon:
+the retrieval process prunes over 70% of edges and
+
+nodes, effectively filtering noise in the sparse set-
+ting where relevant information is scarce. By con-
+trast, in the complex setting, where signal-to-noise
+(SNR) ratios (Table 9 in Appendix B) are inher-
+ently higher, the marginal benefit of pruning is
+smaller. We can observe that the retrieved graph
+almost doubled in SNR, which also indicates the
+raise in the performance. Finally, we also examine
+the best single-agent designs across different LLM
+backbones. Results reveal that agent effectiveness
+varies by task, underscoring the necessity of learn-
+ing adaptive collaboration schemes rather than re-
+lying on fixed heuristics. By coordinating agents
+through a weighted-voting mechanism learned via
+routing, NG-Router consistently outperforms all
+individual agents, illustrating the benefit of princi-
+pled collaboration in multi-agent reasoning.
+
+5.3. Top K Pruning
+
+During our experiment, we report the full routing
+results, however, we notice that pruning the long
+tail of low-quality or noisy agents is helpful to
+reduce variance and sharpens the aggregation of
+useful reasoning patterns. This suggests that agent
+routing benefits not only from diversity but also
+from judicious selection, where a smaller yet high-
+quality subset provides a better balance between
+complementarity and noise. As can be seen in Fig-
+ure 3, full agent routing is usually not the optimal
+solution, whereas pruning the agent number to 10-
+15 would yield better overall performance.
+
+5.4 Transfer Analysis
+
+Beyond the label generation task, we further eval-
+uate the transferability of our approach by apply-
+ing the trained multi-label generation model to the
+two additional tasks defined in the NGQA bench-
+mark: binary classification and natural text gener-
+
+
+Method Binary Classification
+
+Natural Text Generation
+
+Accuracy Recall Precision Fl
+
+ROUGE-1 ROUGE-2  ROUGE-L BLEU BERT
+
+71.00+0.00
+61.33+0.58
+67.00+0.00
+71.00+1.73
+
+68.27+0.00
+61.33+0.58
+67.00+0.00
+71.00+1.73
+
+53.38+0.00
+44.23+0.61
+50.38+0.00
+55.06+2.10
+
+Majority Vote
+Hybrid LLM
+LLM Blender
+NG-Router
+
+61.33+0.58
+
+71.00+1.73
+
+69.67+0.00
+
+67.00+0.00
+
+60.32+0.10
+69.55+0.70
+68.17+0.51
+70.88+0.17
+
+60.84+0.66 60.32+0.10 41.73+1.85
+62.65+1.05 68.65+0.74 46.86+1.00
+63.26+0.64 67.3240.46 49.85+0.77
+65.514£0.37 69.73+0.06 51.55+0.25
+
+86.29+0.02
+95.81+0.09
+95.74+0.04
+96.140.00
+
+Table 4: Comparison of binary classification metrics (Accuracy, Recall, Precision, F1) and natural text generation
+metrics (ROUGE, BLEU, BERT). All values are reported with mean + standard deviation.
+
+ation. As shown in Table 4, NG-Router achieves
+the strongest overall performance across both task
+types. For binary classification, our method yields
+improvements in both precision and F1 over all
+zero-shot baselines, demonstrating that the learned
+representations are sufficiently robust to support
+accurate decision-making when the task is simpli-
+fied to binary outcomes. For natural text genera-
+tion, NG-Router consistently surpasses competing
+methods on ROUGE, BLEU, and BERT metrics,
+indicating that the routing framework not only pre-
+serves semantic fidelity but also enhances fluency
+and informativeness in generated answers. These
+results confirm that the knowledge-graph—guided
+design of NG-Router provides a transferable ad-
+vantage, enabling effective adaptation to multiple
+downstream tasks. Taken together, this analysis
+underscores the generalizability of our framework
+and its potential to serve as a versatile foundation
+for reasoning in diverse nutritional QA scenarios.
+
+5.5 Hyperparameter Analysis
+
+In this section, we study the effect of architectural
+hyper-parameters. Figure 4 presents the results of
+varying the number of layers and hidden dimen-
+sions. Across all benchmarks, we find that per-
+formance differences between configurations are
+moderate yet systematic. Increasing the number
+of layers does not consistently improve F1: while
+three layers slightly outperform two on the Stan-
+dard dataset, deeper settings yield lower scores
+on Sparse and Complex, with larger variances ob-
+served for deeper models. This suggests diminish-
+ing returns and instability with depth, especially in
+multi-hop reasoning tasks. By contrast, enlarging
+the hidden dimension provides stable gains across
+benchmarks. Performance improves monotonically
+from 64 to 256 dimensions, with reduced variance
+at higher capacities, indicating that representational
+richness plays a more robust role than depth in this
+setting. Overall, these findings suggest that a shal-
+low architecture with a larger hidden size strikes
+a better trade-off between accuracy and stability,
+highlighting the importance of capacity over depth
+
+90] Layers
+80 ; Z
+
+mm 3
+70; (1 4
+
+Sparse Standard
+
+Complex
+90 7 Hidden Dimension
+ia 64
+Ha 128
+(256
+
+Standard
+
+Sparse
+
+Complex
+
+Figure 4: F1 performance on the three datasets, varying
+Layers (top) and Hidden Dimensions (bottom). Error
+bars denote standard deviations.
+
+in designing models for diverse QA benchmarks.
+Additionally, we report the original agent perfor-
+mance used to calculate the best agent scores, as
+can be seen in Table 3.
+
+6 Conclusion
+
+We proposed NG-ROUTER, a graph-supervised
+framework for adaptive multi-agent collaboration
+in nutritional QA, an important domain specific
+field. By extending context graphs with query and
+agent nodes, our framework learns task-specific
+routing weight distributions to search for opti-
+mal agent collaboration schemes, while gradient-
+guided subgraph retrieval prunes irrelevant entities
+to reduce contextual overload. Beyond its empirical
+gains, NG-ROUTER offers practitioners a princi-
+pled way to harness the complementary strengths
+of heterogeneous agents without relying on costly
+trial-and-error or heuristic ensembling. This makes
+it a robust and generalizable tool for deploying
+reliable multi-agent systems in complex domain
+specific reasoning tasks.
+
+
+Limitations
+
+This work is limited by its reliance on the NGQA
+benchmark, which is derived from U.S.-centric di-
+etary surveys. While this scope may restrict direct
+generalizability to other populations, domains, or
+languages, NGQA remains the most comprehen-
+sive benchmark currently available for personalized
+nutrition reasoning. Our model is intentionally de-
+signed for this domain-specific setting, where care-
+fully curated knowledge graphs and diverse dietary-
+health annotations provide a rigorous testbed. We
+view this as an essential first step, and leave the
+extension to broader public benchmarks and multi-
+lingual dietary datasets to future work.
+
+Our evaluation also relies on automatic metrics
+such as accuracy, precision, and Fl. These pro-
+vide standardized comparisons with baselines and
+highlight reasoning quality, but they do not capture
+clinical or behavioral outcomes. Similarly, the de-
+sign of the knowledge graph and the gradient-based
+subgraph retrieval involve thresholding choices that
+may introduce bias or limit stability across differ-
+ent datasets. We adopt these abstractions to en-
+sure scalability and systematic experimentation,
+and envision future refinements that incorporate
+adaptive graph schemas, richer outcome measures,
+and broader evaluation settings.
+
+References
+
+Ashkan Afshin, Patrick J Sur, Kairsten A Fay, Leslie
+Cornaby, Giannina Ferrara, Jason S Salama, and
+Christopher J L Murray. 2019. Health effects of
+dietary risks in 195 countries, 1990-2017: a system-
+atic analysis for the global burden of disease study
+2017. The Lancet.
+
+Qwen Alibaba. 2025. Qwen2.5-7b-instruct. https:
+//huggingface.co/Qwen/Qwen2.5-7B-Instruct.
+
+Jinheon Baek, Alham Fikri Aji, and Amir Saffari. 2023.
+Knowledge-augmented language model prompting
+for zero-shot knowledge graph question answering.
+In ACL.
+
+Felix B6lz, Diana Nurbakova, Sylvie Calabretto, Armin
+Gerl, Lionel Brunie, and Harald Kosch. 2023. Hum-
+mus: A linked, healthiness-aware, user-centered and
+argument-enabling recipe data set for recommenda-
+tion. In RecSys.
+
+Jon Nicolas Bondevik, Kwabena Ebo Bennin, Onder
+Babur, and Carsten Ersch. 2024. A systematic review
+on food recommender systems. Expert Systems with
+Applications.
+
+Yuxuan Cao, Jiarong Xu, Carl Yang, Jiaan Wang, Yun-
+chao Zhang, Chunping Wang, Lei Chen, and Yang
+Yang. 2023. When to pre-train graph neural net-
+works? from data generation perspective! In KDD.
+
+CDC. 2020. Adult obesity facts.
+
+Justin Chih-Yao Chen, Swarnadeep Saha, and Mohit
+Bansal. 2024a. Reconcile: Round-table conference
+improves reasoning via consensus among diverse
+LLMs. In ACL.
+
+Shuhao Chen, Weisen Jiang, Baijiong Lin, James Kwok,
+and Yu Zhang. 2024b. Routerdc: Query-based router
+by dual contrastive learning for assembling large lan-
+guage models. NeurIPS.
+
+Weize Chen, Yusheng Su, Jingwei Zuo, Cheng Yang,
+Chenfei Yuan, Chi-Min Chan, Heyang Yu, Yaxi Lu,
+Yi-Hsin Hung, Chen Qian, et al. 2024c. Agentverse:
+Facilitating multi-agent collaboration and exploring
+emergent behaviors. In JCLR.
+
+D. Ding, Ankur Mallick, Shaokun Zhang, Chi Wang,
+et al. 2025. Best-route: Adaptive Ilm routing with
+test-time optimal compute. In JCML.
+
+Dujian Ding, Ankur Mallick, Chi Wang, Robert Sim,
+Subhabrata Mukherjee, Victor Ruhle, Laks VS Lak-
+shmanan, and Ahmed Hassan Awadallah. 2024. Hy-
+bridllm: Cost-efficient and quality-aware query rout-
+ing. In JCLR.
+
+Yilun Du, Shuang Li, Antonio Torralba, Joshua B.
+Tenenbaum, and Igor Mordatch. 2024. Improving
+factuality and reasoning in language models through
+multi-agent debate. In JCML.
+
+
+Bahare Fatemi, Jonathan Halcrow, and Bryan Perozzi.
+2023. Talk like a graph: Encoding graphs for large
+language models. arXiv.
+
+Yihan Feng, Tianyu Zhao, Haotian Liu, Diyi Yang, and
+Tuo Zhao. 2025. Graphrouter: Learning graph-based
+routing for large language model selection. In JCLR.
+
+Yifu Gao, Linbo Qiao, Zhigang Kan, Zhihua Wen,
+Yongquan He, and Dongsheng Li. 2024. Two-stage
+generative question answering on temporal knowI-
+edge graph using large language models. arXiv.
+
+Mouzhi Ge, Francesco Ricci, and David Massimo. 2015.
+Health-aware food recommender system. In RecSys.
+
+Tiezheng Guo, Qingwen Yang, Chen Wang, Yanyi Liu,
+Pan Li, Jiawei Tang, Dapeng Li, and Yingyou Wen.
+2024. Knowledgenavigator: Leveraging large lan-
+guage models for enhanced reasoning over knowl-
+edge graph. Complex & Intelligent Systems.
+
+Will Hamilton, Zhitao Ying, and Jure Leskovec. 2017.
+Inductive representation learning on large graphs.
+NeurIPS.
+
+Xiaoxin He, Yijun Tian, Yifei Sun, Nitesh V Chawla,
+Thomas Laurent, Yann LeCun, Xavier Bresson, and
+Bryan Hooi. 2024. G-retriever: Retrieval-augmented
+generation for textual graph understanding and ques-
+tion answering. arXiv.
+
+Sirui Hong, Mingchen Zhuge, Jonathan Chen, Xiawu
+Zheng, Yuheng Cheng, Jinlin Wang, Ceyao Zhang,
+Zili Wang, Steven Ka Shing Yau, Zijuan Lin, et al.
+2024. Metagpt: Meta programming for a multi-agent
+collaborative framework. In ICLR.
+
+Dongfu Jiang, Xiang Ren, and Bill Yuchen Lin. 2023a.
+LLM-blender: Ensembling large language models
+with pairwise ranking and generative fusion. In ACL.
+
+Jinhao Jiang, Kun Zhou, Zican Dong, Keming Ye,
+Wayne Xin Zhao, and Ji-Rong Wen. 2023b. Struct-
+gpt: A general framework for large language model
+to reason over structured data. In EMNLP.
+
+Jinhao Jiang, Kun Zhou, Wayne Xin Zhao, Yang Song,
+Chen Zhu, Hengshu Zhu, and Ji-Rong Wen. 2024.
+Kg-agent: An efficient autonomous agent framework
+for complex reasoning over knowledge graph. arXiv.
+
+Bowen Jin, Chulin Xie, Jiawei Zhang, Kashob Kumar
+Roy, Yu Zhang, Zheng Li, Ruirui Li, Xianfeng Tang,
+Suhang Wang, Yu Meng, et al. 2024. Graph chain-
+of-thought: Augmenting large language models by
+reasoning on graphs. In ACL.
+
+Jiho Kim, Yeonsu Kwon, Yohan Jo, and Edward Choi.
+2023. Kg-gpt: A general framework for reasoning
+on knowledge graphs using large language models.
+In EMNLP.
+
+Thomas N Kipf and Max Welling. 2016. Semi-
+supervised classification with graph convolutional
+networks. arXiv.
+
+10
+
+Angeliki Lazaridou, Elena Gribovskaya, Wojciech
+Stokowiec, and Nikolai Grigorev. 2022. Internet-
+augmented language models through few-shot
+prompting for open-domain question answering.
+arXiv.
+
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Kiittler, Mike Lewis, Wen-tau Yih, Tim Rock-
+taschel, et al. 2020. Retrieval-augmented generation
+for knowledge-intensive nlp tasks. NeuralIPS.
+
+Zheyuan Liu, Xiaoxin He, Yijun Tian, and Nitesh V
+Chawla. 2024. Can we soft prompt Ilms for graph
+learning tasks? In WWW, pages 481-484.
+
+Tianyi Ma, Yiyue Qian, Zheyuan Zhang, Zehong Wang,
+Xiaoye Qian, Feifan Bai, Yifan Ding, Xuwei Luo,
+Shinan Zhang, Keerthiram Murugesan, et al. 2025.
+Autodata: A multi-agent system for open web data
+collection. arXiv preprint arXiv:2505.15859.
+
+MetaAI. 2024. Llama-3.2-3b-instruct. https: //hugg
+ingface.co/meta-llama/Llama-3.2-3B-Instr
+uct.
+
+Weiqing Min, Chunlin Liu, Leyi Xu, and Shuqiang
+Jiang. 2022. Applications of knowledge graphs for
+food science and industry. Patterns.
+
+MistralAI. 2024. Mistral-7b-instruct-v0.2. https: //
+huggingface.co/mistralai/Mistral-7B-Instr
+uct-v@. 2.
+
+Bo Ni, Zheyuan Liu, Leyao Wang, Yongjia Lei, Yuy-
+ing Zhao, Xueqi Cheng, Qingkai Zeng, Luna Dong,
+Yinglong Xia, Krishnaram Kenthapadi, et al. 2025.
+Towards trustworthy retrieval augmented generation
+for large language models: A survey. arXiv.
+
+Isaac Ong, Amjad Almahairi, Vincent Wu, Wei-Lin
+Chiang, Tianhao Wu, Joseph E. Gonzalez, M. Waleed
+Kadous, and Ion Stoica. 2025. Routellm: Learning
+to route Ilms with preference data. In JCLR.
+
+OpenAI. 2024. Gpt-40 mini: advancing cost-efficient
+intelligence. https: //openai.com/index/gpt-4
+o-mini-advancing-cost-efficient-intellige
+nce/,
+
+Boci Peng, Yun Zhu, Yongchao Liu, Xiaohe Bo,
+Haizhou Shi, Chuntao Hong, Yan Zhang, and Siliang
+Tang. 2024. Graph retrieval-augmented generation:
+A survey. arXiv.
+
+Chen Qian, Zihao Xie, YiFei Wang, Wei Liu, Kunlun
+Zhu, Hanchen Xia, Yufan Dang, Zhuoyun Du, Weize
+Chen, Cheng Yang, et al. 2025. Scaling large lan-
+guage model-based multi-agent collaboration. In
+ICLR.
+
+Noah Shinn, Federico Cassano, Ashwin Gopinath,
+Karthik Narasimhan, and Shunyu Yao. 2023. Re-
+flexion: Language agents with verbal reinforcement
+learning. NeurIPS.
+
+
+Sola S Shirai, Oshani Seneviratne, Minor E Gordon,
+Ching-Hua Chen, and Deborah L McGuinness. 2021.
+Identifying ingredient substitutions using a knowI-
+edge graph of food. Frontiers in Artificial Intelli-
+gence.
+
+D. Stripelis et al. 2024. A multi-model router for effi-
+cient Ilm inference. In EMNLP.
+
+Haitian Sun, Tania Bedrax-Weiss, and William Cohen.
+2019. Pullnet: Open domain question answering
+with iterative retrieval on knowledge bases and text.
+In EMNLP-IJCNLP.
+
+Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo
+Wang, Chen Lin, Yeyun Gong, Lionel Ni, Heung-
+Yeung Shum, and Jian Guo. 2024. Think-on-graph:
+Deep and responsible reasoning of large language
+model on knowledge graph. In JCLR.
+
+Dhaval Taunk, Lakshya Khanna, Siri Venkata Pavan Ku-
+mar Kandru, Vasudeva Varma, Charu Sharma, and
+Makarand Tapaswi. 2023. Grapeqa: Graph augmen-
+tation and pruning to enhance question-answering.
+In WWW.
+
+Y Tian, C Zhang, Z Guo, C Huang, R Metoyer, and
+N Chawla. 2022a. Reciperec: A heterogeneous graph
+learning model for recipe recommendation. In IJCAI.
+
+Yijun Tian, Chuxu Zhang, Zhichun Guo, Yihong Ma,
+Ronald Metoyer, and Nitesh V Chawla. 2022b.
+Recipe2vec: Multi-modal recipe representation learn-
+ing with graph neural networks. arXiv.
+
+Yijun Tian, Chuxu Zhang, Ronald Metoyer, and
+Nitesh V Chawla. 2021. Recipe representation learn-
+ing with networks. In CIKM.
+
+Petar Velickovi¢, Guillem Cucurull, Arantxa Casanova,
+Adriana Romero, Pietro Lio, and Yoshua Bengio.
+2017. Graph attention networks. arXiv.
+
+Heng Wang, Shangbin Feng, Tianxing He, Zhaoxuan
+Tan, Xiaochuang Han, and Yulia Tsvetkov. 2024a.
+Can language models solve graph problems in natural
+language? NeurallPS.
+
+Junlin Wang, WANG Jue, Ben Athiwaratkun, Ce Zhang,
+and James Zou. 2025a. Mixture-of-agents enhances
+large language model capabilities. In JCLR.
+
+Wenjie Wang, Ling-Yu Duan, Hao Jiang, Peiguang Jing,
+Xuemeng Song, and Liqiang Nie. 2021. Market2dish:
+health-aware food recommendation. TOMM.
+
+X. Wang, Y. Fu, Y. Zhang, W. Cheng, et al. 2025b.
+Mixllm: Dynamic routing in mixed large language
+models. In NAACL.
+
+Xintao Wang, Qianwen Yang, Yongting Qiu, Jiaqing
+Liang, Qianyu He, Zhouhong Gu, Yanghua Xiao, and
+Wei Wang. 2023a. Knowledgpt: Enhancing large
+language models with retrieval and storage access on
+knowledge bases. arXiv.
+
+11
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+Ed Chi, and Denny Zhou. 2023b. Self-consistency
+improves chain of thought reasoning in language
+models. In JCLR.
+
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le,
+Ed H Chi, Sharan Narang, Aakanksha Chowdhery,
+and Denny Zhou. 2022. Self-consistency improves
+chain of thought reasoning in language models. In
+ICLR.
+
+Zehong Wang, Sidney Liu, Zheyuan Zhang, Tianyi Ma,
+Chuxu Zhang, and Yanfang Ye. 2025c. Can Ilms
+convert graphs to text-attributed graphs? In NAACL.
+
+Zehong Wang, Zheyuan Zhang, Nitesh Chawla, Chuxu
+Zhang, and Yanfang Ye. 2024b. Gft: Graph
+foundation model with transferable tree vocabulary.
+NerulPS.
+
+Zehong Wang, Zheyuan Zhang, Tianyi Ma, Nitesh V
+Chawla, Chuxu Zhang, and Yanfang Ye. 2025d.
+Learning cross-task generalities across graphs via
+task-trees. ICML.
+
+Zehong Wang, Zheyuan Zhang, Tianyi Ma, Nitesh V
+Chawla, Chuxu Zhang, and Yanfang Ye. 2025e. Neu-
+ral graph pattern machine. [CML.
+
+Zehong Wang, Zheyuan Zhang, Chuxu Zhang, and Yan-
+fang Ye. 2024c. Subgraph pooling: tackling negative
+transfer on graphs. In IJCAI.
+
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+et al. 2022. Chain-of-thought prompting elicits rea-
+soning in large language models. NeuralIPS.
+
+Yilin Wen, Zifeng Wang, and Jimeng Sun. 2023.
+Mindmap: Knowledge graph prompting sparks graph
+of thoughts in large language models. arXiv.
+
+WHO. 2021. Healthy diet.
+
+WHO. 2023. Obesity info page of the world health
+organization.
+
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak
+Shafran, Karthik Narasimhan, and Yuan Cao. 2023.
+React: Synergizing reasoning and acting in language
+models. In JCLR.
+
+Michihiro Yasunaga, Hongyu Ren, Antoine Bosselut,
+Percy Liang, and Jure Leskovec. 2021. Qa-gnn: Rea-
+soning with language models and knowledge graphs
+for question answering. In NAACL.
+
+Wenbin Yue, Zidong Wang, Jieyu Zhang, and Xi-
+aohui Liu. 2021. An overview of recommenda-
+tion techniques and their applications in healthcare.
+IEEE/CAA Journal of Automatica Sinica.
+
+Jing Zhang, Xiaokang Zhang, Jifan Yu, Jian Tang, Jie
+Tang, Cuiping Li, and Hong Chen. 2022. Subgraph
+retrieval enhanced model for multi-hop knowledge
+base question answering. In ACL.
+
+
+Lingzi Zhang, Yinan Zhang, Xin Zhou, and Zhiqi Shen.
+2024a. Greenrec: A large-scale dataset for green
+food recommendation. In WWW.
+
+Zheyuan Zhang, Lin Ge, Hongjiang Li, Weicheng Zhu,
+Chuxu Zhang, and Yanfang Ye. 2025a. Mapro: Re-
+casting multi-agent prompt optimization as maxi-
+mum a posteriori inference. arXiv.
+
+Zheyuan Zhang, Yiyang Li, Nhi Ha Lan Le, Zehong
+Wang, Tianyi Ma, Vincent Galassi, Keerthiram Mu-
+rugesan, Nuno Moniz, Werner Geyer, Nitesh V
+Chawla, et al. 2025b. Ngqa: A nutritional graph ques-
+tion answering benchmark for personalized health-
+aware nutritional reasoning. ACL.
+
+Zheyuan Zhang, Tianyi Ma, Zehong Wang, Yiyang Li,
+Shifu Hou, Weixiang Sun, Kaiwen Shi, Yijun Ma,
+Wei Song, Ahmed Abbasi, et al. 2025c. Lims4all:
+A review on large language models for research and
+applications in academic disciplines. arXiv preprint
+arXiv:2509. 19580.
+
+Zheyuan Zhang, Kaiwen Shi, Zhengqing Yuan, Ze-
+hong Wang, Tianyi Ma, Keerthiram Murugesan, Vin-
+cent Galassi, Chuxu Zhang, and Yanfang Ye. 2025d.
+Agentrouter: A knowledge-graph-guided Im router
+for collaborative multi-agent question answering.
+arXiv.
+
+Zheyuan Zhang, Zehong Wang, Shifu Hou, Evan Hall,
+Landon Bachman, Jasmine White, Vincent Galassi,
+Nitesh V Chawla, Chuxu Zhang, and Yanfang Ye.
+2024b. Diet-odin: A novel framework for opioid mis-
+use detection with interpretable dietary patterns. In
+Proceedings of the 30th ACM SIGKDD Conference
+on Knowledge Discovery and Data Mining, pages
+6312-6323.
+
+Zheyuan Zhang, Zehong Wang, Tianyi Ma,
+Varun Sameer Taneja, Sofia Nelson, Nhi Ha Lan
+Le, Keerthiram Murugesan, Mingxuan Ju, Nitesh V
+Chawla, Chuxu Zhang, et al. 2024c. Mopi-hfrs:
+A multi-objective personalized health-aware
+food recommendation system with llm-enhanced
+interpretation. arXiv.
+
+Li Zhong, Zilong Wang, and Jingbo Shang. 2024. De-
+bug like a human: A large language model debugger
+via verifying runtime execution step by step. In Find-
+ings of ACL.
+
+12
+
+A Additional Related Works
+A.1 Knowledge Graph Question Answering
+
+Research on Knowledge Graph Question Answer-
+ing (KGQA) has progressed from classic seman-
+tic parsing and retrieval paradigms to increasingly
+model-driven solutions. Early systems translated
+natural-language questions into executable logical
+forms (e.g., SPARQL) over a knowledge graph
+(Sun et al., 2019; Zhang et al., 2022), often pairing
+pre-trained encoders such as BERT with graph-
+aware architectures (GNNs/LSTMs) to locate en-
+tities, relations, and supporting subgraphs (Ya-
+sunaga et al., 2021; Taunk et al., 2023). More
+recent approaches incorporate large language mod-
+els (LLMs) to improve both access and reasoning:
+some convert questions into structured queries like
+SQL/SPARQL to sharpen retrieval (Jiang et al.,
+2023b; Wang et al., 2023a), while others empha-
+size multi-hop inference over retrieved triples or
+subgraphs to handle compositional reasoning (Kim
+et al., 2023; Gao et al., 2024). Despite these ad-
+vances, widely used benchmarks remain largely
+general-purpose and do not fully capture domain-
+specific demands—e.g., the nuanced constraints
+present in nutritional-health reasoning scenarios.
+
+A.2. Graph-Retrieval Augmented Generation
+
+Graph-Retrieval Augmented Generation (Graph-
+RAG) generalizes the RAG paradigm (Lewis et al.,
+2020; Ni et al., 2025) by retrieving structured ev-
+idence rather than only unstructured text. Instead
+of passages alone, Graph-RAG surfaces graph frag-
+ments (triples/subgraphs) and uses graph encoders
+to condition generation, thereby improving preci-
+sion and reducing redundancy (Guo et al., 2024;
+Wen et al., 2023; Lazaridou et al., 2022; Liu et al.,
+2024). Current evaluations predominantly probe
+elementary graph reasoning skills—such as path
+finding, degree/counting, or edge existence (Fatemi
+et al., 2023; Wang et al., 2024a, 2025c). While
+informative for fundamentals, these settings under-
+represent domain-specific requirements. He et
+al. introduce more advanced graph-understanding
+benchmarks in general contexts (He et al., 2024).
+Building on Graph-RAG principles, many appli-
+cations nowadays thrive and shed lights on new
+research paths (Zhang et al., 2024b).
+
+A.3. Graph Neural Networks.
+
+Graph Neural Networks (GNNs) are designed for
+relational data and have delivered strong results
+
+
+Nutrients Low Threshold High Threshold NRV
+Calories (kcal) 40 225 2000
+Carbohydrates (g) 55 75 -
+Protein (g) 10 Us) 50
+Saturated Fat (g) 1.5 5 20
+Cholesterol (mg) 20 40 300
+Sugar (g) 5 225 -
+Dietary Fiber (g) 3 6 -
+Sodium (mg) 120 200 2000
+Potassium (mg) 0 525 3500
+Phosphorus (mg) 0 105 700
+Iron (mg) 0 33 22,
+Calcium (mg) 0 150 1000
+Folic Acid (ug) 0 60 400
+Vitamin C (mg) 0 15 100
+Vitamin D (ug) 0 2.25 15
+Vitamin B12 (ug) 0 0.36 2.4
+
+Table 5: Nutrient Reference Values (NRV) and thresh-
+olds (per 100g of food) used based on the nutritional
+standards.
+
+Health Indicator High Threshold — Low Threshold
+BMI 30 18.5
+Waist Circumference (cm) 102 (88) -
+Blood Pressure (mmHg) 140 90
+Osteoporosis - -
+Blood Urea Nitrogen (mmol/L) 7A -
+Low-Density Lipoprotein (mmol/L) 3.3 -
+
+Red Blood Cell (million cells/uL) - 4
+Glucose (mmol/L) 7 -
+Glycohemoglobin (%) 6.5 -
+Hemoglobin (g/dL) - 13.2 (11.6)
+
+Table 6: Health Indicators with Corresponding High
+and Low Thresholds. Parentheses indicate sex-specific:
+male (female) thresholds where applicable.
+
+across social, recommendation, biological, and
+molecular applications by exploiting graph induc-
+tive biases (Kipf and Welling, 2016; Velickovi¢
+et al., 2017; Hamilton et al., 2017). Their abil-
+ity to share parameters across varying graph
+sizes/topologies supports deployment in dynamic,
+real-world settings. A growing body of work
+investigates transfer and pretraining for cross-
+task/domain generalization—mirroring trends in
+language and vision—via subgraph pooling, pre-
+training schemes, and task-agnostic embeddings
+(Wang et al., 2024c; Cao et al., 2023). Looking
+forward, the community is moving toward graph
+foundation models, i.e., large-scale pretrained GNN
+backbones intended to capture broadly reusable
+structural/semantic patterns (Wang et al., 2024b,
+2025e,d). Despite progress, open challenges per-
+sist, including oversmoothing, expressive-power
+limits, and scalability, motivating research on more
+adaptive architectures and training recipes.
+
+13
+
+Health Indicator Associated Tags
+
+Obesity Low Calorie
+
+Opioid Misuse High Protein; Low Sugar; Low Sodium
+Hypertension Low Sodium
+
+Diabetes Low Sugar; Low Carb
+
+Low Calorie
+
+Low Cholesterol; Low Saturated Fat
+Low Sodium
+
+Low Sugar
+
+Low Sugar; Low Carb
+
+High Calorie; High Protein
+
+Weight Loss/Low Calorie Diet
+Low Fat/Low Cholesterol Diet
+Low Salt/Low Sodium Diet
+Sugar-Free/Low Sugar Diet
+Diabetic Diet
+
+Weight Gain/Muscle Building Diet
+
+Low Carbohydrate Diet Low Carb
+High Protein Diet High Protein
+Renal/Kidney Diet Low Protein
+
+Table 7: Health Indicators and Their Associated Nutri-
+tional Tags. Each indicator is linked to relevant tags
+reflecting dietary requirements.
+
+B NGQA Benchmark Details
+
+B.1 Benchmark Description
+
+We build upon the NGQA benchmark (Zhang et al.,
+2025b), which integrates multiple U.S. national
+health and nutrition resources. The benchmark pri-
+marily relies on the National Health and Nutrition
+Examination Survey (NHANES), a biannual survey
+conducted by the CDC that combines demographic,
+dietary, examination, laboratory, and questionnaire
+data. Dietary intake is captured through the What
+We Eat in America (WWEIA) program, which col-
+lects 24-hour dietary recalls and links them to nutri-
+ent information in the USDA’s Food and Nutrient
+Database for Dietary Studies (FNDDS). Together,
+these resources provide comprehensive coverage
+of health indicators, food consumption, and nu-
+trient composition. To represent user behaviors,
+the benchmark includes dietary habit features de-
+rived from NHANES (e.g., awareness of healthy
+eating, consumption of processed or frozen foods).
+Through manual curation, they constructed 54 dis-
+tinct dietary habit tags, which serve as additional
+nodes in the graph.
+
+Nutrient annotations were derived from in-
+ternational dietary standards (WHO, FSA, EU,
+CAC), covering 16 macro- and micronutrients
+such as calories, protein, sugar, sodium, and iron.
+These were mapped to user health profiles through
+threshold-based rules with mapping rules shown in
+Table 5, 6 and 7. The benchmark emphasizes four
+prevalent health conditions with clear dietary rele-
+vance: obesity, hypertension, diabetes, and opioid
+misuse. Standard clinical definitions were applied
+to the first three, while opioid misuse was defined
+using medical criteria based on illicit use or long-
+term prescription opioid records.
+
+
+Question Level #Records Avg.#Nodes Avg. # Edges Question Level Avg. NodeSNR Avg. Tag SNR
+
+Sparse 8,490 25.8 24.9
+
+Standard 3,622 28.2 29.0 pane d ae 1a
+
+Complex 1,690 30.9 34.0 a
+Complex 31.6 76.3
+
+Table 8: Statistics of the Benchmark by Question Level.
+
+B.2 Datasets
+
+Building on the dataset foundation, the NGQA
+benchmark organizes its tasks into three different
+datasets, each reflecting different levels of informa-
+tion availability and reasoning complexity.
+
+Sparse Dataset. These address scenarios with min-
+imal information. Each food is linked to only one
+nutrition tag associated with a single user health
+condition. While this setting mirrors real-world
+cases where labels are scarce or incomplete, it
+presents substantial challenges: the one-to-one link-
+age amplifies the difficulty of subgraph retrieval
+and makes models especially susceptible to inter-
+ference from irrelevant nodes.
+
+Standard Dataset. These represent the balanced
+and idealized setting of the benchmark. Foods
+are connected to multiple nutrition tags that either
+match or contradict several user health conditions.
+Such cases capture clear-cut relationships between
+dietary choices and health outcomes, providing a
+controlled environment for evaluating model per-
+formance. Standard questions therefore serve as the
+reference baseline for structured reasoning tasks.
+
+Complex Dataset. These replicate the intricacies
+of real-life nutritional decision-making. Foods may
+simultaneously contain tags that both align with
+and conflict with user health conditions. For ex-
+ample, a food might be low in sodium (beneficial
+for hypertension) but high in sugar (problematic
+for diabetes). Models must navigate these conflict-
+ing signals, prioritize health needs, and perform
+trade-off reasoning, making this category the most
+realistic and challenging.
+
+A Statistical breakdown of these three categories is
+provided in Table 8. To further quantify informa-
+tiveness, the benchmark also introduces a Signal-to-
+Noise Ratio (SNR), defined as the ratio of relevant
+nodes or tags (signal) to the total number of nodes
+or tags in the graph (noise). As shown in Table 9,
+sparse questions have the lowest SNR, reflecting
+their limited resources, while complex questions
+achieve the highest SNR, highlighting the richer
+contextual information needed for better reasoning.
+
+14
+
+Table 9: Signal-to-Noise Ratio (SNR) by Question
+Level.
+
+C_ Baseline and Implementation Details
+
+To cover the range of agentic strategies explored
+in contemporary LLM research, the benchmark in-
+corporates six representative designs. Raw serves
+as the direct prompting baseline, reflecting the
+unaugmented capacity of the backbone model.
+Chain-of-Thought (CoT) (Wei et al., 2022) encour-
+ages models to generate intermediate reasoning
+steps, thereby improving performance on multi-
+step tasks. Self-Consistency (SC) (Wang et al.,
+2023b) extends CoT by sampling multiple rea-
+soning paths and aggregating the most consistent
+outcome, reducing sensitivity to individual trajec-
+tories. ReAct-Reflection (Yao et al., 2023; Shinn
+et al., 2023) integrates reasoning with external ac-
+tions and iterative self-correction, yielding more
+grounded and robust responses. Multi-Agent De-
+bate (MAD) (Du et al., 2024) facilitates adversar-
+ial discussion among agents, enabling consensus
+through structured deliberation. Finally, Multi-
+Agent Summary aggregates partial reasoning pro-
+duced by diverse agents into a distilled final an-
+swer. Together, these designs span from single-
+agent prompting to multi-agent collaboration, un-
+derscoring the need for principled routing across
+heterogeneous strategies (Zhang et al., 2025a).
+Beyond heuristics, we benchmark against three
+state-of-the-art LLM routing frameworks. LLM-
+Blender (Jiang et al., 2023a) leverages an LLM-as-
+a-judge paradigm: candidate outputs from multiple
+agents are presented to a meta-LLM, which adju-
+dicates and selects the final answer. This approach
+highlights the potential of reflective meta-reasoning
+but incurs high cost and latency due to repeated
+LLM calls. HybridLLM (Ding et al., 2024) adopts
+a hybrid strategy that combines lightweight scoring
+heuristics with selective meta-LLM adjudication,
+aiming to balance efficiency and effectiveness. We
+also select two baselines reported in NGQA pa-
+per, which can be seen as classical graph retrieval
+augmented methods. KAPING (Baek et al., 2023)
+answers questions by constructing a subgraph from
+the entities mentioned in the query and their neigh-
+bors, which is then linearized into triples and fed
+
+
+into the LLM. While the original implementation
+applies top-k filtering, this step was omitted in
+our benchmark as it is not applicable when only
+user and food entities are present. ToG (Sun et al.,
+2024) iteratively explores and prunes reasoning
+paths on a knowledge graph to identify candidate
+answers. Since the released code is tailored to
+Wikidata/Freebase, we reimplemented ToG for our
+benchmark and introduced two adjustments: in-
+creasing the pruning width to five paths and de-
+laying pruning until the second iteration. These
+modifications ensure sufficient coverage and better
+alignment with the benchmark’s complexity.
+
+Beside the implemented baselines, it is worth
+noting our work is greatly inspired by the broader
+idea of graph-based reasoning for LLM orchestra-
+tion in GraphRouter (Feng et al., 2025). However,
+our work departs fundamentally from GraphRouter
+in many ways, of which the most important one is
+that GraphRouter encodes a query and its context
+as a single node linked to candidate LLMs, which
+doesn’t fit into our problem settings.
+
+D_ Case Studies
+
+We provide two case studies to demonstrate the
+effectiveness of our model in routing questions
+to the most appropriate agents (Figure 5). In the
+Borscht example, the gold answer is low_sugar,
+low_sodium. The agent probability distribu-
+tion shows that Qwen2.5-7B-Instruct: : raw and
+Qwen2.5-7B-Instruct::cot achieve probabili-
+ties above 0.08 and both predict the correct labels.
+Other agents, including those from different back-
+bones such as Mistral-7B-Instruct, also pro-
+vide correct or near-correct answers, which demon-
+strates that our router not only identifies the most
+relevant agents but also assigns higher probabili-
+ties to those generating correct predictions. This
+reduces the chance of routing errors and improves
+overall reliability in multi-agent collaboration.
+
+We illustrate several examples of applying our
+subgraph retrieval approach to different datasets
+in Figure 6. To make the reasoning process easier
+to understand, we first convert the original graph
+into plain text. The graph for the Bruschetta ex-
+ample shows that the food is associated with var-
+ious ingredients (garlic, olive oil, tomatoes, basil,
+salt, etc.), belongs to categories like "vegetable
+sandwiches/burgers,” and is linked to multiple nu-
+trition tags such as low_carb, low_sugar, and
+high_sodium. It also contains user-related infor-
+
+15
+
+mation such as health conditions (hypertension)
+and lifestyle habits (e.g., "drinks alcohol less than
+average," "takes more supplements"). While this
+graph contains 25 nodes and 30 edges, many of
+these nodes are not directly useful for answering
+the question about nutrient tags. Most of the user
+habits and ingredient details serve as noise that
+could mislead the reasoning process. Our scor-
+ing method solves this problem by assigning im-
+portance scores to all nodes. Irrelevant informa-
+tion typically receives scores below 0.01, while
+truly relevant entities such as Bruschetta, hyperten-
+sion, and high_sodium achieve much higher scores.
+By filtering the graph to include only nodes with
+scores above 0.01, we obtain a clearer and more
+focused representation, reducing noise and help-
+ing the agent concentrate on the key information
+needed to answer the question.
+
+E_ Prompt Designs
+
+To demonstrate the exact instructions used in our
+system, we present the full set of prompts that
+guided the different agent roles. Figures 7 pro-
+vide a complete overview. These prompts are not
+intended as a novel design contribution, but rather
+as transparent documentation of the configurations
+employed in our experiments.
+
+
+Agent Routing Case Study
+
+Example 1
+
+Question: Based on the nutrients the food provides and the user needs, please answer what nutrient
+tags are used to determine whether the food "Broccoli cheese soup, prepared with milk, home
+recipe, canned, or ready-to-serve" is healthy or unhealthy for the user?
+
+Gold Answer: low_protein
+
+Agent probs
+
+GPT-40-mini: : AGENT: : raw + low_protein (0.052638724)
+
+GPT-40-mini: : AGENT: :cot — high_sodium, low_protein (0.050060976)
+
+GPT-40-mini: : AGENT: :react_reflect— high_sodium, low_protein (0.049231380)
+Mistral-7B-Instruct: :AGENT: :react_reflect — high_sodium, low_protein (0.044603113)
+
+Mistral-7B-Instruct: : AGENT: :mad — low_carb, low_sugar, high_sodium (0.042540662)
+Llama-3.2-3B::AGENT: : cot — low_saturated_fat, low_cholesterol, low_carb (0.039508183)
+Qwen2.5-7B-Instruct: : AGENT: :cot + low_carb, low_sugar, high_sodium (0.032161828)
+Qwen2.5-7B-Instruct: : AGENT: : raw + low_carb, low_sugar, high_sodium (0.031613167)
+
+Example 2
+
+Question: Based on the nutrients the food provides and the user needs, please answer what nutrient
+tags are used to determine whether the food "Borscht" is healthy or unhealthy for the user?
+
+Gold Answer: low_sugar, low_sodium
+
+Agent probs
+
+Qwen2.5-7B-Instruct: : AGENT: : raw > low_sugar, low_sodium (0.095538996)
+Qwen2.5-7B-Instruct: : AGENT: :cot > low_sugar, low_sodium (0.086759798)
+Qwen2.5-7B-Instruct: :AGENT: : summary — low_sugar, low_sodium (0.061009243)
+Mistral-7B-Instruct: : AGENT: :mad + low_sugar, low_sodium (0.051758543)
+
+Llama-3.2-3B: :AGENT: : cot + low_sugar, low_sodium (0.020628655)
+
+GPT-40-mini: : AGENT: :mad — low_carb, low_sugar, low_calorie, low_protein, low_cholesterol,
+low_saturated_fat, low_sodium (0.019520836)
+
+GPT-40-mini: : AGENT: :sc — low_carb, low_sugar, low_calorie, low_protein, low_cholesterol,
+low_saturated_fat, low_sodium (0.018208018)
+
+GPT-40-mini: : AGENT: :cot — low_carb, low_sugar, low_calorie, low_protein, low_cholesterol,
+low_saturated_fat, low_sodium (0.011033830)
+
+Figure 5: Per-question agent routing cases. Each case shows the question, gold answer, and agents’ probability with
+their generated answers.
+
+16
+
+
+Subgraph Retrieval Case Study
+
+Case 1 (Standard)
+
+Graph Context:
+
+’Biscayne codfish, Puerto Rican style’, ’belongs to’, ’low_carb’], [’Biscayne codfish, Puerto
+Rican style’, ’belongs to’, ’low_sugar’], [’Biscayne codfish, Puerto Rican style’, ’belongs to’,
+*high_sodium’], [’user’, ’has’, ’diabetes’], [’diabetes’, ’match’, ’low_sugar’], [’obesity’,
+’need’, ’low_calorie’], ...
+
+Node Quantity: 31
+
+edge quantity: 31
+
+Question: Based on the nutrients the food provides and the user needs, please answer what nutrient
+tags are used to determine whether the food "Biscayne codfish, Puerto Rican style" is healthy or
+unhealthy for the user?
+
+Gold Answer: low_carb, low_sugar
+
+Entity Importance
+
+user (0.412504), low_carb (0.210431), Biscayne codfish, Puerto Rican style (0.176805), low_sugar
+(0.142012), diabetes (0.025764), high_sodium (0.002139), low_cholesterol (0.002011), ...
+
+Case 2 (Complex)
+
+Graph Context:
+
+[’Matzo ball soup’, ’belongs to’, ’low_carb’], [’Matzo ball soup’, ’belongs to’, ’low_sugar’],
+[’Matzo ball soup’, ’belongs to’, ’high_sodium’], [’user’, ’has’, ’diabetes’], [’diabetes’,
+’match’, ’low_sugar’], [’High protein diet’, ’contradict’, ’low_protein’], ...
+
+Node Quantity: 28
+
+edge quantity: 30
+
+Question: Based on the nutrients the food provides and the user needs, please answer what nutrient
+tags are used to determine whether the food "Matzo ball soup" is healthy or unhealthy for the user?
+Gold Answer: low_carb, low_sugar, low_protein
+
+Entity Importance
+
+Matzo ball soup (0.397344), user (0.168014), low_protein (0.104383), low_sugar (0.102992),
+low_carb (0.099755), diabetes (0.016299), Low carbohydrate diet (0.013385), High protein diet
+(0.012389), Adds little to no salt at table (0.005626), Eats lots of fish (0.005585), ...
+
+Case 3 (Sparse)
+Graph Context:
+[’Bruschetta’, ’belongs to’, ’high_sodium’], [’Bruschetta’, ’has’, ’Salt, table, iodized’],
+
+[’Bruschetta’, ’has’, ’Olive oil’], [’user’, ’has’, ’hypertension’], [’hypertension’,
+’contradict’, ’high_sodium’], ...
+
+Node Quantity: 25
+
+edge quantity: 30
+
+Question: Based on the nutrients the food provides and the user needs, please answer what nutrient
+tags are used to determine whether the food "Bruschetta" is healthy or unhealthy for the user?
+Gold Answer: high_sodium
+
+Entity Importance
+user (0.283775), Bruschetta (0.283627), hypertension (0.188398), high_sodium (0.187762),
+Drinks Alcohol less than average (0.003046), Takes more supplements (0.003046), ...
+
+Figure 6: Per-question cases for subgraph retrieval. Each case shows the graph context, the question, the gold
+answer, and entities with importance score > 0.01; for each listed entity we also include the next two entities to
+highlight the score cliff (remaining tail elided with "...").
+
+17
+
+
+QA/Reasoning Prompt Suite
+
+raw:
+
+Given a question, a news context, and retrieved documents, answer the question directly.
+Compress your answer into the SHORTEST exact entity only.
+
+The final output must be one JSON object: "answer”: "<short factual answer>”.
+
+cot (chain-of-thought):
+
+You are a multi-hop reasoning expert and QA agent.
+
+Given a question and the context, reason step-by-step before answering.
+
+Compress your answer into the SHORTEST exact entity only.
+
+The final output must be one JSON object: "answer": "<short factual answer>”.
+
+sc (self-consistency):
+
+You are a self-consistency agent. Independently sample multiple plausible entity selections for the
+given question and context,
+
+then internally perform majority voting to decide the final set.
+
+Generate diverse candidate sets internally, then pick the majority-agreed entities.
+
+The final output must be one JSON object: "answer": "<short factual answer>”.
+
+mad (multi-agent debate):
+You simulate three roles: debate_debater_a, debate_debater_b, and debate_judge.
+- Debater A proposes the most plausible answer using only the provided context, supported by
+1-3 short quotes.
+- Debater B stress-tests A’s claim: if weak or incomplete, correct it or propose a better alternative.
+- Debate Judge decides the best final answer using only the given context (noun, number, or
+yes/no).
+Finally, Debate Judge condenses the result into the shortest exact entity only.
+The final output must be one JSON object: "answer": "<short factual answer>”.
+
+react_reflect:
+You simulate two roles: react and reflect.
+
+- React is a multi-hop reasoning expert that chains facts into a reasoning plan and derives a brief
+final answer.
+
+- Reflect evaluates React’s answer. If incorrect or incomplete, provide revision suggestions;
+otherwise, confirm correctness.
+Reflect then condenses the result into the shortest exact entity only.
+The final output must be one JSON object: "answer": "<short factual answer>”.
+
+summary:
+You simulate three roles: think_a, think_b, and summarize.
+
+- Think_a and Think_b independently reason step-by-step and produce candidate answers.
+
+- Summarize compares their outputs: if they agree, return the shared answer; if not, select the
+best one with reasoning.
+Finally, Summarize condenses the result into the shortest exact entity only.
+The final output must be one JSON object: "answer": "<short factual answer>”.
+
+Figure 7: Prompt suite for six major agent roles used in NGRouter. Each prompt defines a distinct reasoning
+behavior that collectively improves multi-agent QA performance.
+
+18

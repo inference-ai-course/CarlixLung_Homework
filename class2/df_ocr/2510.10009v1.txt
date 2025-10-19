@@ -1,0 +1,1095 @@
+arXiv:2510.10009v1 [cs.CL] 11 Oct 2025
+
+AMI
+
+Beyond the limitation of a single query: Train your LLM
+for query expansion with Reinforcement Learning
+
+Shu Zhao!?#* Tan Yu'+ Anbang Xu!
+
+' NVIDIA 2 Pennsylvania State University
+t Equal Contributions
++ Project Lead tayu@nvidia.com
+
+Abstract
+
+Reasoning-augmented search agents, such as Search-R1, are trained to reason, search, and generate
+the final answer iteratively. Nevertheless, due to their limited capabilities in reasoning and search,
+their performance on multi-hop QA benchmarks remains far from satisfactory. To handle complex or
+compound queries, we train an LLM-based search agent with the native capability of query expansion
+through reinforcement learning. In each turn, our search agent proposes several query variants, which
+are searched simultaneously to cover more relevant information. Meanwhile, given limited post-training
+data and computing resources, it is very challenging for a search agent to master multiple tasks, including
+query generation, retrieved information understanding, and answer generation. Therefore, we propose
+incorporating a pre-trained squeezer model that helps the search agent understand the retrieved
+documents, allowing the search agent to focus on query generation for high retrieval recall. With the
+assistance of the squeezer model, we discover that even a small-scale 3B LLM can demonstrate a strong
+capability of query expansion and achieve state-of-the-art accuracy on the multi-hop QA benchmarks. To
+be specific, our experiments across seven question-answering benchmarks demonstrate that our method,
+named ExpandSearch, achieves an average improvement of 4.4% compared to state-of-the-art baselines,
+with strong gains on multi-hop reasoning tasks requiring diverse evidence aggregation. The project page
+is available at: https: //shuzhao.me/ExpandSearchProject/.
+
+1. Introduction
+
+Large Language Models (LLMs) (Achiam et al., 2023; Team et al., 2023; Dubey et al., 2024; Yang et al.,
+2024) augmented with reasoning and search capabilities have shown remarkable progress in tackling complex
+information retrieval tasks that require multi-step reasoning over external knowledge sources. These reasoning-
+augmented search agents dynamically query databases and process retrieved information to overcome the
+inherent limitations of static parametric knowledge (Gao et al., 2023). Recent advances in reinforcement
+learning with verifiable rewards (RLVR) (Guo et al., 2025) have enabled these agents to learn search strategies,
+decompose complex questions, and iteratively refine their information gathering process (Jin et al., 2025b;
+Zhao et al., 2025).
+
+However, existing search agents face two challenges, limiting their effectiveness in complex reasoning scenarios.
+First, they generate semantically impoverished queries that fail to capture the full spectrum of relevant information
+aspects (Carpineto and Romano, 2012). When confronted with multi-faceted questions requiring diverse
+evidence, these agents may produce narrow queries that miss crucial semantic information essential for
+comprehensive understanding. Meanwhile, in each turn, the search agent generates a single query and the
+single-vector embedding-based retrieval suffers from theoretical limitations as discussed in Weller et al. (2025).
+Second, they suffer from information overload, where the retrieved content contains substantial irrelevant
+
+*Work was partially conducted during Shu’s internship at NVIDIA.
+
+© 2025 NVIDIA. All rights reserved.
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Question: Where was the place of death of Alexander Carl Otto Westphal's father?
+
+D [Identify Alexander Carl Otto Westphal's fatheres Identify Alexander's father
+
+Search Semantic Expansion: His family;
+Agent Search: Father of Alexander Carl Otto 13
+
+Search
+Agent Search: Father of Alexander Carl Otto Westphal
+Search: Alexander Carl Otto Westphal's Family
+
+Car! Friedrich Otto Westphal was the son of Otto Carl
+Friedrich Westphal and Karoline Friederike Heine and the
+father of Alexander Carl Otto Westphal. He was married to Carl Friedrich Otto Westphal ~ 4
+phal was the son of Otto Carl
+Klara, daughter of the banker Alexander Mendelssohn... Dat. = Friedrich Westphal and Karoline Friederike Heine and the =
+atabase father of Alexander Carl Otto Westphal. He was married to ==)
+
+Klara, daughter of the banker Alexander Mendelssohn...
+D (Identity where Alexander C. O. Westphal died ey a LLL. —
+
+| Alexander’ s father is Carl Friedrich Otto Westphal |
+
+Search: Where Otto C. F. Westphal died
+
+Squeezer L
+Alexander C, 0, Westphal (1863, Berlin - 1941, Bonn), was a = Identify where he died
+German neurologist and psychiatrist. He was the son of ... Syntax Expansion: What the place of death of him
+(°°) aos: 3
+No, identify Otto C. F. Westphal's death place Search: Where Carl F. O. Westphal died
+Search: Carl F. O. Westphal's place of death
+Search: Otto C. F. Westphal's death place
+Ve Friedrich Otto Westphal (23 March 1833, in Berlin - : =
+
+z Veen 1890, in Kreuzlingen) was a German psychiatrist...
+Rudolf Westphal was a German classical scholar. He
+subsequently lived at Biickeburg, and died at Stadthagen in
+Schaumburg-Lippe on 10 July 1892... ( carl Friedrich Otto Westphal died in Kreuzlingen |
+
+Answer: Stadthagen, seh: Basis - Answer: Kreuzlingen_|
+
+(a) Previous approaches: Missing Info, Lost in the Middle (b) Ours: Expanded Coverage, Distilled Context
+
+Figure 1: Comparison between Search-R1 and the proposed ExpandSearch Previous methods (a) miss
+critical information when using single queries and suffer from context overload. Our approach (b) generates
+multiple query variants to achieve comprehensive coverage while using a squeezer model to distill retrieved
+content to only reasoning-relevant information.
+
+information that obscures critical facts and degrades reasoning quality (Liu et al., 2024; An et al., 2024).
+This noise-to-signal ratio problem becomes particularly acute in multi-hop reasoning tasks where agents must
+navigate through extensive search results to identify sparse but crucial evidence. Meanwhile, as the context for
+the LLM, the lengthy retrieved content would take a large amount of computational costs and GPU memory,
+which significantly slows down the training process.
+
+Our key insight is that effective information retrieval requires a dual strategy: expanding the query
+space to maximize relevant information coverage, then selectively distilling the retrieved content to
+preserve only reasoning-critical facts. This expand-then-squeeze paradigm mirrors human information-
+seeking behavior, where we cast a wide net through diverse search formulations, then critically filter and
+synthesize the gathered information. By explicitly separating the recall-optimization phase from the precision-
+optimization phase, we can address both semantic incompleteness and information overload systematically.
+
+Therefore, we propose ExpandSearch, a novel reinforcement learning framework that trains search agents to
+perform query expansion while leveraging selective distillation for improved reasoning. In the expansion phase,
+we train models via reinforcement learning to reformulate initial queries into multiple semantically-enriched
+variants that capture diverse perspectives, alternative phrasings, and implicit semantic relationships. These
+expansions consist of two complementary types: syntax expansions that handle surface-form variations and
+semantic expansions that broaden the information scope, both addressing distinct retrieval limitations, as
+shown in Figure 1. This query diversification significantly improves retrieval recall, particularly for multi-hop
+reasoning tasks requiring evidence aggregation from multiple angles. In the squeeze phase, we prompt an
+LLM as a summarizer to perform selective distillation, extracting and condensing only the reasoning-relevant
+information from the expanded retrieval results while filtering out noise and redundancy. The search agent is
+trained to effectively utilize these distilled, reasoning-focused summaries to generate accurate answers.
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+The main contributions of our work are as follows:
+
+¢ We identify and formalize the dual problems of semantic incompleteness and information overload in
+reasoning-augmented search agents, demonstrating through empirical analysis that both issues signifi-
+cantly degrade performance on complex reasoning tasks.
+
+¢ We propose ExpandSearch, an expand-then-squeeze framework that combines reinforcement learning-
+based query expansion with prompted selective information distillation to achieve high recall while
+maintaining precision in multi-step reasoning scenarios.
+
+¢ We demonstrate through extensive experiments across seven benchmarks that our method achieves
+substantial improvements over state-of-the-art baselines, with particularly strong gains on multi-hop
+reasoning tasks requiring diverse evidence aggregation.
+
+2. Related Work
+
+2.1. Deep Search Agents
+
+Large Language Models (LLMs) demonstrate remarkable reasoning capabilities (Achiam et al., 2023; Team
+et al., 2023; Dubey et al., 2024), yet remain fundamentally constrained by limited domain-specific expertise (Li
+et al., 2023) and susceptibility to hallucination phenomena (Ji et al., 2023). The integration of external
+knowledge sources through retrieval mechanisms has emerged as a critical solution, primarily manifesting in
+two paradigms: retrieval-augmented generation (RAG) (Guu et al., 2020) and the deployment of retrievers as
+interactive tools (Schick et al., 2023). RAG-based systems (Gao et al., 2023) typically implement a two-stage
+pipeline where retrieved documents are first obtained based on query similarity, then incorporated during the
+generation process. However, such approaches frequently struggle with the inclusion of contextually irrelevant
+information that can degrade output quality (Jin et al., 2025a).
+
+The alternative search-as-a-tool framework empowers LLMs to actively invoke retrieval systems through either
+strategic prompting or targeted fine-tuning. Prompting-based approaches such as IRCoT (Trivedi et al., 2023)
+and ReAct (Yao et al., 2023) guide models to interleave reasoning steps with strategic retrieval queries, while
+Toolformer (Schick et al., 2023) leverages supervised fine-tuning to enhance the model’s search invocation
+capabilities. More recently, Search-R1 (Jin et al., 2025b) has pioneered the application of reinforcement learning
+techniques (Guo et al., 2025) to develop sophisticated search agents, demonstrating substantial performance
+improvements. Subsequent developments including ZeroSearch (Sun et al., 2025), MaskSearch (Wt et al.,
+2025), IKEA (Huang et al., 2025), HybridDeepSearcher (Ko et al., 2025), and ParallelSearch (Zhao et al., 2025)
+have introduced increasingly refined reward mechanisms to enhance search effectiveness. However, current
+approaches generate semantically limited queries that fail to capture diverse information aspects and struggle
+with information overload from irrelevant retrieved content. Our ExpandSearch framework addresses these
+limitations through an expand-then-squeeze paradigm that trains agents to generate semantically-enriched
+query expansions while leveraging selective distillation to extract reasoning-critical information from the
+retrieved results.
+
+2.2. Reinforcement Learning
+
+Reinforcement learning (RL) enables agents to optimize cumulative rewards through iterative environmental
+interaction and feedback-driven learning (Sutton and Barto, 1998). The integration of RL with LLM training was
+pioneered by Ouyang et al. (2022) through reinforcement learning from human feedback (RLHF) (Kaufmann
+et al., 2023). RLHF employs human preference annotations (Lambert et al., 2025) to train reward models that
+guide LLM policy refinement, typically via Proximal Policy Optimization (PPO) (Schulman et al., 2017). However,
+PPO’s requirement for repeated model updates creates significant computational bottlenecks. Recent efficiency-
+focused approaches including DPO (Rafailov et al., 2023), SimPO (Meng et al., 2024), and ORPO (Hong et al.,
+2024) circumvent reward model training entirely. Despite reduced computational costs, these methods face
+off-policy constraints (Pang et al., 2024) and typically yield inferior performance compared to traditional RL
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Algorithm 1 LLM Response Rollout with Multi-Turn Search Engine Calls in Parallel
+
+Require: Input query x, policy model 79, search engine R, squeezer 7, maximum turns B.
+Ensure: Final response y.
+1: Initialize rollout sequence y « 0
+2: Initialize action count b «+ 0
+3: while b < Bdo
+4 Initialize current action LLM rollout sequence y, « 0
+5 while True do
+6: Generate response token y; ~ 79(- | 2, y + yp)
+7 Append y; to rollout sequence yp < yo + yt
+8 if y; in [</search>, </answer>, <eos>] then break
+9
+
+end if
+10: end while
+11: YHYyYtYo
+123 if <search> </search> detected in y then
+13: Extract multiple queries [q1, q2,--- , dn] << Parse(yp, <search>, </search>)
+14: Retrieve search results in parallel {C; = R(q;)}?_,
+15: Summarize the search results through squeezer s = 75({C;}?_,)
+16: Insert the summary s into rollout y ~ y + <information>s</information>
+17: else if <answer> </answer> detected in y, then
+18: return final generated response y
+19: else
+20: Ask for rethink y ~ y+ “My action is not correct. Let me rethink.”
+21: end if
+D2 Increment action count b+ b+ 1
+
+23: end while
+24: return final generated response y
+
+approaches. Emerging techniques like Group Relative Policy Optimization (GRPO) (Guo et al., 2025) and
+RLOO (Ahmadian et al., 2024) offer promising alternatives by eliminating critic networks through group-wise
+evaluation strategies. Recent work has demonstrated RL’s effectiveness in improving LLM search and reasoning
+capabilities. Our framework leverages verifiable rewards to train agents for query expansion and effective
+utilization of distilled information, improving both semantic coverage and the processing of reasoning-focused
+summarization.
+
+3. Method
+
+In this section, we introduce the proposed expand-then-squeeze approach, the training template and the reward
+functions.
+
+3.1. Expand-then-Squeeze Strategy
+
+Similar to Search-R1, the proposed ExpandSearch adopts an iterative process. It alternates between the
+LLM generation and the search engine calling. Unlike Search-R1 which generates a single query in each step,
+ExpandSearch generates multiple diverse query variants, such as paraphrases, decomposed sub-questions,
+keyword expansions to facilitate retrieval for more relevant knowledge. We term this process as expand. It
+is worth noting that multiple expanded queries would retrieve a large number of chunks, bringing a huge
+amount of irrelevant information, significantly distracting the attention of LLM, especially in multi-turn rollout
+scenarios. To resolve this, we add a squeeze step. It compresses the retrieved long context into a compact
+text through a fixed-weight long-context LLM through API calls. We term the expansion followed by squeezing
+process as Expand-then-Squeeze strategy. In the following, we explain the proposed Expand and Squeeze
+strategy in detail.
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Expand. If an external retrieval is needed, the LLM would generate a <search> </search> block wrapping up
+the set of n diverse queries {q;}"_,. For each query q;, we call the search engine F to retrieve k most relevant
+chunks:
+
+The expand step effectively overcomes the limitation of a single query (Weller et al., 2025) for retrieval, and
+improves the retrieval recall.
+
+Squeeze. The generated queries [qi,--- , @] as well as the retrieved chunks [C,,--- ,C,,] are fed into a frozen
+LLM with a prompt template defined in Section B, e.g., squeezer, to squeeze the long retrieved chunks, z,, to
+generate the summary:
+
+The squeezed information s would be encapsulated in a block <information> </information> and inserted
+into the ongoing roll-out sequence, serving as an additional context for the next generation step. This search-
+then-reason iteration continues until the model generates a final response, which is enclosed between <answer>
+</answer>. The complete workflow is described in Algorithm 1. Compared to the original retrieved chunks
+[(C1,--- ,C,], the compressed information s is much shorter, significantly saving the GPU memory consumption
+in the training instance. Meanwhile, as the weights of the squeezer are fixed in training, we host the squeezer
+independently in the inference instance, and the training instance calls the squeezer through an API.
+
+3.2. Training Template and Reward Function
+
+To train ExpandSearch, we create a simple template that instructs LLM to conduct reasoning-search iterations
+and generate the answer in the final step. As shown in Table 1, we encourage LLM to explicitly conduct query
+expansion and generate k various query variants to achieve high recall.
+
+Following Search-R1, the reward function for training ExpandSearch is a weighted sum of the exact-match
+(EM) reward rpy and the format reward r-:
+
+Tr =TReM + Ars. (3)
+
+The extract-match (EM) reward is defined as rpm (ansprea, ansgt) = I(ansprea = anSgt) Where I(-) denotes the
+
+indicator function, which is 1 only for the condition that the predicted answer ansp,eq is exactly the same as
+the ground-truth answer ans,;. The format reward r; is 1 only if the predicted answer ansp;eq strictly follows
+the format defined in Table 1. By default, we set as 0.2.
+
+4. Results and Analysis
+
+4.1. Experiment Setup
+
+Datasets and Evaluation Metric The evaluation includes seven benchmarks spanning diverse retrieval
+complexities, grouped into two categories: (1) General Question Answering, comprising NQ (Kwiatkowski et al.,
+2019), TriviaQA (Joshi et al., 2017), and PopQA (Mallen et al., 2023); (2) Multi-Hop Question Answering,
+including HotpotQA (Yang et al., 2018), 2WikiMultiHopQA (Ho et al., 2020), Musique (Trivedi et al., 2022),
+and Bamboogle (Press et al., 2023). Following Jin et al. (2025b), we combine NQ and HotpotQA training
+sets for training, evaluating on validation/test splits using Exact Match (EM) to measure both in-domain and
+out-of-domain generalization.
+
+Baseline Methods We employ various baselines to evaluate ExpandSearch, including R1 without search
+engine (Guo et al., 2025), Search-R1 (Jin et al., 2025b), ZeroSearch (Sun et al., 2025), StepSearch (Wang
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Table 1: Template for ExpandSearch. question will be replaced with the specific question during training and
+inference.
+
+Answer the given question. You must conduct reasoning inside <think> and </think>
+first every time you get new information. After reasoning, if you find you lack some
+knowledge, you can call a search engine by <search> query </search>, and it will return
+the searched results between <information> and </information>. Within <search>
+</search>, generate k diverse query variants — such as paraphrases, decomposed sub-
+questions, keyword expansions to facilitate retrieval for more relevant knowledge. Separate
+multiple queries with ## so they can be run in parallel.
+
+Example format: <search> query_1 ## query_2 ## ... #4 query_n </search>
+
+You can search as many times as you want. If you find no further external knowledge
+needed, you can directly provide the answer inside <answer> and </answer> without
+detailed illustrations. For example, <answer> abc </answer>. Question: question.
+
+et al., 2025), Route-R1 Zhang et al. (2025) and ParallelSearch (Zhao et al., 2025).
+
+Implementation Details We conduct experiments using Qwen-2.5-Base/Instruct models (Yang et al., 2024)
+as the backbone of the search agent, E5 (Wang et al., 2022) as the embedding model, and the 2018 Wikipedia
+dump (Karpukhin et al., 2020) as the corpus. All experiments are conducted on 8 NVIDIA H100 GPUs. The
+model is developed with the Search-R1 framework and trained via veRL for reinforcement learning, using
+Proximal Policy Optimization (PPO) as the default algorithm. More details can be found in Section A.
+
+4.2. Main Results
+
+Table 2 presents the results comparing ExpandSearch against baselines across seven question-answering
+benchmarks and four model configurations. Our analysis reveals several key findings.
+
+(1) Our method achieves consistent and substantial improvements across all configurations. It outperforms
+the strongest baselines by an average of 4.4% absolute improvement. This demonstrates the robustness and
+effectiveness of our reinforcement learning approach for search agent training.
+
+(2) 3B search agents can surpass larger 7B counterparts. Remarkably, our 3B-Instruct model achieves 0.457
+average EM score, outperforming 7B baseline methods, including Search-R1 and ZeroSearch by substantial
+margins, and is comparable with the SOTA 7B model ParallelSearch, showing that the expand stage increases
+the retrieval coverage and the squeeze stage provides the most relevant information to search agents.
+
+(3) Model architecture and instruction tuning interact differently across scales. For 3B models, the instruct
+variant outperforms the base model by 2.2%, because smaller base models struggle with instruction following
+and cannot generate correct search operations during the RL rollout stage to get a valid trajectory. Conversely,
+for 7B models, the base variant surpasses the instruct model by 3.1%, suggesting that at larger scales, base
+models retain more flexible capabilities from pre-training that benefit search agent behavior when both variants
+can adequately follow instructions.
+
+(4) Our method consistently improves the performance on both general and multi-hop tasks. Our method
+achieves an average improvement of 5.0% and 4.0% over the best baseline on the general and multi-hop QA
+benchmarks, respectively, indicating the agent effectively learns to decompose complex queries and orchestrate
+multi-step search strategies.
+
+(5) Performance gains are consistent across in-domain and out-of-domain evaluations. Our method shows
+robust generalization with 5.2% average improvement on out-of-domain benchmarks and 3.0% on in-domain
+benchmarks, suggesting that the learned search policies transfer well to unseen question distributions.
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Table 2: Exact Match (EM) scores across seven general and multi-hop question answering benchmarks.
+The best and second best scores under each metric are highlighted in colors. '/* denote in-domain/out-
+of-domain datasets. * represents methods trained on different training sets. ExpandSearch consistently
+outperforms baselines in average performance.
+
+Methods General QA Multi-Hop QA og.
+NQi  TriviaQA* PopQA* HotpotQA* 2wiki* Musique* Bamboogle*
+Qwen2.5-3b-Instruct
+R1 0.210 0.449 0.171 0.208 0.275 0.060 0.192 0.224
+Search-R1 0.341 0.545 0.378 0.324 0.319 0.103 0.264 0.325
+ZeroSearch* 0.414 0.574 0.448 0.274 0.300 0.098 0.111 0.317
+StepSearch! - - - 0.345 0.320 0.174 0.344 -
+Router-R1 0.388 0.706 0.384 0.352 0.434 0.138 0.512 0.416
+ ExpandSearch (Ours) 0.446 0.677. =+©0.456 = 0.422,———s«0.450—si0.1940 0.540 0.457
+Qwen2.5-3b-Base
+R1 0.226 0.455 0.173 0.201 0.268 0.055 0.224 0.229
+Search-R1 0.406 0.587 0.435 0.284 0.273 0.049 0.088 0.303
+ZeroSearch* 0.430 0.616 0.414 0.338 0.346 0.130 0.139 0.345
+StepSearch! - - - 0.329 0.339 0.181 0.328 -
+ ExpandSearch (Ours) ~ 0.488 ~~ 0.700 0.507. 0.414" *0.398 «0.136 0.452 ~~ 0.435"
+Qwen2.5-7b-Instruct
+R1 0.270 0.537 0.199 0.237 0.292 0.072 0.293 0.271
+Search-R1 0.393 0.610 0.397 0.370 0.414 0.146 0.368 0.385
+ZeroSearch' 0.436 0.652 0.488 0.346 0.352 0.184 0.278 0.391
+StepSearch? - - - 0.386 0.366 0.226 0.400 -
+ParallelSearch 0.462 0.628 0.429 0.429 0.424 0.197 0.411 0.425
+' ExpandSearch (Ours) 0.450 0.667 0.451 0.428 0.459 0.211 © 0.476 ~—- 0.449 ©
+Qwen2.5-7b-Base
+R1 0.297 0.539 0.202 0.242 0.273 0.083 0.296 0.276
+Search-R1 0.480 0.638 0.457 0.433 0.382 0.196 0.432 0.431
+ZeroSearch* 0.424 0.664 0.604 0.320 0.340 0.180 0.333 0.409
+StepSearch? - - - 0.380 0.385 0.216 0.467 -
+ParallelSearch 0.492 0.658 0.455 0.457 0.452 0.229 0.468 0.458
+' ExpandSearch (Ours) 0.496 0.703 = 0.506 ~—s«0«4450—(itiH4BB L9G 0.540 ~—- 0.480
+
+4.3. Expansion Behavior Analysis
+
+Query expansion significantly improves retrieval recall by addressing the semantic brittleness of single-
+query search. As demonstrated in Figure 2, increasing the number of expanded queries from 1 to 3 yields
+consistent improvements in exact match accuracy across benchmarks. The most substantial gains occur
+when moving from single-query (n = 1) to dual-query (n = 2) generation, with an average improvement of
+6.7%, suggesting that even minimal expansion captures previously missed semantic variations. The continued
+improvement at n = 3 indicates that complex reasoning tasks benefit from multiple complementary query
+perspectives, though with diminishing returns that suggest a natural saturation point in query diversity.
+
+End-to-end reinforcement learning is essential for learning effective query expansion strategies. We
+compare our method with n set to 3 and k set to 5 to Search-R1 with k = 15, i.e., both methods have the
+same number of retrieval chunks. As shown in Table 3, our results demonstrate the critical importance of
+end-to-end training for query expansion. ExpandSearch achieves an average EM score of 0.446, representing a
+34.3% relative improvement over Search-R1. This substantial gain validates our hypothesis that trained query
+expansion can effectively address the semantic limitations of single-query retrieval. A particularly revealing
+finding is that simply adding the expansion prompt in Table 1 and the squeezer to Search-R1 without RL training
+(Search-R1 w/ Expansion + Squeezer) yields no improvement and even slightly degrades performance. This
+counterintuitive result highlights a crucial insight that naive query expansion without proper training can
+introduce noise that overwhelms the potential benefits of increased coverage. In contrast, when we remove the
+squeezer and only train the agent using a query expansion (ExpandSearch w/o squeezer) outperforms the
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+NQ TriviaQA PopQA HotpotQA
+0.677
+0.642
+0.616 aa
+0.6 0.6) 2 0.6 0.6
+9.385 o.az0 ONG = 4 0.378 a
+0.47.——_—"* 0.4 0.49,337 0.4 9333
+0.2 0.2 0.2 0.2
+0.0 0.0 0.0 0.0
+1 2 3 1 2 3 1 2 3 1 2 3
+2wiki Musique Bamboogle Average
+0.6 0.6 0.6 0.5490 640.6
+0.49318 0.4 0.49.347 — gales
+0.194
+0.2 0.2 0.158 ° 0.2 0.2
+p.090
+0.0 0.0 0.0 0.0
+1 2 3 1 2 3 1 2 3 1 2 3
+
+Figure 2: Impact of query expansion count (n) on EM accuracy across benchmarks. Increasing the number
+of rephrased queries from 1 to 3 yields substantial EM accuracy gains.
+
+Table 3: Ablation study comparing trained versus untrained expansion and squeezer impact. Expand-
+Search outperforms Search-R1, while naive addition of expansion and squeezer without training degrades
+performance.
+
+Methods General QA Multi-Hop QA nee.
+NQ_ TriviaQA PopQA HotpotQA 2wiki Musique Bamboogle
+ExpandSearch 0.444 0.664 0.447 0.415 0.432 0.196 0.524 0.446
+- w/o squeezer 0.385 0.570 0.398 0.361 0.384 0.146 0.323 0.364
+Search-R1 0.352 0.557 0.395 0.324 0.321 0.111 0.266 0.332
+- w/ Expansion + Squeezer 0.335 0.543 0.340 0.327 0.303 0.099 0.360 0.330
+
+baselines, showing that (1) generating semantically coherent and diverse query variants that capture different
+aspects of the information need, and (2) properly utilizing the expanded retrieval results in the reasoning
+process. Without end-to-end training, the model cannot learn the complex interplay between query generation
+and answer generation.
+
+Our learned query expansion strategy naturally discovers two complementary expansion types that
+address distinct retrieval failure modes. Through qualitative analysis in Section E of generated queries, we
+observe that: (1) Syntactic expansions handle surface-form variations that confuse embedding models. For
+instance, expanding “where did he die” to include “his death place” and “location of death” overcomes word-
+order sensitivity in dense retrievers; (2) Semantic expansions broaden the information scope by generating
+related but distinct queries, such as expanding “Alex’s father” to include “Alex’s family” and “Alex’s parents”,
+capturing information that may be stored under broader categorical terms.
+
+Syntax expansions dominate the learned query distribution, reflecting the brittleness of embedding-based
+retrieval to surface forms. We use an LLM to analyze and assign a type of each query. As shown in Table 4,
+our trained model generates 63.35% syntax expansions versus 36.65% semantic expansions, suggesting that
+paraphrasing and reformulation are the primary mechanisms for improving retrieval recall. This distribution
+emerges naturally through reinforcement learning, indicating that lexical variation poses a greater challenge
+than semantic breadth for current dense retrievers. More details can be found in Section B.
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Table 4: Impact of removing syntax and semantic expansions on EM accuracy. Syntax expansions domi-
+nate the learned distribution, addressing surface-form retrieval brittleness. Removing either expansion type
+consistently degrades performance, demonstrating their complementary roles.
+
+Variants Ratio General: QA Muilti-Hop'O5. Avg.
+NQ_ TriviaQA PopQA HotpotQA 2wiki Musique Bamboogle
+ExpandSearch - 0.444 0.664 0.447 0.415 0.432 0.196 0.524 0.446
+w/o Syntax Expansion 63.35% 0.443 0.636 0.381 0.404 0.407 0.191 0.384 0.407
+w/o Semantic Expansion 36.65% 0.438 0.644 0.370 0.413 0.402 0.175 0.368 0.401
+NQ TriviaQA PopQA HotpotQA
+
+0.651 0.664 0.677
+
+0.6 0.6 0.6 0.6
+0.427 0:444 0.446 0.430 0.447, 0.456 0.404 (0.415 0.422
+0.4 0.4 0.4 :
+0.2 0.2 0.2 .
+0.0 0.0 0.0 ,
+3 5 10 3 5 10 3 5 10 5
+
+10
+
+2wiki Musique Bamboogle Average
+
+Os 8 0-6) 9524 0.524 0.540 | 0.6
+
+0.403 0-432 0-450
+0.4 0.4 0.4
+re a 0.2| -0:197, 0-196 0.194 | 15
+0.0 0.0 a Ll [| 0.0
+3 5 10 3 3 5 10
+
+5 10
+
+0.435 (0.446 0.457
+0.4
+
+0.2
+
+0.0
+
+3 5 10
+
+Figure 3: Effect of retrieval depth (k) on EM accuracy. Increasing k from 3 to 10 chunks allows the model to
+cover more information from the expanded queries, yielding consistent improvements across benchmarks.
+
+Both expansion types are essential and non-redundant for optimal performance. Removing syntax or
+semantic expansions leads to consistent performance decline, demonstrating that neither expansion type can
+fully compensate for the other. This complementarity suggests they address fundamentally different retrieval
+limitations.
+
+4.4. Squeeze Behavior Analysis
+
+The squeezer component is critical for managing information overload from expanded retrieval. As shown
+in Table 3, removing the squeezer from ExpandSearch causes a dramatic performance drop. This degradation
+is particularly severe on complex multi-hop tasks like Bamboogle and Musique, where the model must navigate
+through multiple chunks of potentially irrelevant information without selective distillation.
+
+Retrieval depth shows consistent but diminishing returns across all benchmarks. Figure 3 demonstrates
+that increasing k from 3 to 5 chunks yields substantial improvements, while further expansion to k = 10
+provides marginal benefits for some benchmarks. This saturation pattern validates our squeeze-based approach
+rather than unlimited retrieval expansion, selective distillation of moderately-sized retrieval sets proves more
+effective.
+
+Squeezer architecture exhibits a task-specific trade-off between model capacity and specialization. As
+shown in Table 5, LLaMA-3.1-70B achieves superior performance on general QA tasks, leveraging its larger
+capacity to better understand diverse queries. However, LLaMA-4-17b, despite being smaller, outperforms
+on multi-hop reasoning tasks. It reveals that general knowledge extraction and multi-hop evidence synthesis
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Table 5: Impact of squeezer model selection on EM accuracy. LLaMA-3.1-70b achieves superior performance
+on general QA through larger capacity, while LLaMA-4-17b excels on multi-hop reasoning despite smaller size.
+
+General QA Multi-Hop QA
+Squeezer Avg.
+NQ _ TriviaQA PopQA HotpotQA 2wiki Musique Bamboogle
+LLaMA-3.1-8b 0.411 0.611 0.425 0.386 0.377 0.159 0.379 0.389
+LLaMA-3.1-70b 0.481 0.682 0.476 0.404 0.392 0.167 0.476 0.433
+LLaMA-4-17b 0.446 0.677 0.456 0.422 0.450 0.194 0.540 0.457
+0.8 1000 wn 3-0
+s 2
+0.6 ei 800 >
+5 5 600 pedi é 2.0 ae
+30.4 g 51.5
+a £ 400 L
+("4 ° @ 1.0
+0.2 o 2
+s 200 E 0.5
+0.0 0 = 0.0
+0 50 100 150 200 250 300 0 50 100 150 200 250 300 0 50 100 150 200 250 300
+Training Steps Training Steps Training Steps
+
+Figure 4: Training dynamics showing reward, response length, and search frequency. The synchronized
+growth of reward, response length, and search frequency reveals that the model autonomously learns expanded
+retrieval as an optimal strategy. Smooth training curves indicate stable optimization without collapse.
+
+require fundamentally different compression capabilities.
+
+Results regarding testing different squeezer models during inference time can be found in Section C.
+
+4.5. Training Dynamics
+
+We illustrate the training dynamics in Figure 4. The reinforcement learning process effectively discovers the
+correlation between query expansion and task performance, as evidenced by the steady increase in reward.
+Notably, the model autonomously learns to increase search frequency as a strategy for improving answer
+quality, demonstrating that expanded retrieval emerges as an optimal strategy without explicit supervision.
+This behavioral shift correlates with response length expansion, suggesting that the model learns to synthesize
+information from multiple retrieval rounds into more comprehensive answers. The synchronized growth of all
+three metrics reveals a coherent learned strategy where more searches yield more relevant evidence, enabling
+more detailed and accurate responses. The smooth training curves without sudden drops or high variance
+indicate stable optimization, suggesting that the expand-then-squeeze framework provides a robust learning
+signal that allows progressive refinement of search strategies while maintaining previously learned capabilities.
+
+5. Conclusion
+
+In this paper, we presented ExpandSearch, a reinforcement learning framework that trains search agents to
+overcome the limitations of single-query retrieval through learned query expansion and selective information
+distillation. Our expand-then-squeeze paradigm addresses two critical challenges in reasoning-augmented
+search: semantic incompleteness in query formulation and information overload from expanded retrieval sets.
+Experiments across seven QA benchmarks demonstrate that ExpandSearch achieves substantial improvements
+over state-of-the-art baselines, with particularly strong gains on multi-hop reasoning tasks. These results
+suggest that the future of retrieval-augmented reasoning lies not in simply scaling retrieval volume or model
+size, but in learning sophisticated strategies for query formulation and information synthesis, opening avenues
+for further research into adaptive retrieval strategies and more efficient training methods for search agents.
+
+10
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+6. Acknowledgments
+
+We acknowledge the NVIDIA Brev Team for providing access to GPU clusters and training resources. Their
+technical support and computational infrastructure were instrumental in enabling the large-scale experiments
+reported in this paper. The platform’s streamlined setup and one-click deployment capabilities made it
+remarkably easy for our team to quickly start experimenting without extensive infrastructure management.
+
+We also acknowledge the NVIDIA NIM Team for the LLMs access via API calls, which significantly streamlines
+the development. The reliable API infrastructure and diverse model offerings enabled rapid prototyping and
+iteration, allowing our team to efficiently explore different approaches and validate our methods at scale.
+
+References
+
+Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo
+Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report. arXiv preprint
+arXiv:2303.08774, 2023.
+
+Arash Ahmadian, Chris Cremer, Matthias Gallé, Marzieh Fadaee, Julia Kreutzer, Olivier Pietquin, Ahmet Ustiin,
+and Sara Hooker. Back to basics: Revisiting reinforce-style optimization for learning from human feedback
+in Ilms. In Annual Meeting of the Association for Computational Linguistics (ACL), 2024.
+
+Chenxin An, Jun Zhang, Ming Zhong, Lei Li, Shansan Gong, Yao Luo, Jingjing Xu, and Lingpeng Kong. Why
+does the effective context length of Ilms fall short? arXiv preprint arXiv:2410.18745, 2024.
+
+Claudio Carpineto and Giovanni Romano. A survey of automatic query expansion in information retrieval. ACM
+Computing Surveys, 2012.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman,
+Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. The llama 3 herd of models. arXiv preprint
+arXiv:2407.21783, 2024.
+
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia, Jinliu Pan, Yuxi Bi, Yixin Dai, Jiawei Sun, Haofen Wang,
+and Haofen Wang. Retrieval-augmented generation for large language models: A survey. arXiv preprint
+arXiv:2312.10997, 2023.
+
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma, Peiyi
+Wang, Xiao Bi, et al. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning.
+arXiv preprint arXiv:2501.12948, 2025.
+
+Kelvin Guu, Kenton Lee, Zora Tung, Panupong Pasupat, and Ming-Wei Chang. Retrieval augmented language
+model pre-training. In International Conference on Machine Learning (ICML), 2020.
+
+Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara, and Akiko Aizawa. Constructing A multi-hop QA dataset
+for comprehensive evaluation of reasoning steps. In International Conference on Computational Linguistics
+(COLING), 2020.
+
+Jiwoo Hong, Noah Lee, and James Thorne. ORPO: monolithic preference optimization without reference model.
+In Conference on Empirical Methods in Natural Language Processing (EMNLP), 2024.
+
+Ziyang Huang, Xiaowei Yuan, Yiming Ju, Jun Zhao, and Kang Liu. Reinforced internal-external knowledge
+synergistic reasoning for efficient adaptive search agent. arXiv preprint arXiv:2505.07596, 2025.
+
+Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan Su, Yan Xu, Etsuko Ishii, Yejin Bang, Andrea Madotto,
+and Pascale Fung. Survey of hallucination in natural language generation. ACM Computing Surveys, 2023.
+
+11
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Bowen Jin, Jinsung Yoon, Jiawei Han, and Sercan O. Arik. Long-context Ilms meet RAG: overcoming challenges
+for long inputs in RAG. In International Conference on Learning Representations (ICLR), 2025a.
+
+Bowen Jin, Hansi Zeng, Zhenrui Yue, Jinsung Yoon, Sercan Arik, Dong Wang, Hamed Zamani, and Jiawei Han.
+Search-r1: Training Ilms to reason and leverage search engines with reinforcement learning. arXiv preprint
+arXiv:2503.09516, 2025b.
+
+Mandar Joshi, Eunsol Choi, Daniel S. Weld, and Luke Zettlemoyer. Triviaqa: A large scale distantly supervised
+challenge dataset for reading comprehension. In Annual Meeting of the Association for Computational
+Linguistics (ACL), 2017.
+
+Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and
+Wen-tau Yih. Dense passage retrieval for open-domain question answering. In Conference on Empirical
+Methods in Natural Language Processing (EMNLP), 2020.
+
+Timo Kaufmann, Paul Weng, Viktor Bengs, and Eyke Htillermeier. A survey of reinforcement learning from
+human feedback. arXiv preprint arXiv:2312.14925, 2023.
+
+Dayoon Ko, Jihyuk Kim, Haeju Park, Sohyeon Kim, Dahyun Lee, Yongrae Jo, Gunhee Kim, Moontae Lee, and
+Kyungjae Lee. Hybrid deep searcher: Integrating parallel and sequential search reasoning. arXiv preprint
+arXiv:2508.19113, 2025.
+
+Tom Kwiatkowski, Jennimaria Palomaki, Olivia Redfield, Michael Collins, Ankur P. Parikh, Chris Alberti,
+Danielle Epstein, Illia Polosukhin, Jacob Devlin, Kenton Lee, Kristina Toutanova, Llion Jones, Matthew Kelcey,
+Ming-Wei Chang, Andrew M. Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. Natural questions: a benchmark
+for question answering research. Transactions of the Association for Computational Linguistics (TACL), 2019.
+
+Nathan Lambert, Valentina Pyatkin, Jacob Morrison, Lester James V. Miranda, Bill Yuchen Lin, Khyathi Raghavi
+Chandu, Nouha Dziri, Sachin Kumar, Tom Zick, Yejin Choi, Noah A. Smith, and Hannaneh Hajishirzi.
+Rewardbench: Evaluating reward models for language modeling. In North American Chapter of the Association
+for Computational Linguistics (NAACL) Findings, 2025.
+
+Yinheng Li, Shaofei Wang, Han Ding, and Hang Chen. Large language models in finance: A survey. In
+International Conference on AI in Finance (ICAIF), 2023.
+
+Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang.
+Lost in the middle: How language models use long contexts. Transactions of the Association for Computational
+Linguistics (TACL), 2024.
+
+Alex Mallen, Akari Asai, Victor Zhong, Rajarshi Das, Daniel Khashabi, and Hannaneh Hajishirzi. When not to
+trust language models: Investigating effectiveness of parametric and non-parametric memories. In Annual
+Meeting of the Association for Computational Linguistics (ACL), 2023.
+
+Yu Meng, Mengzhou Xia, and Danqi Chen. Simpo: Simple preference optimization with a reference-free reward.
+In Conference on Neural Information Processing Systems (NeurIPS), 2024.
+
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, Pamela Mishkin, Chong Zhang,
+Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller,
+Maddie Simens, Amanda Askell, Peter Welinder, Paul F. Christiano, Jan Leike, and Ryan Lowe. Training
+language models to follow instructions with human feedback. In NeurIPS, 2022.
+
+Richard Yuanzhe Pang, Weizhe Yuan, He He, Kyunghyun Cho, Sainbayar Sukhbaatar, and Jason Weston.
+Iterative reasoning preference optimization. In NeurIPS, 2024.
+
+12
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Ofir Press, Muru Zhang, Sewon Min, Ludwig Schmidt, Noah A. Smith, and Mike Lewis. Measuring and
+narrowing the compositionality gap in language models. In Conference on Empirical Methods in Natural
+Language Processing (EMNLP) Findings, 2023.
+
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D. Manning, Stefano Ermon, and Chelsea Finn.
+Direct preference optimization: Your language model is secretly a reward model. In Conference on Neural
+Information Processing Systems (NeurIPS), 2023.
+
+Timo Schick, Jane Dwivedi-Yu, Roberto Dessi, Roberta Raileanu, Maria Lomeli, Eric Hambro, Luke Zettlemoyer,
+Nicola Cancedda, and Thomas Scialom. Toolformer: Language models can teach themselves to use tools. In
+Conference on Neural Information Processing Systems (NeurIPS), 2023.
+
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization
+algorithms. arXiv preprint arXiv:1707.06347, 2017.
+
+Hao Sun, Zile Qiao, Jiayan Guo, Xuanbo Fan, Yingyan Hou, Yong Jiang, Pengjun Xie, Fei Huang, and Yan Zhang.
+Zerosearch: Incentivize the search capability of Ilms without searching. arXiv preprint arXiv:2505.04588,
+2025.
+
+Richard S. Sutton and Andrew G. Barto. Reinforcement learning: An introduction. IEEE Transactions on Neural
+Networks, 1998.
+
+Gemini Team, Rohan Anil, Sebastian Borgeaud, Jean-Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan Schalk-
+wyk, Andrew M Dai, Anja Hauth, Katie Millican, et al. Gemini: a family of highly capable multimodal models.
+arXiv preprint arXtv:2312.11805, 2023.
+
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. Musique: Multihop questions
+via single-hop question composition. Transactions of the Association for Computational Linguistics (TACL),
+2022.
+
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. Interleaving retrieval with
+chain-of-thought reasoning for knowledge-intensive multi-step questions. In Annual Meeting of the Association
+for Computational Linguistics (ACL), 2023.
+
+Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Majumder, and Furu
+Wei. Text embeddings by weakly-supervised contrastive pre-training. arXiv preprint arXiv:2212.03533, 2022.
+
+Ziliang Wang, Xuhui Zheng, Kang An, Cijun Ouyang, Jialu Cai, Yuhang Wang, and Yichao Wu. Stepsearch:
+Igniting Ilms search ability via step-wise proximal policy optimization. arXiv preprint arXiv:2505.15107,
+2025.
+
+Orion Weller, Michael Boratko, Iftekhar Naim, and Jinhyuk Lee. On the theoretical limitations of embedding-
+based retrieval. arXiv preprint arXiv:2508.21038, 2025.
+
+Weiqi Wu, Xin Guan, Shen Huang, Yong Jiang, Pengjun Xie, Fei Huang, Jiuxin Cao, Hai Zhao, and Jingren
+Zhou. Masksearch: A universal pre-training framework to enhance agentic search capability. arXiv preprint
+arXiv:2505.20285, 2025.
+
+An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei
+Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren
+Zhou, Junyang Lin, Kai Dang, Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li, Mingfeng Xue, Pei Zhang,
+Qin Zhu, Rui Men, Runji Lin, Tianhao Li, Tingyu Xia, Xingzhang Ren, Xuancheng Ren, Yang Fan, Yang Su,
+Yichang Zhang, Yu Wan, Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and Zihan Qiu. Qwen2.5 technical report.
+arXiv preprint arXiv:2412.15115, 2024.
+
+13
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William W. Cohen, Ruslan Salakhutdinov, and Christo-
+pher D. Manning. Hotpotqa: A dataset for diverse, explainable multi-hop question answering. In Conference
+on Empirical Methods in Natural Language Processing (EMNLP), 2018.
+
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik R. Narasimhan, and Yuan Cao. React:
+Synergizing reasoning and acting in language models. In International Conference on Learning Representations
+CICLR), 2023.
+
+Haozhen Zhang, Tao Feng, and Jiaxuan You. Router-r1: Teaching Ilms multi-round routing and aggregation
+
+via reinforcement learning. arXiv preprint arXiv:2506.09033, 2025.
+
+Shu Zhao, Tan Yu, Anbang Xu, Japinder Singh, Aaditya Shukla, and Rama Akkiraju. Parallelsearch: Train
+your Ilms to decompose query and search sub-queries in parallel with reinforcement learning. arXiv preprint
+arXiv:2508.09303, 2025.
+
+14
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+A. Experiment Setup
+
+A.1. Datasets
+
+Natural Questions (NQ): A large-scale open-domain QA dataset containing 307K training, 8K development, and
+8K test examples derived from Wikipedia pages. The dataset supports both long answer selection (identifying
+relevant passages) and short answer extraction (finding specific answer spans), with human performance
+benchmarks of 87% F1 and 76% F1 respectively. NQ provides real questions posed by information-seeking
+users, making it particularly valuable for developing systems that address genuine information needs.
+
+TriviaQA: A reading comprehension dataset with over 65K question-answer-evidence triples, featuring 95K QA
+pairs authored by trivia enthusiasts paired with independently gathered evidence documents (averaging six
+per question). The dataset challenges systems with compositional questions requiring complex understanding,
+significant lexical variability between questions and evidence, and cross-sentence reasoning requirements.
+
+PopQA: A 14K entity-centric QA dataset designed to evaluate language models’ factual knowledge across varying
+entity popularity levels. Questions are systematically generated from Wikidata tuples covering 16 relationship
+types, with each question annotated with entity popularity metrics from Wikipedia page views. The dataset
+uniquely emphasizes long-tail entities to assess how well models encode less popular factual information,
+revealing that while model scaling improves popular knowledge memorization, retrieval augmentation remains
+necessary for long-tail facts.
+
+HotpotQA: A 113K Wikipedia-based QA dataset requiring genuine multi-hop reasoning across multiple docu-
+ments. The dataset features diverse, unconstrained questions with sentence-level supporting fact annotations
+that enable explainable predictions and strong supervision. It includes a novel category of factoid compari-
+son questions requiring fact extraction and comparative analysis, advancing both reasoning capabilities and
+interpretability in QA systems.
+
+2WikiMultiHopQA: A multi-hop QA dataset with 192,606 examples combining structured Wikidata and
+unstructured Wikipedia text to guarantee genuine multi-hop reasoning. The dataset features four question
+types (comparison, inference, compositional, and bridge comparison) with complete reasoning path annotations
+from question to answer. Answer types are diverse, including yes/no, dates, and 708 unique answer categories
+total, ensuring broad coverage of reasoning patterns.
+
+MuSiQue: A reading comprehension dataset addressing shortcut-based reasoning through bottom-up con-
+struction of 2 — 4 hop questions from composed single-hop questions. Available in two variants—MuSiQue-
+Answerable (25K questions) and MuSiQue-Full (50K questions including unanswerable pairs)—the dataset
+requires connected reasoning where each step depends on previous information.
+
+Bamboogle: A manually curated dataset of 125 carefully crafted 2-hop questions created by human annotators
+connecting unrelated facts from Wikipedia articles. Questions are quality-controlled by filtering out those
+answerable through simple web searches, ensuring genuine multi-hop reasoning requirements. Despite its
+smaller scale, Bamboogle provides valuable evaluation for authentic complex question decomposition beyond
+template-based patterns, complementing larger automatically generated datasets.
+
+A.2. Baselines
+
+We evaluate our proposed method against several state-of-the-art baselines: R1 without search engine, Search-
+R1, ZeroSearch, StepSearch, Router-R1, and ParallelSearch.
+
+R1 without search engine: This baseline directly prompts DeepSeek-R1-Distill-Qwen to generate answers
+without accessing external data sources, serving as a non-retrieval baseline that relies solely on the model’s
+parametric knowledge.
+
+Search-R1: A reinforcement learning framework that trains LLMs to autonomously interleave reasoning with
+
+15
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+search engine interactions. The model learns to generate special tokens that trigger search queries during
+step-by-step reasoning. Using PPO or GRPO algorithms with outcome-based rewards, Search-R1 employs
+retrieved token masking to prevent optimization over external content and develops dynamic search strategies
+through trial-and-error learning, including capabilities for self-verification and iterative refinement.
+
+ZeroSearch: A reinforcement learning approach that trains LLMs to develop search capabilities without real
+search engines by using a lightweight fine-tuned LLM as a simulated search engine. The framework employs
+curriculum-based rollout strategies with progressively degraded document quality to expose the policy model
+to increasingly challenging retrieval scenarios. This method addresses the unpredictability of document quality
+and high API costs associated with real search engines while demonstrating that even 3B parameter simulators
+can effectively train search capabilities comparable to real search engine performance.
+
+StepSearch: A reinforcement learning framework implementing step-wise proximal policy optimization
+with fine-grained, token-level supervision. The method enforces a structured think-search-answer loop and
+computes rewards based on information gain (measured via cosine similarity over TF-IDF representations)
+while penalizing redundant retrievals. This step-wise supervision enables effective decomposition of complex
+multi-hop queries into focused search subtasks with dynamic retrieval strategy adaptation.
+
+Router-R1: A reinforcement learning-based multi-LLM routing framework that formulates model selection
+and aggregation as a sequential decision process. The router, instantiated as an LLM itself, interleaves “think”
+actions (internal deliberation) with “route” actions (dynamic model invocation) while integrating responses
+into evolving context. The framework employs lightweight rule-based rewards combining format rewards,
+outcome rewards, and cost optimization, conditioning on simple model descriptors (pricing, latency, example
+performance) to achieve strong generalization to unseen model selection scenarios.
+
+ParallelSearch: A reinforcement learning framework that enables LLMs to recognize parallelizable query
+structures and execute multiple search operations concurrently, addressing the sequential bottleneck in existing
+search agents. The approach introduces specialized reward functions that jointly consider correctness, query
+decomposition quality, and parallel execution benefits.
+
+A.3. Implementation Details
+
+Our experimental framework employs Qwen-2.5 models (both Base and Instruct variants) as the search agent
+backbone, with E5 serving as the embedding model for retrieval tasks. For corpus construction, we utilize
+benchmark-specific data for MultihopRAG, while employing the 2018 Wikipedia dump for all other benchmarks.
+We use the retrieval configuration to 10 passages in this work. All experiments are performed using 8 NVIDIA
+H100 GPUs.
+
+Training Configuration: The PPO algorithm is configured with differentiated learning rates: 1e-6 for the policy
+LLM and 1e-5 for the value LLM. Training proceeds for 500 steps with warm-up ratios set at 28.5% and 1.5%
+for policy and value models respectively. Generalized Advantage Estimation (GAE) parameters are configured
+with \ = 1 andy =1.
+
+Batch Processing: We implement a hierarchical batch structure with a total batch size of 512, divided into
+mini-batches of 256 and micro-batches of 64. The maximum sequence length is constrained to 4, 096 tokens,
+with response generation limited to 500 tokens and retrieved content truncated at 500 tokens.
+
+System Optimization: Memory efficiency is achieved through gradient checkpointing and Fully Sharded Data
+Parallel (FSDP) with CPU offloading. For inference, we deploy vLLM with 1 tensor parallelism, GPU memory
+utilization capped at 60%, and sampling parameters of 1.0 temperature and 1.0 top-p during rollout generation.
+
+Regularization Parameters: The framework incorporates KL divergence regularization with coefficient 3 =
+0.001 and PPO clipping with ratio « = 0.2 to ensure stable training dynamics.
+
+16
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Table 6: Prompt template for squeezers. The template instructs the model to answer queries based solely on
+provided contexts. This focused objective ensures the squeezer filters irrelevant information while preserving
+reasoning-critical facts.
+
+You are a helpful assistant.
+You are given a series of queries and contexts.
+Return the answer to queries based on the Contexts and nothing else.
+
+Queries: QUERIES
+Contexts: CONTEXT
+Answer:
+
+Table 7: Prompt template for analyzing expansion types. The template distinguishes between syntax
+expansions (query reformulations) and semantic expansions (conceptual broadening). This enables quantitative
+analysis of the expansion distribution learned through reinforcement learning.
+
+Classify the following query expansion type.
+
+Base Query: BASE QUERY
+Expanded Query: EXPANDED QUERY
+
+Query expansion types:
+
+- Syntax Expansion: Reformulating the query structure while keeping the same meaning
+(e.g., “Alexander’s father” — “father of Alexander”, “where did he die” — “death place of”)
+- Semantic Expansion: Expanding the meaning to related concepts (e.g., “Alexander’s
+father” — “Alexander’s family”, “death place” — “burial location”)
+
+Respond with ONLY one word: ’syntax’ or ’semantic’
+
+B. Prompt Templates
+
+The prompt template used in squeezers is shown in Table 6. We also present the prompt template that used to
+analyze the expansion type in Table 4, as illustrated in Table 7.
+
+C. Test-time Generalization Across Squeezers
+
+The expand-then-squeeze framework exhibits robust generalization across different squeezer models
+without requiring retraining. As shown in Figure 5, when we replace the training-time squeezer (LLaMA-4-
+17b) with LLaMA-3.1-8b during inference, the system maintains comparable performance across all benchmarks,
+demonstrating that the search agent’s learned expansion strategies are not tightly coupled to a specific squeezer
+implementation. This plug-and-play compatibility suggests that the agent learns generalizable query expansion
+patterns rather than squeezer-specific adaptations.
+
+Different squeezer architectures exhibit task-specific advantages despite similar overall performance.
+Interestingly, the smaller LLaMA-3.1-8b actually outperforms the larger LLaMA-4-17b on certain benchmarks like
+NQ and PopQA, while the larger model excels on complex multi-hop tasks like Bamboogle and 2WikiMultiHopQA.
+This pattern reveals that squeezer selection can be optimized post-training based on task requirements—simpler
+factual queries benefit from faster, lighter squeezers while complex reasoning chains leverage the superior
+synthesis capabilities of larger models.
+
+The modular architecture enables flexible deployment strategies without performance degradation. The
+consistent performance across different squeezers validates our architectural decision to decouple the expansion
+and squeeze components. This modularity allows practitioners to adjust the squeezer based on computational
+constraints or task-specific requirements without retraining the entire system. For instance, resource-constrained
+
+17
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Hg) LLaMA-3.1-8b 19): LLaMA-4-17b
+
+0.7 General QA Multi-Hop QA Overall
+. 0.664
+
+0.6
+
+0.5
+
+0.452 0.447
+
+0.449 9.444
+
+s 0.4
+Wi
+
+0.3
+0.2
+
+0.1
+
+0.0°
+
+NQ TriviaQA PopQA HotpotQA 2wiki Musique Bamboogle Average
+
+Figure 5: Performance comparison using different squeezers at inference time. Replacing the training-time
+squeezer (LLaMA-4-17b) with LLaMA-3.1-8b during inference maintains comparable performance, validating
+the modular architecture.
+
+deployments could use LLaMA-3.1-8b with minimal performance loss, while accuracy-critical applications
+could employ larger squeezers for marginal gains on complex reasoning tasks.
+
+D. LLM Usage Statement
+
+Large language models were used as a general-purpose writing assistance tool during the preparation of
+this manuscript, primarily for grammar checking, sentence restructuring, and improving clarity of technical
+descriptions. LLMs did not contribute to the core research ideas, experimental design, or technical innovations
+presented in this work. All scientific claims, experimental results, and theoretical contributions are the original
+work of the authors, who take full responsibility for the accuracy and integrity of all content.
+
+E. Case Studies
+
+We conduct case studies to gain a deeper understanding of the behavior and capabilities of our ExpandSearch.
+The results are shown in the following tables.
+
+18
+
+
+Beyond the limitation of a single query: Train your LLM for query expansion with Reinforcement Learning
+
+Table 8: Case study using a question from HotpotQA.
+
+Question: 2014 S/S is the debut album of a South Korean boy group that was formed by
+who?
+
+Ground Truth: YG Entertainment
+
+ExpandSearch:
+
+<think> To determine who formed the boy group, I need to first identify the boy group.
+</think>
+
+<search> boy group that debuted with the album 2014 S/S ## male group first album
+2014 S/S debut ## K-pop boy groups debut albums 2014 rookie artists </search>
+<information> Doc 1 Doc 2 ... Based on the provided contexts, here are the answers to
+the given queries: WINNER is the boy group. </information>
+
+_ <think> Now that I know the boy group that debuted with the album 2014 S/S is WINNER. |
+
+I can directly find who formed them. </think>
+
+<search> who formed the boy group WINNER ## WINNER boy group created by who
+
+## who created the WINNER </search>
+
+<information> Doc 1 Doc 2 ... Based on the provided contexts, here are the answers to
+the given queries: YG Entertainment. </information>
+
+"<answer> YG Entertainment </answer> its
+
+Table 9: Case study using the question from 2wiki.
+
+Question: When did John V, Prince Of Anhalt-Zerbst’s father die?
+
+Ground Truth: 12 June 1516
+
+ExpandSearch:
+<think> To determine when John V, Prince of Anhalt-Zerbst’s father died, I need to first
+identify who his father was. </think>
+<search> father of John V, Prince of Anhalt-Zerbst ## John V Prince of Anhalt-Zerbst’s fa-
+ther ## Anhalt-Zerbst royal family tree German princes 17th century genealogy </search>
+<information> Doc 1 Doc2 ... Based on the provided contexts, here are the answers to
+the given queries: Ernest I, Prince of Anhalt-Dessau. </information>
+" <think> Now that I know his father. I can directly find when he died. </think>
+<search> Ernest I Prince of Anhalt-Dessau death date ## when did Ernest I, Prince of
+Anhalt-Dessau die ## Anhalt-Dessau rulers 16th century German princes death dates
+biography </search>
+<information> Doc 1 Doc 2 ... Based on the provided contexts, here are the answers to
+the given queries: 12 June 1516. </information>
+- <answer> 12 June 1516 </answer> Oo
+
+19

@@ -1,0 +1,1323 @@
+arXiv:2510.10114v1 [cs.CL] 11 Oct 2025
+
+LINEARRAG: LINEAR GRAPH RETRIEVAL AUG-
+MENTED GENERATION ON LARGE-SCALE CORPORA
+
+Luyao Zhuang'*, Shengyuan Chen", Yilin Xiao', Huachi Zhou"', Yujing Zhang!
+Hao Chen!, Qinggang Zhang"', Xiao Huang!
+
+'The Department of Computing, Hong Kong Polytechnic University, Hong Kong SAR
+{luyao. zhuang, yilin.xiao, yu-jing.zhang}@connect.polyu.hk;
+huachi666.zhou@connect.polyu.hk; sundaychenhao@€gmail.com;
+{sheng-yuan.chen, qginggang. zhang, xiao. huang}@polyu.edu.hk
+
+ABSTRACT
+
+Retrieval-Augmented Generation (RAG) is widely used to mitigate hallucinations
+of Large Language Models (LLMs) by leveraging external knowledge. While ef-
+fective for simple queries, traditional RAG systems struggle with large-scale, un-
+structured corpora where information is fragmented. Recent advances incorporate
+knowledge graphs to capture relational structures, enabling more comprehensive
+retrieval for complex, multi-hop reasoning tasks. However, existing graph-based
+RAG (GraphRAG) methods rely on unstable and costly relation extraction for
+graph construction, often producing noisy graphs with incorrect or inconsistent re-
+lations that degrade retrieval quality. In this paper, we revisit the pipeline of exist-
+ing GraphRAG systems and propose Linear Graph-based Retrieval-Augmented
+Generation (LinearRAG), an efficient framework that enables reliable graph con-
+struction and precise passage retrieval. Specifically, LinearRAG constructs a
+relation-free hierarchical graph, termed Tri-Graph, using only lightweight entity
+extraction and semantic linking, avoiding unstable relation modeling. This new
+paradigm of graph construction scales linearly with corpus size and incurs no ex-
+tra token consumption, providing an economical and reliable indexing of the orig-
+inal passages. For retrieval, LinearRAG adopts a two-stage strategy: (i) relevant
+entity activation via local semantic bridging, followed by (ii) passage retrieval
+through global importance aggregation. Extensive experiments on four datasets
+demonstrate that LinearRAG significantly outperforms baseline models.
+
+1 INTRODUCTION
+
+Retrieval-Augmented Generation (RAG) has emerged as a promising approach to enhance Large
+
+Language Models (LLMs) by leveraging external knowledge bases 2023
+20205 2025a} |Zhang et al.||2025c). However, existing RAG systems struggle with the
+
+complexities of large-scale, unstructured corpora in real-world scenarios, where the relevant infor-
+mation is frequently distributed unevenly across heterogeneous documents. The context retrieved
+by RAG systems is often voluminous, intricate, and lacks clear organization, leading to issues of
+
+variability in accuracy and coherence 2024} [Zhang et al.|/2024). Although recent ad-
+
+vances attempt to manage this by segmenting documents into smaller chunks for efficient index-
+
+ing (Borgeaud et al.}/2022 2023 2023), this strategy often results in the
+
+loss of critical contextual details, impairing retrieval accuracy and reasoning capabilities for complex
+
+To address this, Graph Retrieval-Augmented Generation (GraphRAG)
+has recently emerged as a powerful paradigm that lever-
+ages external structured graphs to model the hierarchical structure of background knowledge
+2024). Specifically, early work, like RAPTOR and Microsoft’s
+GraphRAG (Edge et al.|/2024), organizes knowledge through recursive summarization and com-
+munity detection with LLM-generated synopses, enabling coarse-to-fine retrieval for comprehen-
+
+*Equal contribution. ‘Corresponding author.
+
+
+sive responses. Building on this, recent approaches, including GFM-RAG 2025), G-
+Retriever 2024), and LightRAG 2024), integrate specialized encoders and ob-
+
+jectives, such as query-dependent GNNs, Prize Collecting Steiner Trees, and dual-level indexing, to
+improve multi-hop generalization, scalability, and efficiency. More recently, HippoRAG
+and its enhancement HippoRAG2 draw inspiration from cogni-
+tive processes to utilize personalized PageRank for multi-hop retrieval. These strategies significantly
+improve retrieval precision and contextual depth, enabling LLMs to address complex, multi-hop
+queries more effectively.
+
+Despite its conceptual promise and theoretical su-
+periority, recent studies reveal that GraphRAG
+
+a) Naive RAG
+
+GEX chunking (1) Encoding GOD retrieval [2 Generation ==) Models frequently underperform even naive RAG
+ES . d * E& Gt approaches on many real-world applications (Han|
+Corpus Chunks Embeddings Passage Answer pp y Pp
+
+Seige nnn acne =. fet al|[2025} 20250) 2025
+SE ey Zhuang et al.}!2025). This performance degradation
+
+& @ Extraction we meg dey aroad ian mainly stems from the poor quality of automatically
+Ce ee ee “constructed knowledge graphs. While graph-based
+Linea AG ____ retrieval increases recall of relevant knowledge, it
+Ba “=, _ Tae aD Se ot concurrently introduces substantial noise and am-
+Corpus. _ Entity Tri-Graph Passage answer biguities into the retrieved contexts, due to errors in
+graph construction. Specifically, two critical defi-
+Figure 1: Three paradigms of RAG systems. _ciencies undermine graph quality, including (i) lo-
+cal inaccuracy: relation extraction processes exhibit
+significant error rates, resulting in inaccurate semantic relationships between entities. (ii) global in-
+consistency: the absence of mechanisms to enforce hierarchical consistency and global coherence
+during extraction leads to structurally fragmented graphs with poor connectivity. These deficiencies
+collectively manifest as structural conflicts and semantic ambiguity within the knowledge graph,
+which subsequently corrupt the retrieval and generation processes. Although recent attempts have
+been made to refine graph quality via bottom-up clustering-based community summarization (Edge
+broader, macro-level view of data, these unsupervised methods are vulnerable to error propagation,
+where inaccuracies in entity relationships are amplified at higher levels of abstraction.
+
+In this paper, we revisit the pipeline of existing GraphRAG systems and propose Linear Graph-
+based Retrieval-Augmented Generation (LinearRAG), a framework that enables efficient, reliable
+graph construction and precise corpus retrieval with multi-hop reasoning. The core idea of Linear-
+RAG is to simplify the complex relational graph into a linear, easy-to-index view by focusing solely
+on modeling the semantics between target entities and the underlying text passages. Instead of rely-
+ing on costly relation extraction, LinearRAG constructs a hierarchical graph from entities, sentences,
+and passages, using only lightweight entity extraction and semantic linking. On top of this graph,
+LinearRAG introduces a two-stage passage retrieval technique: ® local semantic bridging for en-
+tity activation, which identifies contextually relevant entities beyond literal matches by propagating
+semantic similarity in sentences to mine multihop contextual association; and ® global importance
+aggregation for passage retrieval, which applies personalized PageRank over the activated sub-
+graph to aggregate passage importance from a holistic perspective. Together, these modules enable
+LinearRAG to achieve scalable, accurate, and noise-resilient retrieval for complex queries. Our
+overall contributions are summarized as follows:
+
+¢ We identify key limitations in existing GraphRAG systems, specifically highlighting how
+reliance on unstable relation extraction introduces noise and structural inconsistencies. This
+motivates the design of LinearRAG, a novel framework that enables reliable graph con-
+struction and precise passage retrieval while maintaining linear scalability.
+
+¢ LinearRAG constructs a relation-free hierarchical graph, called Tri-Graph, using only
+lightweight entity extraction and semantic linking, which avoids the instability of tradi-
+tional relation modeling and reduces indexing time by over 77%.
+
+* On top of the constructed graph, we design a two-stage retrieval mechanism that combines
+local semantic bridging for precise entity activation with global importance aggregation for
+passage recall. This integrated strategy enables more accurate, noise-resilient, and single-
+pass multi-hop retrieval.
+
+
+BH Evidence Recall 1 Context Relevance Accuracy
+
+9 Local inaccuracy: Per-triple knowledge quality
+
+Einstein did not win the Nobel Relation | (Einstein, won Nobel Prize
+Prize for his theory of relativity. | Extraction | for, theory of relativity )
+
+75.01% 74.57%
+NA
+
+62 LLC 68%
+1
+
+9% Global inconsistency: Inter-triple coherence failures
+
+UL is a major subcategory of AI (AT, subcategory, UL )
+that focuses on finding patterns -
+in data without labeled examples. } Relation
+
+(AL, subcategory, NLP )|
+
+>
+Extraction
+
+AI encompasses several major sub- nl en
+
+categories, including NLP and CV. (AL, subcategory, CV )
+
+Vanilla RAG (Top-5) RAPTOR LightRAG HippoRAG
+(a) Retrieval and Generation Performance (%) of (b) Two types of errors in knowledge graphs
+vanilla RAG v.s. typical GraphRAG baselines. brought by imperfect relation extraction methods.
+
+Figure 2: (a) Retrieval and generation rerformance (%) of Vanilla RAG v.s. GraphRAG Base-
+lines. Notably, the evaluation on Medical dataset measures GPT-based accuracy, context relevance,
+and evidence recall across different RAG baselines. (b) Case study of relation errors in knowl-
+edge graph construction from local inaccuracy and global inconsistency perspectives.
+
+¢ We conduct extensive experiments on four benchmark datasets, demonstrating that Lin-
+earRAG consistently outperforms state-of-the-art baselines in terms of retrieval quality,
+generation accuracy, and scalability, validating its practicality for real-world applications.
+
+2 PRELIMINARY STUDY
+
+In this section, we conducted a series of preliminary studies to investigate the effect of graphs used
+in RAG systems. Our findings reveal critical flaws in graph construction that explain the underlying
+causes of GraphRAG’s frequent underperformance compared to naive RAG in traditional tasks.
+
+2.1 PERFORMANCE DEGRADATION IN GRAPHRAG SYSTEMS
+
+GraphRAG models frequently underperform traditional RAG approaches on many real-world tasks.
+Specifically, our experiments on GraphRAG-Bench demonstrate that while
+GraphRAG leverages graph structures to enhance recall by retrieving a wider array of potentially
+relevant passages, this gain is offset by a significant introduction of noisy and ambiguous contextual
+information. Specifically, GraphRAG methods such as LightRAG and HippoRAG achieve moder-
+ate improvements in evidence recall, but exhibit significantly lower context relevance, ranging from
+36.86% to 54.61%, compared to Vanilla RAG, which attains 62.87% performance. This suggests
+that although graph-based retrieval expands the scope of contextual information, it introduces sub-
+stantial noise that compromises the relevance and reliability of generated answers. For example,
+in a question-answering task about “climate change impacts”, GraphRAG might retrieve passages
+related to “economic policies” due to tenuous graph links. In contrast, vanilla RAG preserves tighter
+alignment with the query context, leading to more accurate and stable outputs.
+
+2.2 GRAPH QUALITY AND ERROR ANALYSIS
+
+To diagnose the root cause of performance degradation observed in Figure [2a] we performed a fine-
+grained error analysis on the knowledge graphs used in GraphRAG. Our analysis revealed that this
+performance degradation stems directly from deficiencies in knowledge graph construction. Tradi-
+tional GraphRAG pipelines rely on explicit relation extraction to construct relational graphs, which
+usually introduce errors at two levels: (i) Local Inaccuracies: relation extraction models often pro-
+duce factually incorrect triples. For example, as shown in Figure the sentence “Einstein did not
+win the Nobel Prize for his theory of relativity” may be misrepresented as (Einstein, won Nobel
+Prize for, theory of relativity), fundamentally altering factual meaning. (ii) Global Inconsistencies:
+existing relation extraction is performed locally on individual text passages, with no mechanism to
+validate or reconcile connections across the entire corpus, leading to redundant or contradictory re-
+lations. For example, “AT” may be linked to “Unsupervised Learning,” “NLP,” and “CV” as parallel
+subcategories without hierarchical coherence (e.g., that NLP and CV are subfields of AI, while “Un-
+
+
+/ I. Offline Construction -----------n-n nrc nce coco r err ces cen GATS RAT AAT ETE STIS GRE EE ETT N
+
+Passage ‘ 7
+Chunki S Extract b ti Post-filtered
+<B y= ee a Entity 1 \ Iter. i Entities BO®):®
+1 aay Sa Linking 4
+ES Sentence ,
+\ ;
+
+we 1
+f it 1
+1 it 1
+1 a 1
+1 it 1
+1 it \
+1 it 1
+corpus passage Sentence Entity Tri- I i t
+So pee eee nn een ene mnne rte ne neem ene TE ne ’ Bg Entities aia 0
+B it 1
+, IZ. Online Retrieval .------------------------------------. . Lpreiltered (J oO jm \
+Stage 1. Entity Activation \ ITrer. i Entities SS SS LS  ** FSS | Activated Entities Aggregation Score |
+/ eee
+{ep — : eo0-C: + |
+intity Activation via —>| ea 1 ut 1
+t “=> O @ => a Semantic Bridging —|—> O O O r Semantic Propagation it i
+H i . it 1
+_ wg vas Iter. i-1 Query Vect
+
+| Question Initial Entities Activated Entities | | Sentences + ney o - i
+proecrcsseeeranennanenaronenecroreneees waveeectesneneeees Lees HT epsasct |? 2
+1 Stage 2. Passage Retrieva i! ut -base! , 1
+: 9 9 11 Bh ielevance, |! Similarity Score |”
+' ition ' ar i : Passage Vector i 1
+
+a eases Initialization] Personalizes Genera uy | Z 9
+! 2 | eases Passage Nodes PageRan @ Q- e: = { i pert oe - O t ! ¢
+‘ 1 i ntities i 1 i
+
+Top K passage nodes A / i a
+tre \ -9 Entity Activation via a “eg nbetataapviaionrianter a
+
+Semantic Bridging Passage Nodes
+
+Figure 3: The overall pipeline of the proposed LinearRAG framework. I. Offline Construction.
+Initially, we construct a Tri-graph containing entity, sentence, and passage nodes, with edges con-
+necting entities to sentences and entities to passages. II. Online Retrieval. We first activate relevant
+entities via local semantic bridging on the entity-sentence subgraph while fixing passage nodes, then
+using the activated entities to aggregate global importance scores, finally, perform passage retrieval
+via personalized PageRank on the entity-passage subgraph while fixing sentence nodes.
+
+supervised Learning” is a technique used within them). This structural ambiguity directly misleads
+the retrieval process, introducing semantic noise based on these inconsistent connections.
+
+2.3. DISCUSSION
+
+The conventional GraphRAG pipeline relies heavily on explicit relation extraction and triple-based
+knowledge representation. While this approach aims to summarize passages into structured rela-
+tional forms, it faces two fundamental issues: First, extracting concise and accurate relational
+triples is computationally expensive and linguistically challenging. Relations expressed in nat-
+ural language are often complex and context-dependent, and often nuanced or compositional to be
+accurately distilled into atomic triples; for example, the sentence “Rachel reluctantly agreed to go
+running with Phoebe” cannot be cleanly reduced to a single atomic triple without losing critical
+semantic nuance. Second, explicit relation extraction is unnecessary. Aligned entities, rather
+than relations, serve as the primary anchors connecting information distributed across passages. The
+original text preserves relational semantics in full context, which can be interpreted dynamically by
+large language models during inference, without relying on error-prone extraction.
+
+3. THE FRAMEWORK OF LINEARRAG
+
+Preliminary findings indicate that explicit relation extraction is not only computationally expensive
+but also largely unnecessary. These insights inform our revisit of the design of GraphRAG compo-
+nents, culminating in two central claims: (i) Aligned entities serve as the primary anchors connect-
+ing information distributed across passages. (ii) Contextual relations are best preserved within the
+original passages, eliminating the need for explicit relation extraction.
+
+Motivated by this idea, we introduce a new GraphRAG paradigm as in Figure }3} It constructs a
+graph that contains three types of nodes: entity nodes, sentence nodes, and passage nodes. Edges
+connect entities to sentences and entities to passages, represented as two adjacency matrices. Re-
+trieval proceeds in two stages: @ entity activation stage, where we fix the passage nodes and use
+local semantic bridging on the entity—sentence subgraph to identify intermediate entities that con-
+nect different passages; and ® passage retrieval stage, where we fix the sentence nodes and apply
+personalized PageRank on the entity—passage subgraph, exploiting the activated entities in the first
+stage as seeds for global importance aggregation. This framework exhibits linear scalability in both
+graph construction and retrieval (detailed analysis in Appendix|[D}, and we refer to itas LinearRAG.
+
+3.1 TOKEN-FREE GRAPH CONSTRUCTION
+
+We construct a hierarchical graph, called Tri-graph, with multiple granularities that is efficient to
+maintain and update. Given a corpus with a set of passages P, we first segment each passage into
+
+
+sentences using punctuation (e.g., periods or exclamation marks), obtaining a sentence set S. We
+then apply lightweight models (e.g., spaCy [2020)) for named entity recognition
+(NER) to derive an entity set €. The passages, sentences, and entities constitute three types of nodes
+in the graph, denoted as V,, V;, and V~, respectively.
+
+Edges are constructed according to the following rules: if a passage p; contains an entity e;, we
+add an edge (V,,, Ve, ); likewise, if a sentence s; mentions an entity e;, we add an edge (V,,, Ve, ).
+These relations correspond to two adjacency matrices: the contain matrix C' between passages and
+entities, and the mention matrix M between sentences and entities.
+
+Formally, the contain matrix C is defined as an |V,,| x |V-| matrix:
+C= [Cis]ivaixivel, Where Ciz = fp, contains e;}- (1)
+Here, / denotes the indicator function, with C;; = 1 if p; contains e;, and C;; = 0 otherwise.
+Similarly, the mention matrix M is defined as an |V;| x |V-| matrix:
+M = [Mijiv.|xivel> Where Mi; =f, mentions e;}- (2)
+
+This design enables efficient graph updates as the corpus grows. When new passages arrive, only
+those passages undergo sentence segmentation, NER, and edge construction, yielding overall linear
+complexity. Notably, NER is both precise and efficient compared with OpenlIE, and can be per-
+formed using lightweight language models (e.g., BERT-based models in spaCy) without incurring
+LLM token costs. In addition, the adjacency matrices C and M are implemented in sparse form,
+exploiting their intrinsic sparsity to further reduce memory usage to a linear-scalability. Finally, by
+retaining the original passages as knowledge carriers, the resulting graph preserves all contextual
+information, thereby ensuring information-lossless construction.
+
+3.2 PASSAGE RETRIEVAL
+
+With the constructed graphs serving as lossless knowledge carriers, the objective becomes identify-
+ing the most informative passages effectively. The design of graph-based retrieval is critical, as it
+must balance precision and recall of relevant context, particularly in the case of multihop queries.
+We decompose the retrieval process into two stages: a precise entity activation stage via local se-
+mantic bridging followed by a passage retrieval stage to recall globally important passages.
+
+3.2.1 FIRST STAGE: RELEVANT ENTITY ACTIVATION VIA SEMANTIC BRIDGING
+
+Generally, direct entity matching can miss relevant intermediate entities that bridge multihop re-
+lations, which are essential for multihop queries. Therefore, it is crucial to identify these latent
+connectors. However, such intermediate entities cannot be directly mined, and the massive number
+of entities challenges the precision of identifying them. To tackle this, we propose relevant entity
+activation via semantic bridging. For an incoming query q, the process is as follows:
+
+Initial entity activation that identifies entities contained in the query q and represents their activa-
+tion in the knowledge graph as a binary vector:
+
+ag = [ag al|Velx1> where agi = erti(g ake , sim(q, ej) (3)
+
+Query-sentence relevance distribution that computes the contextual association between the query
+q and each sentence s; € S, where S = {51,52,...,5)5)} is the set of sentences in the corpus.
+Represent these similarities as a vector:
+
+Oq = [Oq,]|s|x1, Where og; = sim(q, s;). (4)
+
+Semantic propagation that propagates the similarities in 0, through semantic similarity extrac-
+tion to activate relevant intermediate entities, enabling the bridging of multihop relations in the
+knowledge graph. The entity activation vector a, is updated with the weighted aggregation of their
+associated neighbors in the sentence-entity bipartite graph:
+t Tyfat-l gt—1
+a, = MAX(a, Ma, ,a,_), (5)
+
+where ay, is the activation vector of the entities in the t;;, iteration of semantic propagation. With a
+
+few iterations, we identify a set of contextually relevant entities that anchors a subgraph in the corpus
+
+
+that aligns with the reasoning structure of the query. This solution mimics the relation-matching
+process in the GraphRAG algorithms for multi-hop reasoning. Differently, our strategy performs
+implicit relation matching and does not rely on explicitly constructed relational knowledge graph.
+
+Noteworthy, the vectorized formulation of equation [5] enables n-hop entity activation within only
+n iterations, where n is generally small (< 4). Each iteration involves two MatMul1 (matrix mul-
+tiplication) and one MAX operation, which can be efficiently implemented and executed in parallel
+on popular machine learning platforms. Furthermore, due to the intrinsic sparsity of the matrix MW
+and the activation vector ai we can store it in a sparse format to reduce memory consumption, and
+reduce computation cost by applying SpM™M (sparse matrix multiplication) to replace Mat Mul.
+Dynamic pruning. While the above semantic bridging successfully establishes initial associations
+from query entities to potentially relevant intermediates, it also introduces a major challenge: the
+exponential growth of the search space as propagation deepens. Without proper control, irrelevant
+entities may repeatedly serve as new seeds, causing the process to expand combinatorially and drift
+into semantic regions unrelated to the original query intent. To address this issue, we perform graph
+pruning that constrains expansion to high-quality semantic paths. Specifically, at each propagation
+step, we introduce a threshold 6. A newly activated entity is retained for the next iteration only if its
+relevance score exceeds 6; otherwise, it is pruned. Moreover, the process terminates automatically
+once no new entity surpasses the threshold. This adaptive mechanism ensures that propagation
+proceeds only along the most relevant semantic paths, while dynamically tailoring the iteration
+range to the complexity of each query.
+
+3.2.2 SECOND STAGE: PASSAGE RETRIEVAL VIA GLOBAL IMPORTANCE AGGREGATION
+
+In the first stage, relevant entities are extracted via local semantic-bridged subgraph expansion in
+the sentence-entity graph. These entities are used to initialize importance scores in a passage-entity
+graph, a bipartite graph where nodes represent passages (V,,) and entities (V.), with edges connecting
+passages to their contained entities based on occurrence. The second stage performs global impor-
+tance aggregation with hybrid initialization for passage nodes to retrieve important passages using
+Personalized PageRank (PPR) on the passage-entity graph to compute refined global importance
+scores for each node v; € V, U Ve:
+
+I(vj)=(l-d)+d- SO at (6)
+vj €B(vi) J
+
+Here, d is the damping factor (typically 0.85), B(v,) is the set of nodes linking to v;, and deg(v;) is
+the number of outgoing links from node v;. The initial importance score for entity node v; € Ve is
+
+set to I(v;|u; € Ve) = al, where ag = (al), al), ...) is a vector of entity relevance scores for
+
+query g computed in the first stage. For passage nodes v € V,, the initial importance score is:
+
+O mae,
+I(vlv € Vp) = | A- sim(q,v)+mf1+ S° ——=
+
+e,€ Eg
+
+“Wp, (7)
+
+where sim(q,v) is the PPR base score capturing similarity between passage v and query q, Eq is
+the set of activated entities from the first stage, N., is the occurrence count of entity e; in passage
+v, Le, is the hierarchical level of entity e;, and W, is the passage node weight coefficient, A is a
+trade-off coefficient. Passages are ranked by their PPR scores I(v|v € V,), and the top-k passages
+with the highest scores are selected for retrieval.
+
+4 EXPERIMENTS
+
+In this section, we conduct comprehensive experiments to verify the effectiveness and efficiency of
+LinearRAG. Specifically, we aim to answer the following questions. QI (Generation Accuracy):
+How does LinearRAG perform compared to state-of-the-art GraphRAG methods in terms of gener-
+ation performance? Q2 (Efficiency Analysis): How cost-efficient and time-efficient is LinearRAG
+relative to existing GraphRAG approaches? Q3 (Ablation Study): What contribution does each
+component of LinearRAG make to the overall performance? ( Note that for a comprehensive eval-
+uation of LinearRAG, additional experiments on retrieval quality, parameter sensitivity, backbone
+analysis, large-scale efficiency analysis and case studies are presented in Appendix[E])
+
+
+Table 1: Result (%) of baselines and LinearRAG on four benchmark datasets in terms of both
+Contain-Match and GPT-Evaluation Accuracy. The best result for each dataset is highlighted in
+bold, while the second result is indicated with an underline.
+
+HotpotQA 2Wiki MuSiQue Medical
+
+Method
+Contain-Acc. GPT-Acc. Contain-Acc. GPT-Acc. Contain-Acc. GPT-Acc. GPT-Acc.
+Direct Zero-shot LLM Inference
+llama-8B 31.10 27.30 33.60 16.20 7.40 8.10 27.31
+llama-13B 24.20 16.80 21.90 10.50 3.30 4.40 28.86
+GPT-3.5-turbo 33.40 43.20 28.70 31.00 10.30 21.90 45.60
+GPT-40-mini 38.90 40.20 36.30 31.40 13.60 15.80 42.10
+Vanilla Retrieval-Augmented-Generation
+Retrieval (Top-1) 46.30 49.10 36.60 31.70 17.80 21.10 48.01
+Retrieval (Top-3) 53.00 56.00 44.90 39.70 25.10 27.50 59.07
+Retrieval (Top-5) 55.70 58.60 48.60 43.00 26.10 29.60 61.68
+Graph-based Retrieval-Augmented-Generation Methods
+
+KGP 61.50 60.90 31.60 30.00 25.60 30.10 54.22
+G-retriever 42.20 40.60 46.60 27.10 14.40 15.50 50.36
+RAPTOR 55.90 58.30 50.10 42.10 23.30 27.40 55.75
+E’GraphRAG 61.00 63.90 54.30 38.10 23.80 26.20 58.00
+LightRAG 60.30 59.50 55.20 39.00 27.40 28.60 54.36
+HippoRAG 57.00 59.30 66.10 59.90 29.30 24.10 55.04
+GFM-RAG 62.70 65.60 66.80 59.60 29.90 34.60 56.07
+HippoRAG2 62.90 64.30 62.70 55.00 31.00 35.00 60.77
+LinearRAG (Ours) 64.30 66.50 70.20 63.70 33.90 37.00 63.72
+
+4.1 EXPERIMENTAL SETTING
+
+Datasets. We first evaluate the effectiveness of LinearRAG on three widely-used multi-hop QA
+datasets and one domain-specific dataset, including HotpotQA (Yang et al.| [2018), 2WikiMulti-
+HopQA (2Wiki) (Ho et al.| {2020), MuSiQue 2022), and the Medical dataset from
+Cee RAG Bao TBO We follow the same evaluation method as HippoRAG, us-
+ing the same corpus for retrieval and choosing 1,000 questions from each validation set. This setup
+allows for a fair comparison between different methods. We also test our approach on the domain-
+
+specific Medical dataset from GraphRAG-Bench (Xiang et al.| 2025), showing that LinearRAG
+improves both generation results and retrieval quality.
+
+Baselines. We categorize all the baselines into three groups: (i) Zero-shot LLM Inference: We
+evaluate several foundational models including LLaMA3 (8B) and LLaMA3 (13B)
+(2024), as well as GPT-3.5-turbo and GPT-40-mini (2023). (ii) We deploy Vanilla RAG
+methodologies across multiple retrieval configurations (retrieving 1, 3, or 5 top passages), com-
+bining semantic-based document retrieval with chain-of-thought reasoning prompts to guide the
+LLM’s generation process. (iii) State-of-the-art GraphRAG Systems: We compare against lead-
+ing GraphRAG implementations including KGP_(Wang et al.|/2024), G-retriever (He et al.||202
+RAPTOR (Sarthi etal] 2004), E°GraphRAG (Zhao et a].0003) LightRAG (Guo et al[BO03), ig
+poRAG (Gutiérrez et al.||2024), GFM-RAG (Luo et al.|/2025), and HippoRAG2 (Gutiérrez et al.
+(2025). Among these, RAPTOR organizes the corpus into a hierarchical tree graph; G-Retriever,
+LightRAG, HippoRAG, GFM-RAG, and HippoRAG? extract triples from passages to build struc-
+tured graphs; while E?GraphRAG integrates both strategies.
+
+Evaluation Metrics. We evaluate our method using four metrics across two categories. For end-
+to-end QA performance, following existing work (Wang et al., 2025), we use: 1) Contain-Match
+Accuracy (Contain-Acc.), which checks if the correct answer appears in the generated response,
+and 2) GPT-Evaluation Accuracy (GPT-ACC.), an LLM-based metric that assesses whether the pre-
+dicted answer matches the ground truth. For the Medical dataset, since golden answers consist of
+lengthy descriptive statements, we only evaluate using GPT-ACC-. For retrieval quality assessment,
+we adopt metrics from GraphRAG-Bench (Xiang et al.|{2025): 1) Context Relevance, which mea-
+suring semantic alignment between questions and retrieved passages, and 2) Evidence Recall, which
+evaluating whether the retrieved contents contain all necessary information for the correct answer.
+
+
+Table 2: Efficiency and performance comparison of different GraphRAG methods. Notably,
+Accuracy represents the average of Contain-Acc. and GPT-Acc. metrics. Prompt tokens represent
+input to LLM, and completion tokens represent LLM output. Best results are highlighted in bold,
+and second-best results are underlined.
+
+Method Time (s) Token Consumption (x 10°) Aveuracy
+Indexing Retrieval (Avg.) Prompt Completion
+G-retriever 2745.94 11.487 6.05 2.26 36.85
+RAPTOR 1323.57 0.062 0.81 0.03 46.10
+E?GraphRAG 534.60 0.053 0.78 0.08 46.20
+LightRAG 4933.22 10.963 35.52 51.16 47.10
+HippoRAG 936.00 1.461 3.05 0.98 63.00
+GFM-RAG 1202.77 1.211 3.05 0.98 63.20
+HippoRAG2 1147.01 1.694 4.98 1.22 58.85
+LinearRAG (Ours) 249.78 0.093 0 0 66.95
+
+Implementations. For consistency in implementation, all algorithms use the same embedding
+model, i.e., all-mpnet-base-v2 [2023)). We set k = 5 for top k retrieval in all meth-
+ods. All RAG approaches employ the same LLM (GPT-40-mini) for both generation and evaluation
+tasks. All experiments are conducted on the hardware configuration detailed in Appendix |C|
+
+4.2 GENERATION ACCURACY (Q1)
+
+To address QI, we conduct a comprehensive evaluation of generation performance by comparing
+various baseline methods with LinearRAG across four benchmark datasets. The detailed experimen-
+tal results are presented in Table] Based on our analysis, we derive the following key observations.
+
+Obs. 1. RAG significantly enhances zero-shot LLM performance. Direct prompting of LLMs
+without external knowledge retrieval yields the poorest performance across all datasets. For instance,
+advanced models like GPT-40-mini achieve only 15.80% GPT-based accuracy on the MuSiQue
+dataset when operating without retrieval augmentation. However, integrating relevant corpus con-
+tent into prompts substantially improves performance, as Vanilla RAG with top-5 retrieved con-
+texts increases accuracy to 29.60% on the same dataset. Such significant performance enhancement
+demonstrates the essential nature of RAG mechanisms for information-intensive applications.
+
+Obs. 2. GraphRAG methods provide crucial context missed by RAG methods for complex
+reasoning. While larger k values improve accuracy, the gains diminish at higher values, revealing
+vanilla RAG’s core limitation in multi-hop reasoning: it tends to overly focus on searching for men-
+tioned entities or keywords within documents, thereby missing logic-related documents essential
+for the complete reasoning chain. By contrast, methods that model structural dependency in the re-
+trieval consistently perform better. Among them, HippoRAG 2 achieves the best results across most
+datasets, attaining 62.90% Contain-based accuracy on HotpotQA and 31.00% on MuSiQue datasets.
+
+Obs. 3. LinearRAG demonstrates superior performance compared to GraphRAG methods,
+which suffer from sensitivity to constructed graph quality. Typical GraphRAG methods address
+semantic misalignment by explicitly structuring knowledge into graphs, but their effectiveness re-
+lies heavily on relation extraction. Instead, LinearRAG gets rid of ineffective graph construction
+and LinearRAG outperforms all baselines by a significant margin across all datasets, empirically.
+Notably, LinearRAG achieves 63.70% GPT-based accuracy on 2Wiki, around 3.80% absolute im-
+provement over the second best baseline, and boosts Contain-based accuracy to 70.20%.
+
+4.3 EFFICIENCY ANALYSIS (Q2)
+
+To better understand the associated efficiency and cost implications, we conduct a dedicated analysis
+on prompt statistics across different GraphRAG models during the indexing and retrieval stages
+by comparing their token usage and running time on 2WikiMultiHopQA dataset. The results are
+presented in Table [2] and we summarize our key observations as follows:
+
+Obs. 4. Complicated graph construction inevitably brings significant time costs during both
+the indexing and retrieval stages. Models such as G-Retriever and LightRAG employ intricate
+
+
+schema definitions, resulting in notably poor efficiency. For instance, LightRAG requires 4,933.22
+seconds for indexing and 10.963 seconds for retrieval. These models define entities and keywords
+within the graph and perform both high-level and low-level retrieval. Consequently, LLMs are
+overburdened with processing the large volume of content retrieved from these two information
+sources, which results in higher fees and latency.
+
+Obs. 5. Reducing LLM token costs does not necessarily have a negative impact on perfor-
+mance. Complicated prompt construction and completion in G-Retriever and LightRAG fail to
+deliver consistent performance improvements. For instance, HippoRAG2 uses only 3.05M tokens
+during prompt construction and 0.98M tokens in the completion stage, while HippoRAG2 consumes
+4.98M tokens for prompt construction and 1.22M tokens in completion. Despite these lower token
+costs, both models outperform G-Retriever and LightRAG.
+
+Obs. 6. LinearRAG delivers the strongest overall efficiency. Considering the whole pipeline,
+LinearRAG is the fastest and introduces zero token usage. While E?GraphRAG and RAPTOR
+are more time-efficient than LinearRAG at the retrieval stage, it comes at the cost of significantly
+reduced model performance, as it retrieves only directly related documents with the query with-
+out considering the structural dependencies in the reasoning chain. In comparison, the lightweight
+pipeline of LinearRAG avoids LLM calls for both indexing and retrieval, which minimizes latency
+and eliminates token costs. For deployments that demand strong performance along with speed,
+scalability, and cost control, LinearRAG is the most practical choice.
+
+4.4 ABLATION STUDY (Q3)
+
+@ LinearRAG
+
+w/o Entity Activation
+
+w/o Global Importance Aggregation
+
+65.40%
+
+63.15% 63.35%
+
+20%
+
+66.95%
+64.40% 64.20%
+
+|
+|
+
+35.45%
+
+[| 1.65% 32.05%
+|
+
+78% 6 69%61.73%
+
+|
+
+HotpotQA
+
+2WikiMultiHopQA
+
+MuSiQue
+
+Medical
+
+To address Q3, we conduct systematic ablation
+studies on the core components of LinearRAG
+across four datasets. We examine two key mod-
+ules: @ Relevant Entity Activation via Se-
+mantic Bridging, i.e., w/o Entity Activation,
+which directly uses the initial entities extracted
+from the query as activated entities, bypassing
+the semantic bridging process that propagates
+
+activation scores from query entities to related
+
+Figure 4: Ablation study on key modules of Linear- €Mtities in the knowledge graph. @ Passage Re-
+
+RAG under four different datasets. The y-axis repre- trieval via Global Importance Aggregation,
+sents the average of GPT-Acc. and Contain-Acc. i.e., W/o Global Importance Aggregation, which
+skips the personalized PageRank algorithm and directly uses the initial activation scores computed
+by stage ® to retrieve documents from the corpus, without considering global importance relation-
+ships. Each variant is evaluated with the average of GPT-Acc. & Contain-Acc. as our primary
+evaluation metric. Experimental results are shown in Figure|4] and we have the following findings.
+
+Obs. 7. Each module of LinearRAG is critical for optimal performance. The performance
+gains are primarily attributed to two complementary stages. In the first Stage, LinearRAG identifies
+contextually relevant entities through semantic similarity propagation, uncovering the hidden logical
+relationships in multi-hop questions. In the second Stage, the model uses personalized PageRank
+algorithms on the activated subgraph to evaluate document importance from a global perspective.
+These two modules serve different but complementary purposes, allowing LinearRAG to achieve
+both effective and efficient performance.
+
+5 CONCLUSION
+
+In this work, we introduce LinearRAG, a novel GraphRAG framework that simplifies graph con-
+struction by replacing costly and error-prone relation extraction with lightweight entity extraction.
+It creates a hierarchical graph encompassing entities, sentences, and passages. Upon this, Linear-
+RAG features a two-stage retrieval mechanism that advances the precision-recall Pareto frontier by
+jointly leveraging both local and global structural information. Extensive experiments demonstrate
+that LinearRAG consistently surpasses state-of-the-art baselines in retrieval precision, generation
+accuracy, and scalability, offering a robust and efficient solution for handling complex queries.
+
+
+ETHICS STATEMENT
+
+The first three datasets used in the experiments including HotpotQA, 2WikiMultiHopQA and
+MuSiQue are widely used datasets. The medical benchmark dataset is built from public resources.
+Our research strictly adheres to the ICLR Code of Ethics, particularly regarding data privacy, trans-
+parency, and responsible computing practices. And there is no participant involved.
+
+REPRODUCIBILITY STATEMENT
+
+We provide detailed information required to reproduce the main experimental results of the paper,
+including data splits and hyperparameter configurations. Additionally, for each experiment, we out-
+line the required computational resources, such as memory usage and execution time. All baseline
+models are sourced from public repositories. Our code and dataset are made available.
+
+REFERENCES
+
+Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi. Self-rag: Learning to
+retrieve, generate, and critique through self-reflection. 2024.
+
+Jiaxin Bai, Wei Fan, Qi Hu, Qing Zong, Chunyang Li, Hong Ting Tsang, Hongyu Luo, Yauwai Yim,
+Haoyu Huang, Xiao Zhou, et al. Autoschemakg: Autonomous knowledge graph construction
+through dynamic schema induction from web-scale corpora. arXiv preprint arXiv:2505.23628,
+2025.
+
+Sebastian Borgeaud, Arthur Mensch, Jordan Hoffmann, Trevor Cai, Eliza Rutherford, Katie Milli-
+can, George Bm Van Den Driessche, Jean-Baptiste Lespiau, Bogdan Damoc, Aidan Clark, et al.
+Improving language models by retrieving from trillions of tokens. In International Conference on
+Machine Learning (ICML), 2022.
+
+Shengyuan Chen, Qinggang Zhang, Junnan Dong, Wen Hua, Jiannong Cao, and Xiao Huang.
+Neuro-symbolic entity alignment via variational inference. arXiv preprint arXiv:2410.04153,
+2024a.
+
+Shengyuan Chen, Qinggang Zhang, Junnan Dong, Wen Hua, Qing Li, and Xiao Huang. Entity
+alignment with noisy annotations from large language models. arXiv preprint arXiv:2405.16806,
+2024b.
+
+Shengyuan Chen, Chuang Zhou, Zheng Yuan, Qinggang Zhang, Zeyang Cui, Hao Chen, Yilin Xiao,
+Jiannong Cao, and Xiao Huang. You don’t need pre-built graphs for rag: Retrieval augmented
+generation with adaptive reasoning structures. arXiv preprint arXiv:2508.06105, 2025.
+
+Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha
+Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. The llama 3 herd of models.
+arXiv e-prints, pp. arXiv—2407, 2024.
+
+Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt,
+and Jonathan Larson. From local to global: A graph rag approach to query-focused summariza-
+tion. arXiv preprint arXiv:2404. 16130, 2024.
+
+Junfeng Fang, Houcheng Jiang, Kun Wang, Yunshan Ma, Shi Jie, Xiang Wang, Xiangnan He, and
+Tat-Seng Chua. Alphaedit: Null-space constrained knowledge editing for language models. arXiv
+preprint arXiv:2410.02355, 2024.
+
+Junfeng Fang, Yukai Wang, Ruipeng Wang, Zijun Yao, Kun Wang, An Zhang, Xiang Wang, and
+Tat-Seng Chua. Safemlrm: Demystifying safety in multi-modal large reasoning models. arXiv
+preprint arXiv:2504.08813, 2025.
+
+Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia, Jinliu Pan, Yuxi Bi, Yi Dai, Jiawei Sun, and
+
+Haofen Wang. Retrieval-augmented generation for large language models: A survey. arXiv
+preprint arXiv:2312.10997, 2023.
+
+10
+
+
+Zirui Guo, Lianghao Xia, Yanhua Yu, Tu Ao, and Chao Huang. Lightrag: Simple and fast retrieval-
+augmented generation. arXiv preprint arXiv:2410.05779, 2024.
+
+Bernal Jiménez Gutiérrez, Yiheng Shu, Yu Gu, Michihiro Yasunaga, and Yu Su. Hipporag: Neu-
+robiologically inspired long-term memory for large language models. In Advances in Neural
+Information Processing Systems (NeurIPS), 2024.
+
+Bernal Jiménez Gutiérrez, Yiheng Shu, Weijian Qi, Sizhe Zhou, and Yu Su. From rag to memory:
+Non-parametric continual learning for large language models. arXiv preprint arXiv:2502.14802,
+2025.
+
+Haoyu Han, Yu Wang, Harry Shomer, Kai Guo, Jiayuan Ding, Yongjia Lei, Mahantesh Halap-
+panavar, Ryan A Rossi, Subhabrata Mukherjee, Xianfeng Tang, et al. Retrieval-augmented gen-
+eration with graphs (graphrag). arXiv preprint arXiv:2501.00309, 2024.
+
+Haoyu Han, Harry Shomer, Yu Wang, Yongjia Lei, Kai Guo, Zhigang Hua, Bo Long, Hui Liu,
+and Jiliang Tang. Rag vs. graphrag: A systematic evaluation and key insights. arXiv preprint
+arXiv:2502.11371, 2025.
+
+Xiaoxin He, Yijun Tian, Yifei Sun, Nitesh V Chawla, Thomas Laurent, Yann LeCun, Xavier Bres-
+son, and Bryan Hooi. G-retriever: Retrieval-augmented generation for textual graph understand-
+ing and question answering. arXiv preprint arXiv:2402.07630, 2024.
+
+Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara, and Akiko Aizawa. Constructing a multi-hop
+qa dataset for comprehensive evaluation of reasoning steps. arXiv preprint arXiv:2011.01060,
+2020.
+
+Zijin Hong, Zheng Yuan, Qinggang Zhang, Hao Chen, Junnan Dong, Feiran Huang, and Xiao
+Huang. Next-generation database interfaces: A survey of Ilm-based text-to-sql. arXiv preprint
+arXiv:2406.08426, 2024.
+
+Matthew Honnibal, Ines Montani, Sofie Van Landeghem, Adriane Boyd, et al. spacy: Industrial-
+strength natural language processing in python. 2020.
+
+Gautier Izacard, Patrick Lewis, Maria Lomeli, Lucas Hosseini, Fabio Petroni, Timo Schick, Jane
+Dwivedi-Yu, Armand Joulin, Sebastian Riedel, and Edouard Grave. Atlas: Few-shot learning
+with retrieval augmented language models. The Journal of Machine Learning Research (JMLR),
+2023.
+
+Houcheng Jiang, Junfeng Fang, Ningyu Zhang, Guojun Ma, Mingyang Wan, Xiang Wang, Xiangnan
+He, and Tat-seng Chua. Anyedit: Edit any knowledge encoded in language models. ICML, 2025.
+
+Zhengbao Jiang, Frank F Xu, Luyu Gao, Zhiging Sun, Qian Liu, Jane Dwivedi-Yu, Yiming Yang,
+Jamie Callan, and Graham Neubig. Active retrieval augmented generation. In Empirical Methods
+in Natural Language Processing (EMNLP), 2023.
+
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal,
+Heinrich Kiittler, Mike Lewis, Wen-tau Yih, Tim Rocktaschel, et al. Retrieval-augmented gener-
+ation for knowledge-intensive nlp tasks. In Advances in Neural Information Processing Systems
+(NeurIPS), 2020.
+
+Lei Liang, Mengshu Sun, Zhengke Gui, Zhongshu Zhu, Zhouyu Jiang, Ling Zhong, Yuan Qu, Pei-
+long Zhao, Zhongpu Bo, Jin Yang, et al. Kag: Boosting Ilms in professional domains via knowl-
+edge augmented generation. arXiv preprint arXiv:2409. 13731, 2024.
+
+Zirui Liu, Chen Shengyuan, Kaixiong Zhou, Daochen Zha, Xiao Huang, and Xia Hu. Rsc: accelerate
+graph neural networks training via randomized sparse computations. In International Conference
+on Machine Learning, pp. 21951-21968. PMLR, 2023.
+
+LINHAO LUO, Yuan-Fang Li, Reza Haf, and Shirui Pan. Reasoning on graphs: Faithful and inter-
+pretable large language model reasoning. In The Twelfth International Conference on Learning
+Representations, 2024.
+
+11
+
+
+Linhao Luo, Zicheng Zhao, Gholamreza Haffari, Dinh Phung, Chen Gong, and Shirui Pan. Gfm-rag:
+graph foundation model for retrieval augmented generation. arXiv preprint arXiv:2502.01113,
+2025.
+
+OpenAI. Gpt-4 technical report. OpenAI Blog, 2023.
+
+Tyler Thomas Procko and Omar Ochoa. Graph retrieval-augmented generation for large language
+models: A survey. In Conference on AI, Science, Engineering, and Technology (AIxSET), 2024.
+
+Meng Qu and Jian Tang. Probabilistic logic neural networks for reasoning. In Advances in Neural
+Information Processing Systems (NeurIPS), pp. 7710-7720, Vancouver, Canada, 2019.
+
+Parth Sarthi, Salman Abdullah, Aditi Tuli, Shubh Khanna, Anna Goldie, and Christopher D. Man-
+ning. Raptor: Recursive abstractive processing for tree-organized retrieval. In International
+Conference on Learning Representations (ICLR), 2024.
+
+Kartik Sharma, Peeyush Kumar, and Yunqing Li. Og-rag: Ontology-grounded retrieval-augmented
+generation for large language models. arXiv preprint arXiv:2412.15235, 2024.
+
+Chen Shengyuan, Yunfeng Cai, Huang Fang, Xiao Huang, and Mingming Sun. Differentiable neuro-
+symbolic reasoning on large-scale knowledge graphs. Advances in Neural Information Processing
+Systems, 36, 2024.
+
+Kaitao Song, Xu Tan, Tao Qin, Jianfeng Lu, and Tie-Yan Liu. Mpnet: Masked and permuted pre-
+training for language understanding. Advances in neural information processing systems, 33:
+16857-16867, 2020.
+
+Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo Wang, Chen Lin, Yeyun Gong, Lionel Ni,
+Heung-Yeung Shum, and Jian Guo. Think-on-graph: Deep and responsible reasoning of large
+language model on knowledge graph. In International Conference on Learning Representations
+(ICLR), 2024.
+
+Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. Musique: Multi-
+hop questions via single-hop question composition. Transactions of the Association for Compu-
+tational Linguistics, 10:539-554, 2022.
+
+Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Ma-
+jumder, and Furu Wei. Text embeddings by weakly-supervised contrastive pre-training. arXiv
+preprint arXiv:2212.03533, 2022.
+
+Shu Wang, Yixiang Fang, Yingli Zhou, Xilin Liu, and Yuchi Ma. Archrag: Attributed community-
+based hierarchical retrieval-augmented generation. arXiv preprint arXiv:2502.09891, 2025.
+
+Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou. Minilm: Deep self-
+attention distillation for task-agnostic compression of pre-trained transformers. Advances in neu-
+ral information processing systems, 33:5776-5788, 2020.
+
+Yu Wang, Nedim Lipka, Ryan A Rossi, Alexa Siu, Ruiyi Zhang, and Tyler Derr. Knowledge
+graph prompting for multi-document question answering. In Conference on Artificial Intelligence
+(AAAT), 2024.
+
+Zhishang Xiang, Chuanjie Wu, Qinggang Zhang, Shengyuan Chen, Zijin Hong, Xiao Huang, and
+Jinsong Su. When to use graphs in rag: A comprehensive analysis for graph retrieval-augmented
+generation. arXiv preprint arXiv:2506.05690, 2025.
+
+Shitao Xiao, Zheng Liu, Peitian Zhang, and Niklas Muennighoff. C-pack: Packaged resources to
+advance general chinese embedding, 2023.
+
+Yilin Xiao, Junnan Dong, Chuang Zhou, Su Dong, Qian wen Zhang, Di Yin, Xing Sun, and Xiao
+Huang. Graphrag-bench: Challenging domain-specific reasoning for evaluating graph retrieval-
+
+augmented generation, 2025a. URL https: //arxiv.org/abs/2506.02404
+
+Yilin Xiao, Chuang Zhou, Qinggang Zhang, Su Dong, Shengyuan Chen, and Xiao Huang. Lag:
+Logic-augmented generation from a cartesian perspective. arXiv preprint arXiv:2508.05509,
+2025b.
+
+12
+
+
+Yilin Xiao, Chuang Zhou, Qinggang Zhang, Bo Li, Qing Li, and Xiao Huang. Reliable reason-
+ing path: Distilling effective guidance for Ilm reasoning with knowledge graphs, 2025c. URL
+
+https://arxiv.org/abs/2506.10508
+
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William W Cohen, Ruslan Salakhutdinov,
+and Christopher D Manning. Hotpotqa: A dataset for diverse, explainable multi-hop question
+answering. In Empirical Methods in Natural Language Processing (EMNLP), 2018.
+
+Wenhao Yu, Hongming Zhang, Xiaoman Pan, Peixin Cao, Kaixin Ma, Jian Li, Hongwei Wang, and
+Dong Yu. Chain-of-note: Enhancing robustness in retrieval-augmented language models. In Yaser
+Al-Onaizan, Mohit Bansal, and Yun-Nung Chen (eds.), Proceedings of the 2024 Conference on
+Empirical Methods in Natural Language Processing, pp. 14672-14685, November 2024.
+
+Zheng Yuan, Hao Chen, Zijin Hong, Qinggang Zhang, Feiran Huang, Qing Li, and Xiao Huang.
+Knapsack optimization-based schema linking for llm-based text-to-sql generation. arXiv preprint
+arXiv:2502.12911, 2025.
+
+Fangyuan Zhang, Zhengjun Huang, Yingli Zhou, Qintian Guo, Zhixun Li, Wensheng Luo, Di Jiang,
+Yixiang Fang, and Xiaofang Zhou. Erarag: Efficient and incremental retrieval augmented gener-
+ation for growing corpora. arXiv preprint arXiv:2506.20963, 2025a.
+
+Qinggang Zhang, Junnan Dong, Hao Chen, Daochen Zha, Zailiang Yu, and Xiao Huang. Knowgpt:
+Knowledge graph based prompting for large language models. In Advances in Neural Information
+Processing Systems (NeurIPS), 2024.
+
+Qinggang Zhang, Shengyuan Chen, Yuanchen Bei, Zheng Yuan, Huachi Zhou, Zijin Hong, Junnan
+Dong, Hao Chen, Yi Chang, and Xiao Huang. A survey of graph retrieval-augmented generation
+for customized large language models. arXiv preprint arXiv:2501.13958, 2025b.
+
+Qinggang Zhang, Zhishang Xiang, Yilin Xiao, Le Wang, Junhui Li, Xinrun Wang, and Jinsong
+Su. Faithfulrag: Fact-level conflict modeling for context-faithful retrieval-augmented generation.
+arXiv preprint arXiv:2506.08938, 2025c.
+
+Yibo Zhao, Jiapeng Zhu, Ye Guo, Kangkang He, and Xiang Li. E* 2graphrag: Streamlining graph-
+based rag for high efficiency and effectiveness. arXiv preprint arXiv:2505.24226, 2025.
+
+Baolin Zheng, Guanlin Chen, Hongqiong Zhong, Qingyang Teng, Yingshui Tan, Zhendong Liu,
+Weixun Wang, Jiaheng Liu, Jian Yang, Huiyun Jing, et al. Usb: A comprehensive and
+unified safety evaluation benchmark for multimodal large language models. arXiv preprint
+arXiv:2505.23793, 2025.
+
+Qihuang Zhong, Haiyun Li, Luyao Zhuang, Juhua Liu, and Bo Du. Iterative data generation with
+large language models for aspect-based sentiment analysis. arXiv preprint arXiv:2407.00341,
+2024.
+
+Chuang Zhou, Zhu Wang, Shengyuan Chen, Jiahe Du, Qiyuan Zheng, Zhaozhuo Xu, and Xiao
+Huang. Taming language models for text-attributed graph learning with decoupled aggrega-
+tion. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar
+(eds.), Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics
+(Volume 1: Long Papers), pp. 3463-3474, Vienna, Austria, July 2025a. Association for Com-
+putational Linguistics. ISBN 979-8-89176-251-0. doi: 10.18653/v1/2025.acl-long.173. URL
+
+https://aclanthology.org/2025.acl-long.173
+Yingli Zhou, Yaodong Su, Youran Sun, Shu Wang, Taotao Wang, Runyuan He, Yongwei Zhang,
+
+Sicong Liang, Xilin Liu, Yuchi Ma, et al. In-depth analysis of graph-based rag in a unified
+framework. arXiv preprint arXiv:2503.04338, 2025b.
+
+Luyao Zhuang, Qinggang Zhang, Huachi Zhou, Juhua Liu, Qing Li, and Xiao Huang. Losemb:
+Logic-guided semantic bridging for inductive tool retrieval. arXiv preprint arXiv:2508.07690,
+2025.
+
+13
+
+
+A DATASETS
+
+Our experimental evaluation is conducted on four datasets: three established multi-hop benchmark
+
+datasets for multi-hop question answering—HotpotQA (Yang et al.}!2018), MuSiQue (Trivedi et al.
+2022), and 2WikiMultiHopQA (2 Wiki) 2020)—and one domain-specific dataset. Below,
+we provide a concise overview of each dataset’s key characteristics.
+
+(i) HotpotQA (Yang et al.||2018): A comprehensive benchmark comprising 97k question-answer
+
+instances designed to evaluate multi-hop reasoning capabilities. Each question requires models to
+synthesize information from multiple documents, with up to 2 gold-standard supporting passages
+provided alongside numerous irrelevant documents. This structure challenges systems to perform
+effective cross-document inference and evidence selection.
+
+(ii) 2WikiMultiHopQA (2Wiki) (Ho et al.}/2020): A multi-hop reasoning benchmark containing
+192k questions that necessitate information integration across multiple Wikipedia articles. Each
+instance requires evidence synthesis from either 2 or 4 specific articles, testing models’ ability to
+perform structured cross-document reasoning and maintain coherent information flow.
+
+(iii) MuSiQue (Trivedi et al.|/2022): A sophisticated multi-hop QA benchmark featuring 25k
+question-answer pairs that demand 2-4 sequential reasoning steps. Each question requires coherent
+multi-step logical inference across multiple documents, challenging systems to execute structured
+reasoning chains while preserving contextual consistency throughout the inference process.
+
+(iv) Medical: A specialized subset derived from GraphRAG-Bench (Xiang et al.\|2025), constructed
+from structured clinical data sourced from the National Comprehensive Cancer Network (NCCN)
+
+guidelines. These guidelines provide standardized treatment protocols, drug interaction hierarchies,
+and diagnostic criteria. The dataset encompasses four tasks of increasing complexity: fact retrieval,
+complex reasoning, contextual summarization, and creative generation, totaling 4,076 questions
+across all difficulty levels.
+
+B’- BASELINE DETAILS
+
+In our experiments, we compare our method against several widely used GraphRAG approaches.
+
+(i) KGP (Wang et al.||2024) builds a knowledge graph over multiple passages with LLMs; at retrieval
+stage, it introduces an LLM-driven graph traversal agent to navigate the graph and progressively
+
+collect supporting passage.
+
+(ii) G-Retriever 2024) combines graph neural networks with LLMs by formulating sub-
+graph retrieval as a Prize-Collecting Steiner Tree optimization problem, enabling effective conversa-
+tional question answering on textual graphs while mitigating hallucination and enhancing scalability.
+
+(iii) RAPTOR (Sarthi et al.\/2024) develops a hierarchical tree by applying clustering algorithms and
+abstractive summarization techniques, facilitating representation at multiple semantic granularities.
+
+(iv) E?GraphRAG (Zhao et al. uses spaCy to extract entities and LLMs to summarize pas-
+sage groups into a hierarchical tree with encoded nodes at indexing stage; at retrieval stage, it hits rel-
+evant entities in k-hop neighborhood and collects associated passages for ranking, otherwise dense
+retrieval over the whole tree.
+
+(v) LightRAG 2024) employs a two-tier framework that incorporates graph-based rep-
+resentations within textual indexing, merging fine-grained entity-relation mappings with coarse-
+
+grained thematic structures.
+
+(vi) HippoRAG 2024) is a training-free graph-enhanced retriever that uses the
+
+Personalized PageRank algorithm with query concepts as seeds for single-step or multi-hop retrieval
+across disparate documents.
+
+(vii) GFM-RAG 2025) implements a GraphRAG paradigm by constructing graphs from
+documents and using a graph-enhanced retriever to retrieve relevant documents.
+
+(viii) HippoRAG2 2025) extends HippoRAG with enhanced paragraph integration
+
+and contextualization. Optimizes seed node selection and PageRank reset probabilities while main-
+
+14
+
+
+taining factual memory capabilities and improving associative memory performance. improving
+associative memory performance.
+
+C MACHINE CONFIGURATION
+
+All experiments in this study were conducted on the hardware configuration detailed in Table]
+
+Table 3: Detailed machine configuration used in our experiments.
+
+Component Specification
+GPU NVIDIA GeForce RTX 4090 D (24GB VRAM)
+CPU Intel(R) Xeon(R) Gold 6426Y
+
+D_ EFFICIENCY ANALYSIS OF GRAPH CONSTRUCTION: ALL-STAGE LINEAR
+SCALABILITY
+
+We present the efficiency analysis of LinearRAG and demonstrate that it achieves linear scalability
+in both runtime and memory consumption during graph construction and retrieval, thereby ensuring
+all-stage linear scalability. Detailed analysis is provided below.
+
+Graph construction stage involves lightweight operations such as sentence segmentation and
+named entity recognition over the corpus. The resulting computational complexity is O(|P| - T),
+where T’ denotes the average length of each passage. Notably, this stage incurs no LLM token con-
+sumption. Regarding memory usage, the first data structures to be stored are the embeddings of
+passages, nodes, and sentences, all of which scale linearly with the corpus size, i.e., O(|P| -T’). The
+second set of data structures includes two adjacency matrices, M/ and C, stored in sparse format by
+leveraging the inherent sparsity (each sentence contains at most ~ 4 entities, and each passage at
+most ~ 10 entities). Thus, memory consumption is O(|P| + |S|), which simplifies to O(|P]|) since
+the number of sentences is proportional to the number of passages. Therefore, the overall memory
+complexity is O(|P|- 7’ + |P|) = O(|P|- T), i-e., linear with respect to corpus size.
+
+Retrieval stage involves similarity computations, semantic propagation using SpMM (sparse ma-
+trix multiplication), and Personalized PageRank (PPR) iterations. Each propagation step requires
+O(nnz) time, where nnz is the number of non-zero entries in the sparse matrices (O(|S])), and PPR
+on the bipartite graph is computable in linear time with respect to the number of edges (O(|P])).
+Overall, the computational complexity is O(|P|). Memory consumption primarily arises from
+loading sparse graph structures, activation vectors (of size O(|E| + |S| + |P|)), and temporary
+query-specific computations.
+
+Acceleration with parallel computation. The above analysis confirms the linear scalability of Lin-
+earRAG in both graph construction and retrieval. Additionally, due to the vectorized formulation
+of the graph structures, all data manipulations can be efficiently accelerated through parallel com-
+putation, further boosting performance in both stages. This is empirically verified in our efficiency
+
+experiments in section|4.3|and appendix[E.4]
+
+E ADDITIONAL EXPERIMENTS
+
+E.1 RETRIEVAL QUALITY EVALUATION (Q4)
+
+To provide a more comprehensive assessment beyond generation performance, we adopt the settings
+from GraphRAG-Bench and utilize four tasks of increasing difficulty: Fact Retrieval, Complex Rea-
+soning, Contextual Summarization, and Creative Generation. The comparison is conducted on the
+Medical dataset, same as GraphRAG-Bench. The results comparing LinearRAG with representative
+GraphRAG methods are presented in Table[4]and we have the following observations.
+
+Obs. 8. GraphRAG models demonstrate significant improvements in recall metrics compared
+to RAG baselines, particularly in creative generation tasks, but fall behind in relevance met-
+
+15
+
+
+Table 4: Retrieval quality evaluation results (%) of different baselines across four different
+question categories. The table compares recall and relevance metrics for fact retrieval, complex
+reasoning, contextual understanding, and creative generation tasks. The best results are highlighted
+in bold, and second-best results are underlined.
+
+Method Fact Retrieval Complex Reasoning Contextual Creative Generation
+
+Recall Relevance Recall Relevance Recall Relevance Recall Relevance
+Vanilla RAG (Top-5) 86.24 63.71 84.97 84.11 84.14 89.94 44.88 58.73
+
+RAPTOR 85.40 69.38 89.70 53.20 88.86 58.73 72.70 52.71
+E’GraphRAG 87.84 69.74 87.08 62.67 89.17 71.63 60.26 35.84
+LightRAG 80.32 41.27 82.91 42.79 85.71 43.11 81.34 45.17
+HippoRAG 87.25 52.44 83.80 42.19 83.46 49.13 81.66 45.03
+GFM-RAG 90.08 57.90 85.03 33.06 78.62 40.14 83.51 22.87
+
+LinearRAG (Ours) 88.86 86.09 87.03 81.58 89.13 87.89 89.08 72.74
+
+rics. We infer that the reasons are twofold. On the one hand, for simpler tasks such as fact retrieval,
+models are not required to analyze reasoning chains to recall all the necessary supporting facts.
+Direct semantic retrieval is enough, reducing the risk of retrieving irrelevant or redundant informa-
+tion during graph traversal. On the other hand, for more complex tasks such as creative generation,
+the model needs continuous documents with strong logical dependencies to produce satisfactory out-
+puts. RAG struggles to capture such complex relationships due to underlying graph structure of gold
+answers. Specifically, GFM-RAG improves recall from 44.88% to 83.51% in creative generation,
+but relevance drops from 58.73% to 22.87%.
+
+Obs. 9. LinearRAG demonstrates tremendous performance improvements over GraphRAG
+models in relevance metrics, owning the advantages of both high recall and strong relevance.
+It is challenging to improve recall and relevance simultaneously because increasing recall often
+introduces more irrelevant documents, lowering relevance, while increasing relevance usually misses
+relevant results and lowering recall. LinearRAG achieves the best performance across four tasks
+in recall while achieves better than RAG in relevance metrics in most cases. We infer that the
+reason lies in our construction of a high-quality graph with minimal redundant connections, ensuring
+that irrelevant documents are not retrieved. Specifically, in complex reasoning tasks, LinearRAG
+achieves 87.03% recall and 81.58% relevance, significantly outperforming GFM-RAG’s 85.03%
+recall but only 33.06% relevance, demonstrating LinearRAG’s ability to maintain high precision
+while preserving comprehensive information coverage.
+
+E.2. HYPER-PARAMETER SENSITIVITY (Q5)
+
+We conduct ablation studies to in-
+vestigate the impact of key hyperpa-
+rameters in LinearRAG. All experi-
+ments are evaluated using the average — ss» 66%
+scores of of GPT-Acc. and Contain-
+Acc. on 2WikiMultiHopQA. S% 64% 4
+
+Obs. 10. Impact of threshold 6. «4»
+
+The threshold 6 determines whether 020 (04068 ae a rT
+an entity’s score 18 retained during —(q) The impact of threshold 5. _ (b) The impact of coefficient 2.
+dynamic pruning and whether to con-
+
+tinue expansion. As shown in Fig- Figure 5: Parameter analysis of LinearRAG performance in
+ure [Sal when 6 is too small, it intro- the 2WikiMultiHopQA dataset. (a) shows the dependency of
+duces excessive noise and reduces ef- LinearRAG performance on threshold 6 in dynamic pruning. (b)
+ficiency in the retrieval stage. How- examines the effect of trade-off coefficient A.
+
+ever, when 6 is too large, it prevents
+
+the incorporation of more relevant entities, limiting the model’s ability to capture comprehensive
+contextual information. Therefore, selecting an appropriate value for 6 is crucial for balancing re-
+trieval quality and computational efficiency. And, we set 6 = 4 based on our experimental setting.
+
+67% 68 %
+
+16
+
+
+Table 5: Comparison of different sentence embedding models used in LinearRAG. The best
+results are highlighted in bold.
+
+Model HotpotQA 2Wiki MuSiQue Medical
+Contain-Acc. GPT-Acc. Contain-Acc. GPT-Acc. Contain-Acc. GPT-Acc. GPT-Acc.
+all-mpnet-base-v2 64.30 66.50 70.20 63.70 33.90 37.00 63.72
+all-MiniLM-L6-v2 64.20 64.90 69.50 62.60 32.80 36.90 62.32
+bge-large-en-v1.5 66.20 67.60 69.80 63.90 31.80 35.20 64.45
+e5-large-v2 66.80 68.30 69.90 63.10 31.70 36.50 65.42
+
+Table 6: Indexing efficiency comparison of GraphRAG methods on large-scale ATLAS-Wiki
+corpus. Results are evaluated on ATLAS-Wiki subsets of 5M and 10M tokens. Notaly, prompt
+tokens represent input to LLM, and completion tokens represent LLM output.
+
+Token Consumption (x 10°)
+
+Dataset Method Indexing Time (s)
+Prompt Completion
+RAPTOR 18033.75 7.43 0.96
+5M HippoRAG 6032.46 13.94 3.68
+LinearRAG (Ours) 1409.95 0 0
+RAPTOR 46430.96 16.62 2.82
+10M HippoRAG 13815 28.04 V3
+LinearRAG (Ours) 3084.38 0 0
+
+Obs. 11. Impact of trade-off coefficient 1. The parameter 4 controls the balance between DPR-
+based passage similarity and entity-level information during passage initial scoring. As observed
+in Figure [5b] optimal performance is achieved when ) takes a relatively small value (e.g., 0.05),
+ndicating that entity information serves as the primary component while DPR similarity score acts
+as an auxiliary enhancement.
+
+E.3. EFFECTIVENESS OF DIFFERENT SENTENCE EMBEDDINGS (Q6)
+
+In this section, we study the effectiveness of different sentence embeddings in the LinearRAG. We
+compare the all-mpnet-base-v2 (Song et al.|{2020), bge-large-en 2023), all-MiniLM-
+
+L6-v2 2020) and e5-large-v2 (Wang et al.|[2022). We download the official pre-trained
+model from the Huggingface2.
+
+Obs. 12. Based on the findings presented in Table [5] we observe that performance variations across
+different sentence embedding models remain relatively modest, with all-mpnet-base-v2 demonstrat-
+ing superior results on the majority of datasets. This suggests that LinearRAG exhibits robustness
+to the selection of sentence embedding models. Consequently, we adopt all-mpnet-v2 as our default
+embedding models in all experiments due to its computational efficiency.
+
+E.4. LARGE-SCALE EFFICIENCY ANALYSIS (Q7)
+
+To evaluate the scalability and effectiveness of LinearRAG on large corpora, we conduct compre-
+hensive efficiency analysis using the ATLAS-Wiki dataset 2025). We create two subsets
+containing 5M and 10M tokens respectively for indexing phase evaluation, as shown in Table [6]
+
+Obs. 13. The results demonstrate that LinearRAG achieves significant efficiency advantages over
+typical GraphRAG methods. Specifically, LinearRAG eliminates token consumption entirely (0
+prompt and completion tokens) while achieving 12.8x and 15.1x speedup compared to RAPTOR on
+5M and 10M datasets respectively. This zero-cost indexing approach makes LinearRAG particularly
+suitable for large-scale enterprise deployments without API dependencies.
+
+17
+
+
+Table 7: Case study of LinearRAG. LinearRAG successfully captures implicit relationships with-
+out requiring explicit relation extraction, enabling correct multi-hop reasoning.
+
+Question ”What nationality is Beatrice I, Countess Of Burgundy’s husband?”
+
+Ground Truth Germany
+
+Support Context [Beatrice I, Countess of Burgundy” — ”spouse” — ’’Frederick Barbarossa]
+[Frederick Barbarossa” — ”country of citizenship” — ”Germany”]
+
+Hippo2RAG Retrieved context:
+1) ¥ “William Duncan (actor)”: ...frederick barbarossa was elected king of germany at frankfurt on 4
+march 1152...
+
+2) X “Dulce of Aragon”: ’Dulce of Aragon (or of Barcelona; ; 1160 2013 1 September...
+
+3) X “Gordon Flemyng”: Gordon William Flemyng( 7 March 1934 2013 12 July 1995) was a...
+4) X “Marian Hillar”: Marian Hillar is an American philosopher, theologian, linguis...
+
+5) X “Semi-Tough”: Semi-Tough is a 1977 American comedy film directed by Michael...
+Prediction:
+
+X French.
+
+LinearRAG Activated Entities:
+
+Tter 0-Entity: Beatrice I
+
+Tter 0-Sentence: Beatrice I (1143 2013 15 November 1184) was Countess of Burgundy from 1148 until
+her death, and was also Holy Roman Empress by marriage to Frederick Barbarossa.
+
+Tter 1-Entity: Frederick Barbarossa
+
+Tter 1-Sentence: Frederick Barbarossa was elected King of Germany at Frankfurt on 4 March 1152 and
+crowned in Aachen on 9 March 1152.
+
+Tter 2-Entity: Germany
+
+Retrieved context:
+
+1) ¥ “William Duncan (actor)”: ...he was elected king of germany at frankfurt on 4 march 1152...
+
+2) ¥ “Beatrice I, Countess of Burgundy”: ...holy roman empress by marriage to frederick barbarossa...
+3) X “Richilde, Countess of Hainaut”: Richilde, Countess of Mons and Hainaut( 2013 15 March 1086)...
+4) X “Sophie of Pomerania, Duchess of Pomerania”: Sophia of Pomerania- Stolp( 1435 2013 24...
+
+5) X “’D00e lire Drechlethan”: *D00e lire Drechlethanl00e ire of the Broad Faceis a...
+
+Prediction:
+
+v Germany.
+
+E.5 CASE STUDY (Q8)
+
+To clearly contrast typical GraphRAG baselines with our LinearRAG framework, we include a de-
+tailed case analysis in Table }7| comparing results from the strong baseline HippoRAG2 and our
+model on a multi-hop question from the 2WikiMultihopQA dataset.
+
+Obs. 14. The case demonstrates that HippoRAG2 fails to retrieve relevant evidence due to its
+dependence on explicitly pre-extracted relations (such as husband) that are missing in this context.
+In comparison, our LinearRAG method effectively captures implicit relationships through entity
+activation and contextual chaining, without dependence on pre-extracted relational tuples.
+
+F RELATED WORK
+
+Large language models are prone to hallucination (Fang et al.| Jiang et al.| [Fang et al.| et al.
+3 ~while RAG is
+a promising solution by grounding the reasoning process on contextual evidence from knowledge
+ever, real-world knowledge is often distributed across documents, organizing them effectively for
+answering complex questions has always been a challenging yet promising research topic in RAG.
+In the following, we discuss two major lines (®, ®) of graphRAG research that closely relate to
+our work, which construct explicit graphs for organizing external knowledge sources. Then discuss
+reasoning-enhanced RAG (®), which leverages LLM’s inherent reasoning ability for answering
+complex questions without explicitly structuring corpora.
+
+® Clustering-based hierarchy construction. One line of research employs clustering-based com-
+munity detection, a bottom-up method that applies algorithms like Louvain or Leiden to identify
+
+densely connected clusters of entities within the initial graph (Edge et al.| |2024 2024
+2024). By grouping related entities, it creates a hierarchical structure that abstracts
+
+passages into topic-based communities, reducing redundancy and offering a broader, macro-level
+view of the data. However, as an unsupervised technique, it is vulnerable to error propagation, where
+inaccuracies in entity relationships are amplified at higher levels of abstraction. Moreover, apply-
+
+18
+
+
+ing these clustering algorithms to large-scale graphs presents significant scalability issues, making
+real-time applications infeasible in practice.
+
+® Relation-extraction-based knowledge graph construction. This line of research
+adopts the idea of knowledge graphs to organize
+knowledge across different passages. The basic idea is to extract triples from each text chunk (pas-
+sage) as an atomic summarization of the knowledge within the passage. The triples are connected
+
+via entity alignment (Chen et al.||2024a\b), ultimately forming a unified knowledge graph, which
+
+directly carries structured knowledge and serves as the index of passages, where off-the-shelf graph
+reasoning algorithms (Shengyuan et al.| can be applied
+to perform reasoning (Sun et al.| 2024). However, due to context window limits,
+OpenlE on each passage is processed independently, so the generated triples may be inconsistent.
+Recent work mitigates this via top-down graph construction
+guided by a globally defined schema, but it relies on manual expert annotation to create and maintain
+the domain-specific schema, which is not only expensive, time-consuming, and does not generalize
+well across domains.
+
+® Reasoning-enhanced RAG. The key to answering complex questions in RAG is to effec-
+tively identify multiple distributed documents that support multihop logical dependencies. While
+GraphRAG methods explicitly construct graphs with human priors to organize corpora for efficient
+structured retrieval, reasoning-enhanced RAG directly leverages the inherent reasoning ability of
+LLMs to decompose complex queries into simpler subquestions that can be addressed by dense
+retrieval. LogicRAG and LAG formalize this idea by first
+decomposing a query into a set of subqueries, then constructing a directed acyclic graph based on the
+logical dependencies among them, and solving subproblems one by one by following the topologi-
+cal order. Similarly, Chain-of-Note (CoN) enhances RAG by generating sequential
+notes that break down complex queries into intermediate reasoning steps, retrieving relevant doc-
+uments for each step to build a coherent answer. Another approach, SelfRAG (Asai et al.| (2024),
+integrates self-reflection into the RAG process, where the LLM iteratively evaluates and refines sub-
+queries to ensure retrieved documents align with the logical flow of the reasoning process. These
+methods collectively highlight the potential of LLM-driven reasoning to improve retrieval efficiency
+and answer quality for complex, multihop queries.
+
+G THE USE OF LARGE LANGUAGE MODELS
+
+We employ LLMs primarily for writing polish, including correcting spelling errors, fixing gram-
+matical issues, and rewriting non-native expressions to improve clarity and fluency. And LLMs are
+used only for writing polishing of our manuscript and appendix. It does not generate research ideas,
+results, or claims. We ensure that all scientific contributions and implementations are original.
+
+19

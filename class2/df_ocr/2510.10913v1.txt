@@ -1,0 +1,1770 @@
+arXiv:2510.10913v1 [cs.CL] 13 Oct 2025
+
+ADVICE: Answer-Dependent Verbalized Confidence Estimation
+
+Ki Jung Seo, Sehun Lim, Taeuk Kim*
+Department of Computer Science, Hanyang University, Seoul, Republic of Korea
+{tjrlwjd1,sehun9081 , kimtaeuk}@hanyang.ac.kr
+
+Abstract
+
+Recent progress in large language models
+(LLMs) has enabled them to express their
+confidence in natural language, enhancing
+transparency and reliability. However, their
+confidence often exhibits overconfidence, the
+cause of which remains poorly understood.
+In this work, we conduct a detailed anal-
+ysis of the dynamics underlying verbalized
+confidence and identify answer-independence
+as a key factor, defined as the model’s fail-
+ure to condition confidence on its own an-
+swer. To address this, we propose ADVICE
+(Answer-Dependent VerbalIzed Confidence
+Estimation), a fine-tuning framework that fa-
+cilitates answer-grounded confidence estima-
+tion. Extensive experiments show that AD-
+VICE substantially improves confidence cali-
+bration while preserving task performance. Fur-
+ther analyses confirm that ADVICE strength-
+ens answer-groundedness, leading to more bal-
+anced and well-calibrated confidence distribu-
+tions. Our findings shed light on the origin of
+overconfidence and establish a framework for
+more trustworthy confidence verbalization.
+
+1 Introduction
+
+Recent advances in large language models (LLMs)
+have led to improvements in performance across
+diverse tasks (Grattafiori et al., 2024; OpenAI et al.,
+2024). Nonetheless, hallucination—the genera-
+tion of factually inaccurate or fabricated content—
+remains a persistent limitation (Ji et al., 2023), with
+some arguing that it is theoretically unavoidable
+(Xu et al., 2024; Kalai et al., 2025). This poses an
+obstacle to deploying LLMs, particularly in high-
+stakes domains such as law and healthcare (Jayaku-
+mar et al., 2023; Sakai and Lam, 2025).
+
+As a remedy, recent studies refine LLMs to pro-
+vide not only answers but also confidence estimates
+(Lin et al., 2022; Tian et al., 2023; Xiong et al.,
+
+“Corresponding author.
+
+After your answer, provide a confidence score.
+EP Question: From which country did Angola
+
+achieve independence in 1975?
+
+Answer: Portugal
+<correct answer> Gl Amswer-independent
+
+Confidence: 99 LLM
+
+After your answer, provide a confidence score.
+cay Question: Which American-born Sinclair won the
+Nobel Prize for Literature in 1930?
+
+Answer: Upton Sinclair
+
+<wrong answer> & Answer-independent
+
+Confidence: 100 LLM
+
+Figure 1: LLMs tend to verbalize their overconfidence
+irrespective of whether their answers are correct. We
+propose a fine-tuning method to mitigate this problem,
+achieving well-calibrated verbalized confidence.
+
+2024), aiming to manage the inherent incomplete-
+ness of LLMs rather than eliminate it entirely. In
+this sense, the estimated confidence is intended to
+approximate the likelihood of the corresponding
+answer being correct (Guo et al., 2017).! Well-
+calibrated models can thus express high assurance
+when confident and appropriately convey caution
+when uncertain, reinforcing their reliability.
+Confidence estimation in LLMs has been pur-
+sued through diverse directions, including post-hoc
+score extraction or prompting models to generate
+confidence scores directly. Among these methods,
+verbalized confidence, which requires LLMs to
+articulate confidence levels in natural language dur-
+ing generation, has attracted sustained attention for
+its universal applicability and user-friendly nature
+(Yang et al., 2025). However, its broader applica-
+tion is hindered by the well-known issue of over-
+
+‘Tn related work, the terms uncertainty and confidence
+are often used interchangeably. For clarification, we follow
+the definitions of Lin et al. (2024): uncertainty pertains only
+to the input (q), ie., p(-|q), while confidence concerns both
+the input and the corresponding answer (a), that is, p(-|q, a).
+
+
+confidence (Xiong et al., 2024; Groot and Valdene-
+gro Toro, 2024; Leng et al., 2025; Xu et al., 2025),
+namely the tendency to assign high confidence irre-
+spective of output quality (see Figure 1).
+
+In the literature, research on mitigating the over-
+confidence problem can be broadly categorized
+into three directions: prompting-based techniques,
+sampling-based methods such as self-consistency
+(Zhou et al., 2025), and fine-tuning (Li et al., 2025).
+Although such methods have contributed to im-
+proved calibration, their emphasis lies on how to
+mitigate overconfidence rather than why it arises,
+leaving its root causes largely unexplained.
+
+In this work, we first investigate the intermediate
+process through which LLMs estimate confidence,
+eliciting explicit verbalization and probing their
+inner workings. Specifically, we study how much
+the model relies on its own answer, since this prop-
+erty characterizes confidence and differentiates it
+from other measures of uncertainty (see Footnote
+1).? Our analysis reveals that answer generation
+and confidence verbalization seem to be internally
+decoupled, implying that this disjunction may un-
+derlie the poor calibration of verbalized confidence.
+
+To further study the role of answer-groundedness
+in verbalized confidence estimation, we introduce
+a novel fine-tuning method, ADVICE (Answer-
+Dependent Verbalized Confidence Estimation).
+ADVICE explicitly encourages the model to focus
+more on its answer when reporting its confidence,
+serving as a barometer for evaluating the answer’s
+influence. In experiments, we show that ADVICE
+achieves performance comparable to state-of-the-
+art sampling-based and fine-tuning methods, con-
+firming the importance of answer information in
+confidence estimation. Moreover, ADVICE offers
+several advantages: (1) strong generalization to out-
+of-distribution tasks, (2) balanced confidence score
+distributions, and (3) improved confidence expres-
+sion without compromising overall performance.
+
+In summary, we discover that LLMs tend to
+overlook their own answers when estimating con-
+fidence, which is counterintuitive. To address this,
+we introduce ADVICE, a fine-tuning method that
+improves confidence estimation with competitive
+performance and desirable properties.
+
+We further take inspiration from neuroscience (Navajas
+et al., 2016; Desender et al., 2021), where confidence estima-
+tion is framed as post-decisional evidence accumulation.
+
+2 Related Work
+
+Verbalized confidence Since Lin et al. (2022) in-
+troduced verbalized confidence estimation, numer-
+ous studies have explored its potential, highlight-
+ing its model-agnostic design, cost-effectiveness,
+and accessibility to model knowledge (Yang et al.,
+2025). In particular, a broad spectrum of work
+has sought to improve its calibration. As an ini-
+tial direction, post-hoc methods that do not require
+model modification—such as prompting-based and
+sampling-based ones (Zhao et al., 2024; Yang et al.,
+2025; Zhou et al., 2025)—have been proposed. On
+the other hand, several studies (Tian et al., 2023;
+Stangel et al., 2025; Li et al., 2025) adopt fine-
+tuning methods, specifically for the task of ques-
+tion answering (QA). However, prior studies have
+mainly centered on developing new methods for
+achieving quantitative improvements, with limited
+qualitative analysis of the underlying mechanisms
+behind verbalized confidence estimation. To fill
+this gap, we conduct an in-depth analysis of the
+inner workings of LLMs with respect to verbal-
+ized confidence estimation and propose a guided
+method based on these findings.
+
+LLM probing methods With the wide adoption
+of LLMs, understanding their inner workings has
+become crucial, leading to a surge of research on
+their mechanistic interpretability and explainabil-
+ity (Mohammadi et al., 2025). In particular, a line
+of work on controlling and analyzing the atten-
+tion mechanism, e.g., Attention Rollout, Atten-
+tion Flow, and Attention Knockout (Abnar and
+Zuidema, 2020; Geva et al., 2023), has gained in-
+terest. Meanwhile, gradient-based attribution meth-
+ods provide a more direct quantification of output
+sensitivity to input perturbations. Integrated Gra-
+dients (Sundararajan et al., 2017) attributes output
+importance to input tokens by integrating gradients
+along the path from a baseline to the input. In the
+following, we employ methods from both perspec-
+tives to probe the relationship between verbalized
+confidence estimation and the model’s answer.
+
+3 Claim: Verbalized Confidence is Nearly
+Answer-Independent
+
+By definition, verbalized confidence should mir-
+ror the model’s degree of belief in its generated
+answer. To verify whether this causal relation-
+ship actually holds between the two factors, we
+carry out two complementary evaluations: (1) an
+
+
+Training Dataset Construction ADVICE
+
+loss applied
+
+tresses
+
+Sampling
+
+L=A Lim
++AspLysp
+
+Training Dataset
+
+Correct answer Wrong answer
+
+XM
+
+Question: <Question>
+
+Answer:<Correct answer>
+
+Objective for ADVICE
+
++Amargin£Margin
+
+Correct answer Wrong answer
+
+Confidence
+distributions
+
+Els Pa
+Expected
+_____|_ confidence scores |
+
+Figure 2: The illustration of the ADVICE (Answer- Dependent VerbalIlzed Confidence Estimation) framework.
+
+empirical comparison of confidence distributions
+conditioned on the presence or absence of answer
+information, and (2) an attribution-based analysis.
+Taking the results from both directions together,
+we find—surprisingly and counterintuitively—that
+verbalized confidence is independent of the answer.
+
+3.1 Comparison of Confidence Distributions
+
+Let g € Q represent a question, and Ag indicates
+the set of all possible answer predictions for the
+given question.* C’ denotes the set of confidence
+expressions, such as @ (very low) to 9 (very high).4
+We empirically test whether verbalized confidence
+is independent of the answer content by specifying
+the following equation:
+Pu(C|q,a)* Pu(C|q) Vae€ Ag,
+
+where Pyy(C | -) represents the probability distri-
+bution over all possible confidence expressions
+computed by the model /.
+
+By the law of total probability, Pyy(C | q) can
+be expressed as a marginalization over all possible
+answers. We thus reformulate the right-hand side
+(RHS) of the above equation as follows:
+
+Pu(C | q)= 5 Pu(C | 4,4)Pu(a| @)
+ac Ag
+
+In practice, we approximate the summation by re-
+ducing the full set A, to A,—the set of up to 10
+answers generated by / under top-p sampling—to
+overcome computational constraints.
+
+3Note that A is a collection of model responses to a given
+question gq, including both factually correct and incorrect ones.
+
+“We assume the model verbalizes confidence in a discrete
+manner, using a limited set of numbers or words. See §5.
+
+7S 254 Gemma2-9b-it
+s Llama3.1-8b-Instruct
+£204
+
+7)
+
+c
+
+A 154
+
+>
+
+a
+
+= 107
+
+5
+
+oO
+
+ne}
+
+[e)
+
+[=
+
+a
+
+0.0
+
+0.2 0.4 0.6
+Jensen-Shannon Divergence
+
+Figure 3: Distributions of JSD values comparing confi-
+dence predictions with and without answers. The two
+distributions for both models are peaked around zero,
+implying limited use of answer information.
+
+Finally, we obtain the equation to be evaluated
+for each combination of g € Q anda € Ag:
+
+Pu(C |q,a)% SY) Pu(C | 4,a')Pu(a' | @)-
+alc A,
+
+That is, we compare (1) the confidence distribu-
+tion given a specific answer a as context against (2)
+the weighted sum of corresponding distributions,
+weighted by the probability of each possible answer
+a’. Numerically, the difference between the two
+distributions is measured using Jensen-Shannon
+Divergence (JSD) (Menéndez et al., 1997). Con-
+sequently, we compute >< |A,| JSD values on
+TriviaQA and visualize their overall distribution.
+In Figure 3, we observe that JSD values are
+largely concentrated near zero, following a power-
+law pattern. This suggests that the two distributions
+are nearly identical in most cases, indicating that
+the tested models (GEMMA-2-9B-IT and LLAMA-
+3.1-8B-INSTRUCT) are generally insensitive to
+
+
+le-9 le-9
+
+w
+C00
+°
+
+fon}
+pane:
+
+°
+8
+
+ok,
+
+CtoQ
+
+_
+
+S
+
+°
+°
+38
+
+tT &
+
+AtoQ
+
+a
+
+N
+
+Attention Rollout
+Attention Rollout
+
+ie
+CtoA
+
+fo)
+
+CtoQ AtoQ CtoA
+
+(a) GEMMA2-9B-IT (b) LLAMA3.1-8B-INSTRUCT
+
+Figure 4: Comparison of Attention Rollout scores on
+three attention directions: (1) Answer to Question, (2)
+Confidence to Question, and (3) Confidence to Answer.
+
+answer information during confidence estimation.
+
+3.2 Attribution-Based Analysis
+
+Although the previous finding is remarkable, it
+warrants further corroboration through additional
+evidence from alternative analytical perspectives.
+To this end, we employ two attribution methods—
+Attention Rollout and Integrated Gradients.
+
+Attention Rollout Attention Rollout (AR) (Ab-
+nar and Zuidema, 2020) is a method for quanti-
+fying the contribution of input tokens to model
+predictions by recursively aggregating attention
+weights across layers.> We use this to analyze how
+the components of the input prompt—the question
+(Q), answer (A), and verbalized confidence (C)—
+interact through attention inside the model. This
+analysis aims to show that attention from C' to A
+(C' — A), as quantified by its average AR score, is
+weaker than other attention flows (e.g., A > Q and
+C' — Q), suggesting that LLMs draw less informa-
+tion from the answer component when estimating
+confidence. From Figure 4, we verify that the AR
+score of C’ — A is lower than the reference cases,
+with statistical significance.
+
+Integrated Gradients While Attention Rollout
+captures attention-level interactions, Integrated
+Gradients (IG) provides a gradient-based view that
+enables qualitative analysis of how different input
+components contribute to verbalized confidence.
+Figure 9 in Appendix presents the attribution scores
+assigned to individual input tokens. We observe
+that answer tokens are consistently under-weighted
+compared to tokens in other parts—e.g., “user”
+and the BOS token.
+
+Summary Our empirical analysis confirms that
+the process of generating verbalized confidence
+
+>See Appendix A for the detailed algorithmic process.
+
+operates largely independently of cues from the
+answer component, contradicting its intended def-
+inition. As a result, we hypothesize that this phe-
+nomenon is a primary factor causing poor calibra-
+tion and overconfidence in verbalized confidence.
+
+4 ADVICE: Answer-Dependent
+Verbalized Confidence Estimation
+
+In this chapter, we present ADVICE, a lightweight
+training framework to address the observed issue
+by reinforcing answer-groundedness.
+
+4.1 Training Dataset
+
+We adopt TriviaQA (Joshi et al., 2017) as our train-
+ing dataset, which is an open-domain, free-form
+question answering benchmark. We begin by sam-
+pling 2,000 instances from the training split of the
+dataset. Subsequently, we retain only instances
+where the model generates the correct answer un-
+der greedy decoding. Since the goal of training
+is to guide the model to express assurance when
+generating correct answers and to report low confi-
+dence when producing incorrect ones, we prepare a
+pair consisting of a correct answer (Gcorrect) and an
+incorrect One (Gwrong) for each question q, forming
+a triplet (q, Gcorrect, wrong). The incorrect answer
+(Gwrong) is randomly sampled from the model’s re-
+sponses using stochastic decoding. Finally, as ver-
+balized confidence can appear in various formats
+as described in §5, we construct three variants for
+each instance to train a model capable of fluently
+expressing confidence in multiple forms.
+
+4.2 Training Objective
+
+We follow an intuitive design: we explicitly re-
+quest the model to condition its confidence on its
+generated answer, while maintaining its original
+performance on tasks outside confidence verbaliza-
+tion. Accordingly, we define three objectives for
+each triplet specified in $4.1:
+
+1
+Lim =
+
+S> —log P(x | xt),
+
+| correct |
+Lt € Acorrect
+
+Lisp = max(0, djsD _ Dysp (Peorest || Purong)),
+
+L£Margin = max(0, OMargin _ (Heomene _ Perenng) )
+
+Lim denotes the negative log-likelihood of the
+correct answer Qcorrect, added to preserve general
+task (e.g., QA) abilities as in Li et al. (2025). Ligp
+explicitly drives the model to learn contrasting con-
+fidence distributions (Peorrect and Pyrong) for the
+
+
+TriviaQA MMLU SciQ LogiQA
+Model Method
+ECE NCE BS AUROC ECE NCE BS AUROC ECE NCE BS AUROC ECE NCE BS AUROC
+
+Default 21.9 -21.8 25.3 52.7 21.0 -21.0 24.7 50.1 49 1.5 5.2 50.3 39.1 -39.0 40.4 50.9
+GEMMA2 Self-Consistency 28.2 -28.0 28.5 65.4 22.8 -214 25.9 57.6 3.7 -3.7 6.2 73.9 40.1 -40.1 42.1 47.9
+9B-IT ConfTuner 5.6 -1.6 13.7 84.0 10.2 -5.4 19.5 77.4 69 2.0 64 76.9 16.8 -15.8 22.6 72.9
+
+ADVICE (Ours) 65 1.6 164 78.5 91 45 19.5 68.5 12.7 12.3 7.6 78.5 11.5 -7.9 25.55 62.0
+
+Default 16.9 -16.6 21.2 56.2 26.9 -26.7 29.7 50.8 3.7 -2.1 8.2 52.0 53.8 -53.3 52.9 50.5
+LLAMA3.1 Self-Consistency 21.4 -20.6 26.3 548 27.6 -27.6 32.0 514 3.9 -39 8.3 74.6 46.4 -46.0 47.7 41.9
+8B INSTRUCT ConfTuner 5.2 1.1 15.3 663 13.9 -13.9 24.2 58.2 95 91 95 58.4 28.6 -28.2 32.55 544
+
+ADVICE (Ours) 12.1 8.5 17.7 76.2 174 -3.2 246 65.8 11.2 7.9 88 75.8 30.3 -20.2 34.6 59.5
+
+Default 32.8 -30.5 35.3 51.6 35.3 -35.0 37.0 51.5 10.3 -9.0 15.3 50.3 51.8 -50.9 51.3 52.1
+MISTRAL Self-Consistency 30.3 -28.3 31.5 664 35.3 -35.1 36.0 62.8 14.9 -144 169 66.8 45.0 -45.0 43.3 59.7
+7B INSTRUCT ConfTuner 10.1 -10.0 17.1 79.2 39.0 -39.0 37.2 69.7 11.2 -104 13.8 68.9 27.9 -27.9 24.3 62.5
+
+ADVICE (Ours) 16.9 -9.3 22.1 71.8 31.3 -25.9 33.9 57.7 7.7  -5.8 13.3 57.6 37.7 -28.0 39.9 58.2
+
+Table 1: Average performance over three verbalization types (Score{ Text, Letter, Number}), evaluated on in-
+distribution (TriviaQA) and out-of-distribution (MMLU, SciQ, LogiQA) datasets. Values are percentages. Best
+
+results are in bold—minimum for ECE and BS, absolute minimum for NCE, and maximum for AUROC.
+
+correct (Gcorrect) and wrong answers (Gwrong) given
+the same question g. However, £3sp provides no
+directional constraint, implying that it may still con-
+verge even if the model erroneously assigns greater
+confidence to incorrect answers while underestimat-
+ing correct ones. To resolve this, we apply C-Margin.
+formulated as the difference between the expected
+confidence assigned to correct answers (LUcorrect)
+and that assigned to incorrect ones (/4wrong). In ad-
+dition, we define hyperparameters 0 jsp and dMargin
+to modulate the extent to which the model distin-
+guishes between correct and incorrect answers.
+Finally, we define the total training objective:
+
+L= XML iM + Ajsp£3sp + AMargin£ Margin;
+
+where ALM; Ajsp, and AMargin are hyperparame-
+ters, all set to 1 for simplicity.
+
+5 Experimental Settings
+
+Models We employ three open-weight LLMs:
+LLAMA-3.1-8B-INSTRUCT (Grattafiori et al.,
+2024), MISTRAL-7B-INSTRUCT-VO.3 (Jiang et al.,
+2023), and GEMMA-2-9B-IT (Team et al., 2024).
+
+Datasets We conduct experiments across four
+open-ended QA datasets: TriviaQA (Joshi et al.,
+2017), SciQ (Welbl et al., 2017), MMLU
+(Hendrycks et al., 2021), and LogiQA (Liu et al.,
+2021). Notably, we train only on TriviaQA, en-
+abling evaluation of cross-dataset generalization.
+
+Confidence verbalization types Following Yang
+et al. (2025), we adopt five verbalization types:
+
+¢ ScoreText: categories ({ low, medium, high}).
+
+* ScoreLetter: letter grades ({E, D, C, B, A}).
+
+¢ ScoreNumber: integer scores ({9, 1,..., 9}).
+¢ ScoreFloat: floating-point values (@. 2-1. @).
+¢ ScorePercent: percentages ({9, 1,..., 100}).
+
+Confidence expressions are ordered in ascending
+magnitude, with later one denoting higher confi-
+dence. Details are provided in Appendix B.
+
+Baselines We also compare against several confi-
+dence estimation methods: Default, which refers
+to the naive use of LLMs with minimal prompts,
+Self-Consistency (Xiong et al., 2024), and Con-
+fTuner (Li et al., 2025). Self-Consistency rep-
+resents sampling-based approaches: it generates
+multiple verbalized confidence scores, which are
+then aggregated. Specifically, we select the Avg-
+Conf variant of the method, which computes the
+weighted sum of confidence scores and has been
+shown by Xiong et al. (2024) to outperform other
+configurations. Meanwhile, ConfTuner directly
+fine-tunes LLMs in a manner similar to our ap-
+proach, achieving state-of-the-art results across
+multiple benchmarks.
+
+Metrics We evaluate confidence calibration qual-
+
+ity with four metrics: Expected Calibration Error
+
+(ECE) (Pakdaman Naeini et al., 2015), Net Cali-
+
+bration Error (NCE) (Groot and Valdenegro Toro,
+
+2024), Brier score (BS) (Brier, 1950), and Area Un-
+
+der the ROC Curve (AUROC) (Boyd et al., 2013).
+Formally, ECE is defined as follows:
+
+M
+ECE — S- Pol gce(Br) — conf(B,,)|,
+
+fiatk
+
+where M denotes the number of bins, N the total
+number of samples, B,,, the collection of instances
+
+
+ECE = 0.0564 ECE = 0.0885
+1.0 1.0) 678
+0.8 0.8 4
+e B
+© 0.6 © 0.64
+S a 47
+g g =
+0.4 = _ 0.4
+pa 170
+0.2 qra7] 0.2 q
+
+ECE = 0.2845 ECE = 0.2818
+1.0 1.0 co
+0.8 v “ qo3q 0.8 1894
+o o
+@ 0.6 © 0.6
+— 2 —_ 6 63
+5 3 25
+0 o
+J 04 ¥04 x
+Pa 39 i
+0.2 t 02+
+11
+16 70 | 2 2
+0.0+ ; 0.0+
+0.0 0.2 0.4 06 08 1.0 0.0 02 04 06 08 1.0
+Confidence Confidence
+(a) Default (b) Self-Consistency
+
+00+ 00+ :
+0.0 0.2 04 06 08 0.0 02 04
+
+1.0 06 08 1.0
+Confidence Confidence
+(c) ConfTuner (d) ADVICE
+
+Figure 5: Reliability diagrams on TriviaQA with GEMMA-2-9B-IT under the ScoreNumber setting. ADVICE
+achieves high calibration quality comparable to ConfTuner, outperforming Default and Self-Consistency.
+
+assigned to the m-th bin, acc the accuracy, and
+conf the confidence. We set IZ = 10, a value com-
+monly used in practice. ECE quantifies the average
+absolute difference between predicted confidence
+and empirical accuracy over grouped confidence
+intervals.
+
+We also employ NCE, a variation of ECE, to
+complement each other. NCE is formulated as:
+
+|Bm|
+N (acc(B,,) — conf(By)).
+
+M
+NCE = Ss"
+
+m=,
+
+The distinction is that NCE computes a weighted
+sum of signed differences, whereas ECE com-
+putes one of absolute differences. As a result, bi-
+ased confidence estimation, such as over- or under-
+confidence, yields a large absolute NCE value.
+
+The Brier score is defined as the mean squared
+difference between predicted confidence scores
+(C,) and true binary outcomes (y,,), directly mea-
+suring the accuracy of probabilistic predictions. It
+is calculated as BS = yo (Yn — Cy).
+
+Finally, AUROC measures the likelihood that
+a randomly selected positive instance receives a
+higher confidence score than a randomly selected
+negative one, reflecting the model’s overall ability
+to rank predictions by confidence.
+
+6 Experimental Results
+
+6.1 Main Results
+
+We present the main experimental results in Table
+1 and highlight three key findings as follows.
+
+ADVICE is effective in reducing overconfidence.
+ADVICE exhibits superior calibration performance
+compared to the Default and Self-Consistency base-
+lines on the majority of evaluation metrics, except
+
+TriviaQA MMLU
+Model Training Obj.
+ECE NCE BS ECE NCE BS
+LM 19.7 -19.7 24.7 18.3 -18.2 23.5
+JSD 49 -45 17.0 8.1 -7.1 18.5
+Margin 3.9 0.6 12.1 15.9 -7.6 21.7
+SAMA? LM+JSD 72 -41 187 89 -85 188
+LM+Margin 19.8 -19.7 24.8 18.3 -18.3 23.5
+JSD+Margin 2.0 0.7 15.5 4.2 3.5 17.6
+ADVICE 44 3.2 162 9.6 9.6 19.1
+LM 13.0 -13.0 19.3 23.6 -23.5 27.9
+JSD 16 -0.77 164 184 -16.0 25.3
+TLANAT.A Margin 57.9 55.8 55.3 23.7 -13.8 27.8
+8B INSTRUCT LM+JSD 6.2 5.9 164 144 -13.0 22.6
+LM+Margin 28.0 22.6 28.8 24.3 -7.7 28.8
+JSD+Margin 15.55 13.5 21.8 22.9 -12.8 27.6
+ADVICE TA 7A 16.3 13.2 -4.3 23.0
+
+Table 2: Ablation study on the training objectives. All
+values are percentages.
+
+for SciQ.° From the observed changes in ECE and
+NCE, we find that our method improves calibration
+performance while simultaneously mitigating over-
+confidence. Compared to ConfTuner, the state-of-
+the-art approach, ADVICE achieves comparable re-
+sults across benchmarks. Notably, ADVICE attains
+strong performance on NCE, indicating its particu-
+lar effectiveness in mitigating overconfidence.
+
+ADVICE generalizes well to out-of-distribution
+datasets. Although fine-tuning—based methods
+carry the risk of overfitting, ADVICE neverthe-
+less achieves strong performance across most
+benchmarks, including both in-domain and out-of-
+distribution settings. This demonstrates the robust-
+ness of ADVICE and affirms its effectiveness as a
+reliable, general-purpose calibration framework.
+
+ADVICE provides more balanced confidence
+distributions. Figure 5 presents the reliability
+
+We attribute this to the relative simplicity of the SciQ
+dataset, which results in high accuracy and consequently
+causes the baselines’ overconfidence to have a positive impact.
+
+
+0.2
+
+ECE
+
+0.1
+
+0.2 0.4 0.6 0.2 0.4 0.6
+
+Ojsp djsp
+— = Gemmaz2-9b-it —— Gemma2-9b-it
+— ~ Llama3.1-8b-Instruct —-~ Llama3.1-8b-Instruct
+(a) TriviaQA (b) MMLU
+
+Figure 6: ECE as a function of dygp on (a) TriviaQA
+and (b) MMLU. Blue lines correspond to GEMMA-2-
+9B-IT, and orange lines to LLAMA-3.1-8B-INSTRUCT.
+Solid/dashed lines: ScoreLetter/ScoreNumber settings.
+
+diagrams of four methods evaluated with GEMMA-
+2-9B-IT on TriviaQA. Both the Default and Self-
+Consistency methods predominantly generate high
+confidence scores, showing limited reliability. In
+contrast, ADVICE produces fine-grained confi-
+dence scores that align more closely with accuracy,
+providing more precise and reliable information.
+
+6.2 Ablation Study on Training Objectives
+
+We conduct an ablation study on the training ob-
+jective to assess the contribution of each compo-
+nent. First, as described in §4.2, £14 serves as an
+auxiliary term for preserving language modeling
+performance. As a result, we observe that Lr
+is generally independent of confidence calibration.
+On the other hand, the results in Table 2 show that
+Lysp and LMargin Contribute to improving confi-
+dence verbalization together. Compared to using ei-
+ther loss alone, jointly optimizing both enables the
+model not only to distinguish Poorrect from Pyrong
+but also to separate them in the intended direction.
+Furthermore, we observe that ADVICE achieves
+the best generalization across datasets and models.
+
+6.3 Effect of Hyperparameters
+
+To examine the impact of Ljgp, we evaluate the
+calibration performance under varying djsp. The
+hyperparameter djsp controls how sensitively the
+model distinguishes between the two answer dis-
+tributions, Peorrect aNd Pyrong. Figure 6 shows the
+variation of ECE across different values of djgp.
+We consistently observe a reduction in ECE as djgp
+increases. This is intuitive, as a smaller djsp re-
+duces the penalty for similarity between contrastive
+distributions, resulting in less distinct separation
+and degraded calibration performance.
+
+Verb. TriviaQA MMLU
+Model ” Method
+Type ECE NCE BS ECE NCE BS
+Percent Default 26.9 -26.8 27.0 25.5 -25.5 26.5
+GEMMA2 ercent ADVICE 10.6 -7.1 16.7 10.9 -7.4 20.0
+9B-IT
+Float Default. 27.5 -27.4 27.3 26.3 -26.3 27.0
+oat ADVICE 11.9 -8.1 16.9 11.0 -9.8 19.1
+Percent Default. 18.6 -18.5 20.3 30.2 -30.2 31.6
+LLAMA3.1 ercen’ ADVICE 8.6 2.1 16.0 19.7 -16.4 25.0
+
+8B INSTRUCT
+Default 19.6 -19.5 21.0 32.5 -32.3 33.0
+ADVICE 9.0 4.4 16.8 21.9 -20.2 26.4
+
+Float
+Table 3: Performance on out-of-distribution verbaliza-
+tion types, ScorePercent and ScoreFloat. All values are
+presented as percentages. The best results are in bold.
+
+GEMMA2-9B-IT LLAMA3.1-8B-INSTRUCT
+
+Dataset Method
+ScoreLetter ScoreNumber ScoreLetter ScoreNumber
+
+soe Default 70.7 70.7 75.2 T4.8
+TriviaQA ADvICE 70.5 70.3 76.9 712
+Default A232 72.1 66.6 67.2
+MMLU ApvicE 714 728 67.2 673
+SciQ Default 94.9 94.9 91.1 91.2
+a ADVICE 94.6 94.8 92.3 91.9
+: Default 53.2 52.3 39.0 38.9
+LosiQA ADVICE 48.5 49.5 417 42.2
+
+Table 4: Task (QA) accuracies before and after fine-
+tuning. These results demonstrate that ADVICE does
+not adversely impact the task performance of LLMs.
+
+6.4 Generalization on Verbalization Types
+
+We construct our dataset based on three ver-
+balization types—ScoreText, ScoreLetter, and
+ScoreNumber—to promote generalization over dis-
+tinct verbalization formats. To further evaluate AD-
+VICE’s generalization capacity, we test it on two
+extra verbalization types, ScoreFloat and ScorePer-
+cent, the details of which are presented in §5. Table
+3 reports calibration performance on these new
+types, showing that ADVICE exhibits robust gen-
+eralization across different verbalization schemes.
+
+6.5 Effect on General Performance
+
+When fine-tuning an LLM, it is essential to verify
+whether the modification compromises the model’s
+general task performance. In this part, we exam-
+ine how ADVICE influences task (QA) accuracy,
+rather than confidence verbalization. As shown in
+Table 4, accuracy changes are negligible, demon-
+strating that ADVICE preserves the LLM’s inher-
+ent capabilities. Because verbalized confidence
+tends to be overconfident, shifts in task accuracy
+could influence calibration performance as mea-
+sured by ECE, even when confidence estimation
+itself is constant. Yet, the consistency of accu-
+
+
+1453
+
+Count
+©
+8
+8
+
+E D c B A
+Verbalized Confidence
+
+(a) GEMMA2-9B-IT
+
+(MMLU, Default) (TriviaQA, Default)
+
+839 1931
+
+2000
+1750
+elu 1500
+
+#1250
+
+8 300 3 1000
+woo 750
+111 116 500
+100 73 250
+} 206 3 8. 0 0 3 2 9 3h |
+O2i2 3 5S 6 F 8 8 E D Cc B A
+
+(b) LLAMA3.1-8B-INSTRUCT
+
+4
+Verbalized Confidence Verbalized Confidence
+
+(c) GEMMA2-9B-IT
+(MMLU, ADVICE)
+
+(d) LLAMA3.1-8B-INSTRUCT
+(TriviaQA, ADVICE)
+
+Figure 7: Verbalized confidence distributions after answer masking. Default remains overconfident when answers
+are unknown, while ADVICE shows appropriate uncertainty.
+
+Training Step Top 10 Tokens
+
+(ADVICE) 1 2 3 4 5 6 7 8 9 10
+
+0 (Default) <start_of_turn> <bos> user _only Provide Confidence Answer \n “ce Answer
+100 <start_of_turn> user <bos> —__only _A Confidence Provide _Exile _between Answer
+200 <start_of_turn> user <bos> \n _A Confidence Provide _between _only _Exile
+300 <start_of_turn> _Fxile user <bos> _only Provide _Kiss Confidence _You Question
+400 _Fxile <start_of_turn> _only <bos> Provide user _A Confidence Question eee
+500 <start_of_turn> <bos> _Exile —__only user Provide _A Confidence ees Question
+
+Table 5: Top 10 tokens sorted by their absolute attribution scores for GEMMA2-9B-IT. The answer token is in bold.
+
+le-10 le-9
+2.0 8
+
+4 1.25 5 i
+2 2
+© 1.00 ° @1s i
+50.75 | 5
+€ € 1.0
+£ 0.50 £
+< < L
+
+0.25 TT 0.5 @
+
+ADVICE Default ADVICE Default
+
+(a) GEMMA2-9B-IT (b) LLAMA3.1-8B-INSTRUCT
+
+Figure 8: Attention Rollout score distributions for Con-
+fidence (C) — Answer (A), comparing ADVICE and
+Default. ADVICE contributes to improved attention. In
+both cases, the t-test confirms statistical significance.
+
+racy across fine-tuning indicates that ECE improve-
+ments stem from enhanced confidence calibration
+rather than task performance gains.
+
+7 ADVICE Enhances Answer Awareness
+
+Lastly, we verify that ADVICE’s improvements
+actually arise from its answer-groundedness.
+
+In the first experiment, we replace answer tokens
+with the padding (<pad>) token to simulate the ab-
+sence of the answer and evaluate its effect. As illus-
+trated in Figures 7a and 7b, the Default method gen-
+erates confidence distributions that are markedly
+biased toward high values, reflecting overconfi-
+dence. In contrast, ADVICE (Figures 7c and 7d)
+reveals the opposite behavior: its verbalized con-
+fidence substantially declines when the answer is
+masked, accurately conveying obscurity regarding
+the correctness of the response. This finding empir-
+
+ically validates that ADVICE enhances the model’s
+answer-awareness in confidence estimation, lead-
+ing it to express obscurity when deprived of the
+answer.
+
+Second, we revisit the Attention Rollout analysis
+($3.2) to explore how adopting ADVICE alters the
+attention dynamics (Default vs. ADVICE). In Fig-
+ure 8, ADVICE leads the model to focus more con-
+sistently on answers than Default. This outcome
+supports our hypothesis that the poor quality of
+confidence verbalization possibly originates from
+answer independence, and that ADVICE boosts
+performance by alleviating this limitation.
+
+Finally, we conduct a qualitative analysis of to-
+ken attribution scores using Integrated Gradients,
+following the same procedure as in §3.2. Using
+a fixed input (Instruction, Q, A), we track how
+token-level attribution patterns evolve throughout
+the fine-tuning process of ADVICE. Specifically,
+we focus on the top-k tokens (& = 10) ranked by
+the absolute magnitude of their attribution scores,
+capturing both positive and negative contributions.
+In Table 5, we can see that as training progresses,
+the rank of the answer token (_Exile) increases,
+suggesting that ADVICE encourages the model to
+become more answer-dependent.
+
+In summary, our three experiments consistently
+demonstrate that LLMs’ overconfidence mainly
+arises from neglecting answer information in ver-
+balized confidence estimation, and that ADVICE
+effectively mitigates this problem.
+
+
+8 Conclusion
+
+This work provides a systematic investigation into
+the fundamental cause of overconfidence in LLMs’
+verbalized confidence. In particular, our mathe-
+matical analysis identifies answer-independence
+as the key contributing factor. Based on this in-
+sight, we propose ADVICE (Answer-Dependent
+VerbalIzed Confidence Estimation), an effective
+training framework that guides LLMs to generate
+more answer-grounded confidence estimations. Ex-
+tensive experiments demonstrate that ADVICE sub-
+stantially mitigates the overconfidence commonly
+observed in LLMs, enabling them to produce more
+reliable and better-calibrated confidence estimates.
+
+Limitations
+
+This study identifies the root cause of overconfi-
+dence in LLMs and presents ADVICE, which effec-
+tively addresses it, leading to notable improvements
+in calibration. However, several limitations remain,
+offering directions for future research.
+
+First, this work primarily focuses on short-
+form QA and multiple-choice question answer-
+ing. Extending the approach to tasks that demand
+long-context understanding and complex reasoning
+would be a valuable next step.
+
+Second, while ADVICE enhances calibration
+through a contrastive objective that promotes
+answer-dependent confidence, it requires LLM-
+generated answers to form contrastive pairs, in-
+troducing additional data construction costs. Nev-
+ertheless, we consider this trade-off reasonable, as
+it explicitly targets the fundamental factor behind
+overconfidence and advances the development of
+more reliable models.
+
+References
+
+Samira Abnar and Willem Zuidema. 2020. Quantify-
+ing attention flow in transformers. In Proceedings
+of the 58th Annual Meeting of the Association for
+Computational Linguistics, pages 4190-4197, On-
+line. Association for Computational Linguistics.
+
+Kendrick Boyd, Kevin H. Eng, and C. David Page. 2013.
+Area under the precision-recall curve: Point estimates
+and confidence intervals. In Machine Learning and
+Knowledge Discovery in Databases, pages 451-466,
+Berlin, Heidelberg. Springer Berlin Heidelberg.
+
+GLENN W. Brier. 1950. Verification of forecasts ex-
+pressed in terms of probability. Monthly Weather
+Review, 78(1):1 - 3.
+
+Kobe Desender, K Richard Ridderinkhof, and Peter R
+Murphy. 2021. Understanding neural signals of post-
+decisional performance monitoring: An integrative
+review. eLife, 10:e67556.
+
+Mor Geva, Jasmijn Bastings, Katja Filippova, and Amir
+Globerson. 2023. Dissecting recall of factual asso-
+ciations in auto-regressive language models. In The
+2023 Conference on Empirical Methods in Natural
+Language Processing.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-
+ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh
+Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-
+tra, Archie Sravankumar, Artem Korenev, Arthur
+Hinsvark, and 542 others. 2024. The llama 3 herd of
+models. Preprint, arXiv:2407.21783.
+
+Tobias Groot and Matias Valdenegro Toro. 2024. Over-
+confidence is key: Verbalized uncertainty evaluation
+in large language and vision-language models. In
+Proceedings of the 4th Workshop on Trustworthy Nat-
+ural Language Processing (TrustNLP 2024), pages
+145-171, Mexico City, Mexico. Association for Com-
+putational Linguistics.
+
+Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Wein-
+berger. 2017. On calibration of modern neural net-
+works. In Proceedings of the 34th International Con-
+ference on Machine Learning, volume 70 of Pro-
+ceedings of Machine Learning Research, pages 1321-
+1330. PMLR.
+
+Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou,
+Mantas Mazeika, Dawn Song, and Jacob Steinhardt.
+2021. Measuring massive multitask language under-
+standing. In International Conference on Learning
+Representations.
+
+Edward J Hu, yelong shen, Phillip Wallis, Zeyuan Allen-
+Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu
+Chen. 2022. LoRA: Low-rank adaptation of large
+language models. In International Conference on
+Learning Representations.
+
+Thanmay Jayakumar, Fauzan Farooqui, and Luqman
+Farooqui. 2023. Large language models are legal but
+they are not: Making the case for a powerful Legal-
+LLM. In Proceedings of the Natural Legal Language
+Processing Workshop 2023, pages 223-229, Singa-
+pore. Association for Computational Linguistics.
+
+Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan
+Su, Yan Xu, Etsuko Ishii, Ye Jin Bang, Andrea
+Madotto, and Pascale Fung. 2023. Survey of halluci-
+nation in natural language generation. ACM Comput-
+ing Surveys, 55(12):1-38.
+
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-
+sch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+laume Lample, Lucile Saulnier, Lélio Renard Lavaud,
+Marie-Anne Lachaux, Pierre Stock, Teven Le Scao,
+Thibaut Lavril, Thomas Wang, Timothée Lacroix,
+
+
+and William El Sayed. 2023. Mistral 7b. Preprint,
+arXiv:2310.068235.
+
+Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke
+Zettlemoyer. 2017. TriviaQA: A large scale distantly
+supervised challenge dataset for reading comprehen-
+sion. In Proceedings of the 55th Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 1601-1611, Vancouver,
+Canada. Association for Computational Linguistics.
+
+Adam Tauman Kalai, Ofir Nachum, Santosh S. Vem-
+pala, and Edwin Zhang. 2025. Why language models
+hallucinate. Preprint, arXiv:2509.04664.
+
+Jixuan Leng, Chengsong Huang, Banghua Zhu, and Ji-
+axin Huang. 2025. Taming overconfidence in LLMs:
+Reward calibration in RLHF. In The Thirteenth Inter-
+national Conference on Learning Representations.
+
+Yibo Li, Miao Xiong, Jiaying Wu, and Bryan Hooi.
+2025. Conftuner: Training large language mod-
+els to express their confidence verbally. Preprint,
+arXiv:2508.18847.
+
+Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+Teaching models to express their uncertainty in
+words. Transactions on Machine Learning Research.
+
+Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. 2024.
+Generating with confidence: Uncertainty quantifica-
+tion for black-box large language models. Transac-
+tions on Machine Learning Research.
+
+Jian Liu, Leyang Cui, Hanmeng Liu, Dandan Huang,
+Yile Wang, and Yue Zhang. 2021. Logiqa: a chal-
+lenge dataset for machine reading comprehension
+with logical reasoning. In Proceedings of the Twenty-
+Ninth International Joint Conference on Artificial
+Intelligence, NCAT 20.
+
+Sourab Mangrulkar, Sylvain Gugger, Lysandre De-
+but, Younes Belkada, Sayak Paul, and Benjamin
+Bossan. 2022. PEFT: State-of-the-art parameter-
+efficient fine-tuning methods. https://github.
+com/huggingface/peft.
+
+M.L. Menéndez, J.A. Pardo, L. Pardo, and M.C. Pardo.
+1997. The jensen-shannon divergence. Journal of
+the Franklin Institute, 334(2):307-3 18.
+
+Hadi Mohammadi, Ayoub Bagheri, Anastasia Gi-
+achanou, and Daniel L. Oberski. 2025. Explainabil-
+ity in practice: A survey of explainable nlp across
+various domains. Preprint, arXiv:2502.00837.
+
+Joaquin Navajas, Bahador Bahrami, and Peter E Latham.
+2016. Post-decisional accounts of biases in con-
+fidence. Current Opinion in Behavioral Sciences,
+11:55-60. Computational modeling.
+
+OpenAL, :, Aaron Hurst, Adam Lerer, Adam P. Goucher,
+Adam Perelman, Aditya Ramesh, Aidan Clark,
+AJ Ostrow, Akila Welihinda, Alan Hayes, Alec
+Radford, Aleksander Madry, Alex Baker-Whitcomb,
+Alex Beutel, Alex Borzunov, Alex Carney, Alex
+
+10
+
+Chow, Alex Kirillov, and 401 others. 2024. Gpt-4o
+system card. Preprint, arXiv:2410.21276.
+
+Mahdi Pakdaman Naeini, Gregory Cooper, and Milos
+Hauskrecht. 2015. Obtaining well calibrated proba-
+bilities using bayesian binning. Proceedings of the
+AAAI Conference on Artificial Intelligence, 29(1).
+
+Hajar Sakai and Sarah S. Lam. 2025. Large language
+models for healthcare text classification: A system-
+atic review. Preprint, arXiv:2503.01159.
+
+Paul Stangel, David Bani-Harouni, Chantal Pellegrini,
+Ege Ozsoy, Kamilia Zaripova, Matthias Keicher, and
+Nassir Navab. 2025. Rewarding doubt: A reinforce-
+ment learning approach to confidence calibration of
+large language models. CoRR, abs/2503.02623.
+
+Mukund Sundararajan, Ankur Taly, and Qiqi Yan. 2017.
+Axiomatic attribution for deep networks. In Proceed-
+ings of the 34th International Conference on Machine
+Learning - Volume 70, ICML 17, page 3319-3328.
+JMLR.org.
+
+Gemma Team, Morgane Riviere, Shreya Pathak,
+Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupati-
+raju, Léonard Hussenot, Thomas Mesnard, Bobak
+Shahriari, Alexandre Ramé, Johan Ferret, Peter Liu,
+Pouya Tafti, Abe Friesen, Michelle Casbon, Sabela
+Ramos, Ravin Kumar, Charline Le Lan, Sammy
+Jerome, and 179 others. 2024. Gemma 2: Improving
+open language models at a practical size. Preprint,
+arXiv:2408.00118.
+
+Katherine Tian, Eric Mitchell, Allan Zhou, Archit
+Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn,
+and Christopher Manning. 2023. Just ask for cali-
+bration: Strategies for eliciting calibrated confidence
+scores from language models fine-tuned with human
+feedback. In Proceedings of the 2023 Conference
+on Empirical Methods in Natural Language Process-
+ing, pages 5433-5442, Singapore. Association for
+Computational Linguistics.
+
+Johannes Welbl, Nelson F. Liu, and Matt Gardner. 2017.
+Crowdsourcing multiple choice science questions.
+In Proceedings of the 3rd Workshop on Noisy User-
+generated Text, pages 94-106, Copenhagen, Den-
+mark. Association for Computational Linguistics.
+
+Miao Xiong, Zhiyuan Hu, Xinyang Lu, YIFEI LI, Jie
+Fu, Junxian He, and Bryan Hooi. 2024. Can LLMs
+express their uncertainty? an empirical evaluation of
+confidence elicitation in LLMs. In The Twelfth Inter-
+national Conference on Learning Representations.
+
+Chenjun Xu, Bingbing Wen, Bin Han, Robert Wolfe,
+Lucy Lu Wang, and Bill Howe. 2025. Do language
+models mirror human confidence? exploring psycho-
+logical insights to address overconfidence in LLMs.
+In Findings of the Association for Computational
+Linguistics: ACL 2025, pages 25655-25672, Vienna,
+Austria. Association for Computational Linguistics.
+
+
+Ziwei Xu, Sanjay Jain, and Mohan Kankanhalli.
+2024. Hallucination is inevitable: An innate lim-
+itation of large language models. arXiv preprint
+arXiv:2401.11817.
+
+Daniel Yang, Yao-Hung Hubert Tsai, and Makoto Ya-
+mada. 2025. On verbalized confidence scores for
+LLMs. In ICLR Workshop: Quantify Uncertainty
+and Hallucination in Foundation Models: The Next
+Frontier in Reliable Al.
+
+Xinran Zhao, Hongming Zhang, Xiaoman Pan, Wenlin
+Yao, Dong Yu, Tongshuang Wu, and Jianshu Chen.
+2024. Fact-and-reflection (FaR) improves confidence
+calibration of large language models. In Findings of
+the Association for Computational Linguistics: ACL
+2024, pages 8702-8718, Bangkok, Thailand. Associ-
+ation for Computational Linguistics.
+
+Ziang Zhou, Tianyuan Jin, Jieming Shi, and Qing Li.
+2025. Steerconf: Steering Ilms for confidence elicita-
+tion. Preprint, arXiv:2503.02863.
+
+11
+
+
+A LLM Probing Methods
+
+Attention Rollout Compared to naive attention
+scores, Attention Rollout provides more reliable
+attributions by recursively aggregating attention
+across layers. This aggregation accounts for the
+residual connections and the hierarchical flow of
+information, yielding a more faithful estimate of
+token contributions.
+Attention Rollout is recursively defined as:
+
+where A(/;) denotes the raw attention matrix of
+layer 7, updated with residual connections and com-
+puted as
+
+A(1;)A(Ij_-1),
+
+A(t) fi> J,
+
+ifi=j,
+
+A(l;) = 0.5 Watt “ 0.5/.
+
+We define the Question tokens as those ranging
+from Question: to the end of the input (i.e., the
+<end_of_turn> token), and the Answer tokens as
+those spanning from Answer: to the token immedi-
+ately preceding the subsequent Confidence:. As
+the next step, we computed the attention rollout for
+each token, starting from the position of the colon
+(i.e., the “:” in Answer:), which corresponds to
+the point where the first token of the answer or
+the confidence expression begins to be generated.
+Subsequently, we compute the rollout scores across
+the entire layer, and aggregate the rollout scores by
+taking their average.
+
+Integrated Gradients Integrated Gradients are
+formulated as:
+
+1
+a=0
+
+where 7 denotes the feature dimension, and x’, cor-
+responds to the baseline input. In practice, the
+integral is approximated via a Riemann sum with a
+predefined number of interpolation steps, n_steps.
+We employed the IntegratedGradients imple-
+mentation from the captum library to compute
+attribution scores. For all experiments, we set
+the hyperparameters to n_steps 512 and
+internal_batch_size = 32, and adopted a zero
+vector as the baseline. Furthermore, we visualized
+the resulting attributions using the visualization
+utilities provided within the same package.
+
+OF (a’ +a x (a —2’))
+
+On: da
+
+12
+
+B Confidence Verbalization Types
+
+As outlined in §5, we utilize five types of verbal-
+ization—ScoreText, ScoreLetter, ScoreNumber,
+ScoreFloat and ScorePercent. For metric eval-
+uation, each verbalized confidence expression is
+mapped to a numeric value within the interval [0, 1].
+We specify the numeric mappings for each prompt
+type as follows:
+
+¢ ScoreText: Verbalized levels are mapped as low
+= 0.1, medium = 0.5, high = 0.9.
+
+ScoreLetter: Each letter token {E, D, C, B, A} is
+mapped to: E= 0.1, D= 0.3, C= 0.5, B= 0.7,
+A= 0.9.
+
+ScoreNumber: Each digit i € {@,1...,9} is
+assigned a value of 7/9.
+
+ScoreFloat: Each floating-point value is used
+directly without further mapping.
+
+ScorePercent: Each percentage token i7% is
+mapped to a value of 7/100.
+
+C_ Experimental Setting Description
+
+Here we provide the detailed settings for the ex-
+periment that compares confidence distributions in
+§3.1, which further demonstrates the answer inde-
+pendence of verbalized confidence.
+
+For evaluating answer-independence, we lever-
+age the training set of TriviaQA. We construct mul-
+tiple answers corresponding to the same question in
+the dataset, i.e., (q, {@1,...,@m}). We set m = 10
+in our experiments. We then remove duplicate an-
+swers to construct the A, = {a1,...,@n} for each
+question in dataset. Note that the number of filtered
+answers, n, depends on the question g. For each
+model, we construct a training dataset consisting
+of nearly 1,000 instances.
+
+D_ Implementation Details
+
+Training Details Here, we describe the imple-
+mentation details of ADVICE. We utilize LoRA
+(Hu et al., 2022) from the HuggingFace PEFT
+library (Mangrulkar et al., 2022) for fine-tuning.
+Specifically, we fine-tune the adapters attached to
+the query, key, value, and output projection mod-
+ules across all transformer layers, using a rank of
+r = 8 anda scaling factor of a = 32. Optimiza-
+tion is performed with AdamW at a learning rate
+1 x 107°, scheduled by a step-wise decay with
+7 = 0.85 anda step size of 1. We adopt a batch size
+
+
+of 4 and apply gradient accumulation with a fac-
+tor of 4 using the Accelerate framework. We train
+GEMMA-2-9B-IT and LLAMA-3.1-8B-INSTRUCT
+for 3 epochs, and MISTRAL-7B-INSTRUCT- V0.3
+for 1 epoch. Trainings are conducted on 1 NVIDIA
+A100 80GB PCIe GPU. Based on the results in Fig-
+ure 6, we set djgp to 0.6, as the Jensen—Shannon
+divergence (JSD) is defined to take values between
+0 and In 2 (© 0.693). The value of dMargin is set
+to 1, which is chosen to be strictly greater than the
+expectation difference observed in all experimental
+settings. Explanation for each training objective
+hyperparameter is described in §4.2.
+
+Self-Consistency Following Xiong et al. (2024),
+we implement the method using the vanilla prompt
+with M = 5. This involves prompting the LLM
+to generate five candidate answers and aggregating
+them as follows:
+
+a yew TY; = Y} x C;
+conf yu C,
+
+where Y; are candidate answers with their corre-
+sponding verbalized confidence C; and Z is indi-
+cator function. Note that Y denotes the answer
+that has the highest confidence score among all
+candidate answers.
+
+d
+
+ConfTuner We re-implement ConfTuner based
+on their official code’. For LLAMA-3.1-8B-
+INSTRUCT, we use their publicly available fine-
+tuned model®. We fine-tune GEMMA-2-9B-IT
+and MISTRAL-7B-INSTRUCT-VO.3 on our train-
+ing dataset. Following the original implementation,
+we adopt the same prompt type (i.e., ScoreNum-
+ber). Since the number of training samples dif-
+fers from the original paper, we also adjust the
+number of training epochs accordingly: we train
+MISTRAL-7B-INSTRUCT-V0O.3 for 2 epochs and
+GEMMA-2-9B-IT for 3 epochs.
+
+E Prompt Templates
+
+We provide the prompt templates, as shown in Ta-
+ble 6 and Table 7, following the templates used by
+Yang et al. (2025).
+
+F Qualitative Evaluation
+
+We qualitatively assess how our method affects the
+extent to which confidence is grounded in the an-
+swer. In Figure 10, we observe that as training
+
+Thttps://github.com/liushiliushi/ConfTuner
+Sliushiliushi/ConfTuner-LLaMA
+
+13
+
+progresses, the attribution scores of answer tokens
+gradually increase. This result demonstrates that
+our method enhances calibration capability by in-
+ducing answer-dependent confidence estimation.
+
+
+Legend: Bi Negative C1 Neutral @ Positive
+Word Importance
+(BBELFSHeoF tUmluser Provide _ only _a__short _answer __in _the _form _of __keywords __to __the __following _question . After _your _answer , provide __a confidence __score _between _A _( very _high
+confidence ) and __£ _( very _low _confidence ) _which _measures _how _confident _you _are _in __your _answer ._Use __the _following __ format _to _respond : ~** Answer : _[ Write __your answer _here .]
+Confidence : __[ Write __your __confidence __score _here .] *** If __you cannot _provide _an __answer , answer _with __’ NO ANSWER *. Question :__Who _had_a__70s__No__ 1 __hit _with _Kiss __You _All __Over
+? #end_of_turn #start_of_turn model Answer : __Exile Confidence :
+
+(a) Default
+
+Legend: li Negative C1 Neutral @ Positive
+Word Importance
+(BBEstart_of turn user Provide _only _a__short _answer _in _the _form _of _keywords __to __the _following _question . _After _your _answer , provide _a confidence _score _between JJA\_( very _high
+confidence ) _and _£ _( very _low _confidence ) _which _measures __how _confident _you _are _in __your _answer ._Use __the __following __format _to _respond : *** Answer : _[ Write __your _answer _here .]
+Confidence : _[ Write _your __confidence _score _here .] *** If __you cannot _provide _an _answer , __answer _with _” NO _ANSWER *. Question :__Who _had _a__70s__No_1__hit _with _Kiss _You _All _Over
+? #end_of_turn #start_of_turn model Answer : __Exile Confidence :
+
+(b) ADVICE
+
+Figure 9: Visualization of token attribution with Integrated Gradients (GEMMA2-9B-IT).
+
+Task Prompt
+
+Generation Provide only a short answer in the form of keywords to the following question.
+
+Multiple-Choice The following multiple-choice question has only one correct answer. Provide only
+the option letter of the correct answer.
+
+Table 6: These are task-dependent prefix prompts that are placed before the main prompt template.
+
+14
+
+
+Task
+
+Prompt
+
+ScoreLetter
+
+After your answer, provide a confidence score between A (very high confidence)
+and E (very low confidence) which measures how confident you are in your answer.
+Use the following format to respond:
+
+Answer: [Write your answer here. ]
+
+Confidence: [Write your confidence score here. ]
+
+7x3
+
+If you cannot provide an answer, answer with ‘NO ANSWER‘.
+
+ScoreText
+
+ScoreNumber
+
+After your answer, provide one of the following confidence scores which measures
+how confident you are in your answer: high, medium, low.
+
+Use the following format to respond:
+
+Answer: [Write your answer here. ]
+
+Confidence: [Write your confidence score here. ]
+
+eee
+
+If you cannot provide an answer, answer with ‘NO ANSWER‘.
+
+After your answer, provide a confidence score between 0 and 9 which measures how
+confident you are in your answer, where 9 is the maximum. Never use 10.
+
+Use the following format to respond:
+
+Answer: [Write your answer here. ]
+
+Confidence: [Write your confidence score here. ]
+
+7x4
+
+If you cannot provide an answer, answer with ‘NO ANSWER‘.
+
+ScorePercent
+
+After your answer, provide a confidence score in percentage which measures how
+confident you are in your answer.
+
+Use the following format to respond:
+
+Answer: [Write your answer here. ]
+
+Confidence: [Write your confidence score here. ]
+
+(723
+
+If you cannot provide an answer, answer with ‘NO ANSWER‘.
+
+ScoreFloat
+
+After your answer, provide a confidence score between 0.0 and 1.0 which measures
+how confident you are in your answer.
+Use the following format to respond:
+
+eee
+
+Answer: [Write your answer here. ]
+Confidence: [Write your confidence score here. ]
+
+eee
+
+If you cannot provide an answer, answer with ‘NO ANSWER‘.
+
+Table 7: Main prompt variations depending on verbalization type.
+
+15
+
+
+Legend: @ Negative O Neutral @ Positive
+
+Word Importance
+BGSl#start_of |_turn user Provide __only __a _short __answer __in __the _form __of __keywords __to _the __following question .
+_After __your __answer , __provide __a confidence __score __between _A _( very _high __confidence ) __and _E _( very _low
+—confidence ) which __measures __how __confident __you __are __in ___your __answer .__Use __the __following __format __to __respond
+:*** Answer : _[ Write _your __answer __here .] Confidence : _[ Write _your confidence _score _here .] *** If you cannot
+—pProvide __an __answer , __answer __with _ NO __ANSWER ~. Question : __Otis _ Barton __was __a __pioneer __in __exploring __where
+? #end_of_turn #start_of_turn model Answer : __Deep __sea Confidence :
+
+(a) Default
+
+Legend: @ Negative O Neutral M Positive
+
+Word Importance
+#§68)#start_of_turn user Provide __only __a _short _answer __in _the _form _of __keywords _to _the __following __question .
+_After __your __answer , __provide __a confidence __score __between _A _( very _high confidence ) __and _E __( very _low
+
+—confidence ) __which __measures __how __confident __you __are __in __your __answer . Use __the __following __format _to __respond
+
+:*** Answer : __[ Write _your __answer __here .] Confidence : __[ Write __your __confidence _score _here .] *** If _you cannot
+—provide __an __answer , __answer __with _” NO __ANSWER *. Question : __Otis __Barton __was __a __pioneer __in __exploring __where
+
+? #end_of_turn #start_of_turn model Answer : __Deep __sea Confidence :
+
+(b) 100 Step
+
+Legend: Hf Negative O Neutral & Positive
+
+Word Importance
+{BO8l#start_of_turn user Provide __only __a _short __answer __in _the _form __of __keywords __to _the __following question .
+_After __your __answer , __provide __a confidence __score __between _A _( very _high __confidence ) __and _E _( very _low
+—confidence ) _which _measures __how __confident __you __are _in _your __answer .__Use __the __following __format _to __respond
+:*** Answer : _[ Write _your _answer _here .] Confidence : _[ Write _your _confidence _score _here .] *** If you cannot
+—provide __an __answer , __answer __with _ NO __ANSWER *. Question : __Otis __Barton __was __a __pioneer __in __exploring __where
+? #end_of_turn #start_of_turn model Answer : __Deep __sea Confidence :
+
+(c) 200 Step
+
+Legend: H Negative 1 Neutral @ Positive
+
+Word Importance
+#bos|#start_of_turn user Provide _only _a _short _answer __in _the _form _of _keywords _to _the __following question .
+_After __your __answer , __provide __a confidence __score __between _A __( very _high __confidence ) __and _E __( very _low
+—confidence ) __which _measures __how __confident __you __are __in ___your __answer .__Use __the __following __format __to __respond
+:*** Answer : _[ Write _your _answer _here .] Confidence : _[ Write _your _confidence _score _here .] *** If you cannot
+provide __an __answer , __answer _with _~ NO __ANSWER ~. Question : __Otis Barton _was —a _pioneer _in _exploring _.where
+? #end_of_turn #start_of_turn model Answer : _Deep __sea Confidence :
+
+(d) 300 Step
+
+Legend: H Negative O Neutral @ Positive
+
+Word Importance
+#bos #start_of_turn user Provide __only __a _short __answer __in _the __form __of __keywords __to __the __following __question .
+_After _your __answer , __provide __a confidence __score __between | x very _high __confidence ) __and i very _low
+—confidence ) _which _measures __how __confident _you __are _in __your __answer .__Use __the __following __format _to __respond
+:*** Answer : _[ Write _your __answer _here .] Confidence : _[ Write _your confidence _score _here .] *** If you cannot
+—provide __an __answer , __answer __with _” NO __ANSWER ~. Question : __Otis _ Barton __was __a __pioneer __in __exploring __where
+? #end_of_turn #start_of_turn model Answer : __Deep __sea Confidence :
+
+(e) 400 Step
+
+Legend: Hf Negative DO Neutral M Positive
+
+Word Importance
+#bos #start_of_turn user Provide __only __a _short __answer __in _the _form __of __keywords __to _the __following question .
+_After _your __answer , __provide __a __confidence __score __between By very __high __confidence ) and _E _( very _low
+—confidence ) __which __measures __how __confident __you __are __in __your __answer . __Use __the __following __format _to __respond
+:*** Answer : __[ Write _your __answer __here .] Confidence : __[ Write __your __confidence _score _here .] © ** If _you cannot
+—provide __an __answer , __answer __with _. NO __ANSWER *. Question : __Otis __Barton __was __a __pioneer __in __exploring __where
+? #end_of_turn #start_of_turn model Answer : __Deep __sea Confidence :
+
+(f) 500 Step
+
+Figure 10: Visualization of token attribution changes across training steps using Integrated Gradients (GEMMA2-
+9B-IT). As training progresses, the attribution scores on answer tokens consistently increase.
+
+16
+
+
+Legend: @ Negative 0 Neutral & Positive
+
+Word Importance
+#|begin_of_text| #|start_header_id| SYSteM#|end_header_id| CC Cut ting GAnowledge GDate : GDecember G 202 3 C Today GDate : G26
+GJul G 202 4 CC Provide Gonly Ga Gshort Ganswer Gin Gthe Gform Géf Gkeywords Gfo Gthe Gfollowing Gquestion . GAfter Gyour Ganswer ,
+Gprovide Ga Gconfidence Gscore Gbetween GA G( very Ghigh Gconfidence ) Gand GE G( very Glow Géonfidence ) Gwhich Grneasures Ghow
+Géonfident Gyou Gare Gin Gyour Ganswer . GUse Gthe Gfollowing Gformat Gfo Grespond :C’** *C Answer : G[ Write Gyour Ganswer Ghere .
+Ic Conf idence : G[ Write Gyour Géonfidence Gscore Ghere . ]C** *C'lf Gyou Géannot Gprovide Gan Ganswer , Ganswer Gwith G’ NO
+GANSW ER *. #|eot_id| #|start_header_id| user #|end_header_id| CC Question : GOt is GBarton Gwas Ga Gpioneer Gin Géxploring GWwhere ?
+#|eot_id| #|start_header_id| assistant #|end_header_id| CC ‘Answer : Ga s Gand Gunderwater C
+
+(a) Default
+
+f idence ]
+
+Legend: M Negative 0 Neutral & Positive
+
+Word Importance
+((DEEMMOMREN +|start_header_id| Systen#jend_header_id| CC Cut ting GKnowledge GDate : GDecember G 202 3 C Today GDate : G'26
+GJul G 202 4 CC Provide Gonly Ga Gshort Ganswer Gin Gthe Gform Gof Gkeywords Gto Gthe Gfollowing Gquestion . GAfter Gyour Ganswer ,
+Gprovide Ga Géonfidence Gécore Gbetween GA G( very Ghigh Géonfidence ) Gand GE G( very Glow Géonfidence ) Gwhich Grneasures Ghow
+Géonfident Gyou Gare Gin Gyour Ganswer . GUse Gthe Gfollowing Gformat Gfo Gfespond :C’* > ~C Answer : G[ Write Gyour Ganswer Ghere .
+JC Conf idence : G[ Write Gyour Géonfidence Gscore Ghere . JC ~ *C'lf Gyou Géannot Gprovide Gan Ganswer , Ganswer Gwith G* NO
+GANSW ER *. #|eot_id| #|start_header_id| user #|end_header_id| CC Question : GOt is SBSHOn|GWas Ga Gpioneer Gin Géxploring Gwhere ?
+#|eot_id| #|start_header_id| assistant #|end_header_id| CC’Answer : EG@laves Gand
+
+‘Conf idence :
+
+(b) 100 Step
+
+Legend: H Negative 0 Neutral Hl Positive
+
+Word Importance
+#\begin_of_text| #|start_header_id| system #|end_header_id| CC ‘Cut ting GKnowledge GDate : GDecember G 202 3 C Today GDate : G26
+GJul G 202 4 CC Provide Gonly Ga Gshort Ganswer Gin Gthe Gform Gof Gkeywords Gto Gthe Gfollowing Gquestion . GAfter Gyour Ganswer ,
+Gprovide Ga Géonfidence Gscore Gbetween GA G( very Ghigh Géonfidence ) Gand GE G( very Glow Géonfidence ) Gwhich Grneasures Ghow
+Géonfident Gyou Gare Gin Gyour Ganswer . GUse Gthe Gfollowing Gformat Gfo Gfespond :C’** ~C Answer : G[ Write Gyour Ganswer Ghere .
+]C ‘Conf idence : G[ Write Gyour Géonfidence Gscore Ghere . JC * *C'lf Gyou Géannot Gprovide Gan Ganswer , Ganswer GWwith G’ NO
+GANSW ER *. #|eot_id| #|start_header_id] user #|end_header_id| CC Question : GOt is GBanonGwas Ga Gpioneer Gin Géxploring Gwhere ?
+#|eot_id| #|start_header_id| assistant #|end_header_id| CC'‘Answer : GC aves Gand Gunderwater C ‘Conf idence :
+
+(c) 200 Step
+
+Legend: @ Negative 1 Neutral Ml Positive
+
+Word Importance
+#|begin_of_text| #|start_header_id| system #|/end_header_id| CC ‘Cut ting GKnowledge GDate : GDecember G 202 3 C Today GDate : G'26
+GJul G 202 4 CC Provide Gonly Ga Gshort Ganswer Gin Gthe Gform Géf Gkeywords Gfo Gthe Gfollowing Gquestion . GAfter Gyour Ganswer ,
+Gprovide Ga Géonfidence GScore Gbetween GA G( very Ghigh Gconfidence ) Gand GE G( very Glow Géonfidence ) Gwhich Grneasures Ghow
+Géonfident Gyou Gare Gin Gyour Ganswer . GUse Gthe Gfollowing Gformat Gfo Grespond :C’** ~C Answer : G[ Write Gyour Ganswer Ghere .
+IC ‘Conf idence : Gf Write Gyour Géonfidence Gscore Ghere . ]C‘*~ “C'lf Gyou Géannot Gprovide Gan Ganswer , Ganswer Gwith G* NO
+GANSW ER *. #|eot_id| #|start_header_id| user #|end_header_id| CC Question : GOt GBRRONIGWwas Ga Gpioneer Gin Géxploring Gwhere ?
+#|eot_id| #|start_header_id| assistant #|end_header_id| CC Answer : GC aves Gand Gunderwater C ‘Conf idence :
+
+(d) 300 Step
+
+Legend: H Negative 0 Neutral Hl Positive
+
+Word Importance
+#|begin_of_text| #|start_header_id| system #|end_header_id| CC ‘Cut ting GKnowledge GDate : GDecember G ‘202 3 C Today GDate : G'26
+GJul G 202 4 CC Provide Gonly Ga Gshort Ganswer Gin Gthe Gform Gof Gkeywords Gto Gthe Gfollowing Gquestion . GAfter Gyour Ganswer ,
+Gprovide Ga Géonfidence Gécore Gbetween GA G( very Ghigh Géonfidence ) Gand GE G( very Glow Géonfidence ) Gwhich Grneasures Ghow
+Géonfident Gyou Gare Gin Gyour Ganswer . GUse Gthe Gfollowing Gformat Gfo Grespond :C’** *C Answer : G[ Write Gyour Ganswer Ghere .
+]C Conf idence : G[ Write Gyour Gconfidence Gscore Ghere . JC’ * *C'lf Gyou Géannot Gprovide Gan Ganswer , Ganswer Gwith G* NO
+GANSW ER *. #|eot_id| #|start_header_id] user #|end_header_id| CC Question : GOt is GBanOnMGWas Ga Gpioneer Gin Géxploring Gwhere ?
+#|eot_id| #|start_header_id| assistant #|end_header_id| CC Answer : GC aves Gand Gunderwater C ‘Conf idence :
+
+(e) 400 Step
+
+Legend: H Negative 0 Neutral & Positive
+
+Word Importance
+#|begin_of_text| #|start_header_id| system #|end_header_id| CC ‘Cut ting GKnowledge GDate : GDecember G ‘202 3 C Today GDate : G'26
+GJul G 202 4 CC Provide Gonly Ga Gshort Ganswer Gin Gthe Gform Gof Gkeywords Gfo Gthe Gfollowing Gquestion . GAfter Gyour Ganswer ,
+Gprovide Ga Géonfidence Gscore Gbetween GA G( very Ghigh Géonfidence ) Gand GE G( very Glow Géonfidence ) Gwhich Grneasures Ghow
+Géonfident Gyou Gare Gin Gyour Ganswer . GUse Gthe Gfollowing Gformat Gfo Gfespond :C’* > ~C Answer : G[ Write Gyour Ganswer Ghere .
+Ic Conf idence : G[ Write Gyour Géonfidence Gscore Ghere . JC’ ~ “C'lf Gyou Géannot Gprovide Gan Ganswer , Ganswer GWith G* NO
+GANSW ER *. #leot_id| #|start_header_id| user #/end_header_id| CC Question : GOt is GBanOnIGias Ga Gpioneer Gin Géxploring Gwhere ?
+#|eot_id| #|start_header_id| assistant #|end_header_id| CC’Answer : GC aves Gand Gunderwater C ‘Conf idence :
+
+(f) 500 Step
+
+Figure 11: Visualization of token attribution changes across training steps using Integrated Gradients (LLAMA3.
+8B-INSTRUCT). As training progresses, the attribution scores are reallocated.
+
+17

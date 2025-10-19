@@ -1,0 +1,1132 @@
+arXiv:2510.11537v1 [cs.CL] 13 Oct 2025
+
+An Encoder-Integrated PhoBERT with Graph Attention for Vietnamese
+
+Token-Level Classification
+
+Ba-Quang Nguyen
+University of Engineering and Technology
+Vietnam National University
+Hanoi, Vietnam
+2302041 2@vnu.edu.vn
+
+Abstract
+
+In this paper, we propose a novel neural ar-
+chitecture named TextGraphFuseGAT, which
+integrates a pretrained transformer encoder
+(PhoBERT) with Graph Attention Networks
+(GAT) for token-level classification tasks. The
+proposed model constructs a fully connected
+graph over the token embeddings produced by
+PhoBERT, enabling the application of a GAT
+layer to capture rich inter-token dependencies
+beyond those modeled by sequential context
+alone. To further enhance contextualization, a
+Transformer-style self-attention layer is applied
+on top of the graph-enhanced embeddings. The
+final token representations are passed through
+a classification head to perform sequence label-
+ing.
+
+We evaluate the effectiveness of our approach
+on three Vietnamese benchmark datasets: the
+PhoNER-COVID19 dataset (Truong et al.,
+2021) for Named Entity Recognition (NER)
+in the COVID-19 domain, the PhoDisfluency
+dataset (Dao et al., 2022) for speech disfluency
+detection, and the VietMed-NER dataset (Le-
+Duc et al., 2024) for medical-domain NER.
+VietMed-NER is the first Vietnamese medi-
+cal spoken NER dataset, featuring 18 entity
+collected from real-world medical speech tran-
+scripts, annotated using the standard BIO tag-
+ging scheme. Its specialized vocabulary and
+complex domain-specific expressions make it a
+challenging benchmark for token-level classifi-
+cation models.
+
+Experimental results demonstrate that our
+method consistently outperforms strong base-
+lines, including transformer-only and conven-
+tional neural models such as BiLSTM + CNN
++ CRF, confirming the effectiveness of combin-
+ing pre-trained semantic features with graph-
+based relational modeling for improved token
+classification across multiple domains.
+
+1 Introduction
+
+1.1 Background and Motivation
+
+Token-level classification is a fundamental task in
+NLP, supporting applications such as Named Entity
+Recognition (NER), POS tagging, and disfluency
+detection, which in turn enable downstream sys-
+tems like information extraction and dialogue pro-
+cessing. For Vietnamese, a morphologically rich
+language with limited annotated resources, accu-
+rate token-level modeling is especially important.
+Pre-trained language models such as PhoBERT
+have substantially advanced Vietnamese NLP by
+providing strong contextual embeddings. However,
+self-attention alone may be insufficient to capture
+explicit syntactic structures or long-range discourse
+cues, motivating hybrid architectures that combine
+contextual encoders with structural modeling.
+
+1.2 Challenges in Vietnamese Token-Level
+Tasks
+
+Vietnamese token-level classification remains dif-
+ficult due to several factors: (1) Ambiguous tok-
+enization, since whitespace does not always align
+with word boundaries; (ii) Data scarcity, with lim-
+ited and domain-specific annotated corpora; (iii)
+Severe label imbalance, where the majority “O”
+class dominates and rare entities are underrepre-
+sented. In addition, each task poses unique diffi-
+culties: NER requires distinguishing overlapping
+entity types, while disfluency detection relies on
+subtle discourse patterns in the absence of prosodic
+features.
+
+1.3 Datasets
+
+We evaluate our approach on three publicly
+available Vietnamese benchmarks: PhoNER-
+COVID19, PhoDisfluency, and VietMed-NER.
+These datasets span two distinct domains of Viet-
+namese language processing: formal written text
+and spontaneous speech transcripts.
+
+
+PhoNER-COVID19 is a Vietnamese NER
+dataset focusing on short sentences related to
+the COVID-19 pandemic. It contains 10 entity
+types (e.g., PATIENT_ID, SYMPTOM&DISEASE,
+LOCATION, DATE) annotated with the stan-
+dard BIO scheme, yielding 20 distinct labels.
+The data is sourced from news headlines, offi-
+cial government announcements, and social me-
+dia posts, capturing a realistic snapshot of Viet-
+namese usage during the pandemic. Both word-
+level and syllable-level tokenizations are pro-
+vided. The training/validation/test splits con-
+tain 5,027/2,000/3,000 sentences, corresponding to
+132,511/56,283/85,678 tokens for word-level and
+167,541/71,325/108,354 tokens for syllable-level.
+No nested entities are annotated.
+
+PhoDisfluency is a Vietnamese disfluency de-
+tection dataset annotated at both word and syl-
+lable levels. It follows the disfluency structure
+of Shriberg (1994), with three label categories:
+RM (Reparandum), JM (Interregnum), and O (flu-
+ent words). The training/validation/test sets com-
+prise 4,478/500/893 sentences, corresponding to
+82,419/10,238/16,751 tokens for word-level and
+98,694/12,024/19,850 tokens for syllable-level.
+The label set is consistent across all splits, and
+no nested annotations are included.
+
+VietMed-NER is a Vietnamese medical NER
+dataset manually annotated with 18 entity types
+(e.g., DISEASESYMPTOM, DRUGCHEMICAL,
+SURGERY) using the BIO scheme. The corpus
+is collected from ASR transcripts of Vietnamese
+medical speech, covering terminology from various
+specialties. It contains 9,270 sentences. The train-
+ing/validation/test splits include 4,620/1,150/3,500
+sentences with 11,109/2,729/7,897 entity mentions,
+respectively. The dataset is provided at the word
+level without nested entities.
+
+Overall, these datasets provide a diverse and
+challenging evaluation benchmark for token-level
+classification in both formal written news and infor-
+mal spoken language domains. We use both word-
+level and syllable-level versions (where available)
+to assess the generalizability and robustness of our
+method across different linguistic granularities.
+
+1.4 Contributions
+Our main contributions in this work are:
+¢ We introduce TextGraphFuseGAT, a hy-
+
+brid model that combines transformer-based
+contextual embeddings with graph attention
+
+mechanisms for token-level classification.
+
+¢ We evaluate our model on three challenging
+Vietnamese benchmarks, demonstrating su-
+perior performance compared to transformer-
+only baselines.
+
+¢ We provide empirical evidence that relational
+modeling via graphs complements sequential
+modeling, suggesting a promising direction
+for hybrid neural architectures, especially in
+under-resourced languages like Vietnamese.
+
+To our knowledge, this is the first work to in-
+tegrate graph attention and transformer decod-
+ing into a unified architecture for Vietnamese
+token-level tasks.
+
+2 Related Work
+
+Token-level classification tasks, such as disfluency
+detection and Named Entity Recognition (NER),
+are central challenges in natural language process-
+ing (NLP). For Vietnamese, both tasks have re-
+ceived increased attention in recent years due to
+the need for high-quality language technology re-
+sources in under-resourced languages.
+
+2.1 Disfluency Detection
+
+Disfluency detection has been studied extensively
+in English. Early neural approaches such as Za-
+yats et al. (2016) (Zayats et al., 2016) proposed
+a BiLSTM model that significantly outperformed
+traditional pattern-based methods. Later, prosodic
+and attention-based signals were integrated into
+disfluency modeling (Zayats and Ostendorf, 2019
+(Zayats and Ostendorf, 2019)). Schlangen and
+Hough (2017) (Schlangen and Hough, 2017) jointly
+modeled disfluency detection and utterance seg-
+mentation from speech, highlighting the close in-
+teraction between the two problems. Wang et al.
+(2020) (Wang et al., 2020) explored self-training
+and self-supervised learning for unsupervised dis-
+fluency detection, while Lou and Johnson (2020)
+(Jamshid Lou and Johnson, 2020) introduced semi-
+supervised self-training with self-attentive parsing,
+setting new benchmarks on English datasets.
+
+For Vietnamese, Dao et al. (2022) (Dao et al.,
+2022) presented one of the first comprehensive
+studies targeting Vietnamese disfluencies. They
+explored various architectures, including BiLSTM
++ CNN + CRE, XLM-R, and PhoBERT fine-tuning.
+Their experiments showed that pretrained language
+
+
+models like PhoBERT significantly outperformed
+traditional sequence labeling architectures.
+
+2.2 Named Entity Recognition
+
+Named Entity Recognition (NER) has long been
+a fundamental task in NLP, aiming to identify and
+classify proper names such as persons, organiza-
+tions, locations, and other domain-specific entities.
+In English, large-scale shared benchmarks such as
+CoNLL-2003 (Sang and De Meulder, 2003) has
+served as standard testbeds for decades. Early ap-
+proaches relied on hand-crafted features combined
+with sequence labeling models such as Conditional
+Random Fields (CRFs) (Lafferty et al., 2001) and
+BiLSTM-CREF architectures (Lample et al., 2016),
+which already demonstrated strong performance by
+capturing both lexical and contextual cues.
+
+With the introduction of pretrained contextual-
+ized embeddings, particularly ELMo (Peters et al.,
+2018) and later transformer-based encoders such
+as BERT (Devlin et al., 2019) and RoBERTa (Liu
+et al., 2019), the state of the art on English NER
+benchmarks was dramatically advanced. These
+models leverage large-scale pretraining to capture
+both syntactic and semantic information, leading
+to substantial improvements over purely super-
+vised methods. More recent work has further ex-
+plored domain adaptation and multilingual model-
+ing, where cross-lingual encoders such as XLM-R
+(Conneau et al., 2019) have been shown to trans-
+fer NER capabilities across languages, including
+low-resource settings.
+
+NER has also been widely studied for Viet-
+namese. The VLSP shared task (Nguyen et al.,
+2018) provided an early benchmark dataset and
+evaluation campaigns. Vu et al. (2018) intro-
+duced VnCoreNLP (Vu et al., 2018), a widely used
+toolkit for multiple Vietnamese NLP tasks, includ-
+ing NER. Truong et al. (2021) (Truong et al., 2021)
+introduced a domain-specific COVID-19 dataset
+and benchmarked several models, again confirm-
+ing that PhoBERT fine-tuning achieved superior re-
+sults. More recently, Le-Duc et al. (2024) (Le-Duc
+et al., 2024) proposed VietMed-NER, a large-scale
+Vietnamese medical NER dataset containing 18 en-
+tity types collected from medical records, clinical
+notes, and other healthcare-related documents.
+
+2.3. Graph-based Models for Token
+Classification
+
+Recent advances in graph neural networks (GNNs)
+have demonstrated their effectiveness for model-
+
+ing linguistic structures beyond sequential order.
+Marcheggiani and Titov (2017) (Marcheggiani and
+Titov, 2017) applied graph convolutional networks
+(GCNs) to semantic role labeling, while Cetoli et
+al. (2017) (Cetoli et al., 2017) used GCNs for
+named entity recognition. Zhang et al. (2018)
+(Zhang et al., 2018) showed that pruning depen-
+dency trees before applying GCNs improved rela-
+tion extraction. Velickovic et al. (2018) (Veliékovic
+et al., 2018) introduced the Graph Attention Net-
+work (GAT), which enables more flexible relational
+modeling by attending over neighborhoods. More
+recent work such as Zhang et al. (2020) (Zhang
+et al., 2020) proposed Graph-BERT to unify atten-
+tion and graph structures.. These studies suggest
+that relational modeling via graphs can comple-
+ment sequential modeling in structured prediction
+tasks.
+
+2.4 Discussion
+
+Although these studies highlight the power of pre-
+trained models for Vietnamese, they mostly treat
+the problem using either sequential models (e.g.,
+BiLSTM-CRF) or transformer-based models in iso-
+lation. In contrast, our approach introduces a hy-
+brid graph-based architecture that models token-
+level relations more explicitly using graph attention
+mechanisms, followed by a Transformer decoder
+for compositional refinement — a combination that
+is underexplored in Vietnamese token classifica-
+tion.
+
+Recent work has shown that graph neural net-
+works (GNNs) are effective in modeling token rela-
+tions beyond linear order (Wu et al., 2020), while
+Transformer decoders have been adapted to struc-
+tured prediction tasks (Zhou et al., 2020). To the
+best of our knowledge, no prior work has proposed
+an architecture that jointly integrates these two
+components within a unified framework for disflu-
+ency detection or NER, particularly in the context
+of low-resource languages.
+
+This motivates our proposed model: a PhoBERT-
+augmented, graph-enhanced, transformer-decoder-
+based token classifier for Vietnamese.
+
+Summary of existing approaches:
+
+¢ BiLSTM + CNN + CRE architectures for to-
+ken classification.
+
+¢ Pretrained language models (PhoBERT, XLM-
+R) fine-tuned for Vietnamese.
+
+
+¢ GNNs and Transformers used separately in
+prior work.
+
+¢ No prior work combines GAT + Transformer
+decoder for Vietnamese token-level tasks.
+
+3 Method
+
+3.1 Pretrained Embedding Encoder
+
+We employ PhoBERT (Nguyen and Nguyen, 2020),
+a state-of-the-art Vietnamese language model based
+on RoBERTa, as the backbone encoder in our ar-
+chitecture. Given an input sentence, we tokenize it
+using PhoBERT’s Byte-Pair Encoding (BPE) tok-
+enizer and extract contextual embeddings from the
+final hidden layer. These token-level representa-
+tions encode rich syntactic and semantic informa-
+tion. Unlike approaches that keep the pre-trained
+encoder frozen, we fine-tune PhoBERT jointly with
+the downstream components, allowing the contex-
+tual representations to adapt dynamically to the
+characteristics of each specific task. The PhoBERT
+embeddings H € R”*“ are then used as input node
+features for the subsequent graph construction mod-
+ule. For simplicity, we omit the batch dimension
+B; all representations can be extended to R?*"*¢
+in practice.
+
+3.2 Graph Construction Module
+
+To explicitly model interactions among tokens, we
+construct a fully connected graph over each input
+sequence, treating every token as a node and con-
+necting all token pairs via directed edges. Each
+node is also connected to itself. The node fea-
+tures are initialized as the PhoBERT embeddings
+H, so the output of this module is the graph (G’, 7),
+which serves as input to the GAT layer. We build
+the edge index efficiently over mini-batches by off-
+setting token indices per sample.
+
+3.3. Graph Attention Network (GAT)
+
+We apply a multi-head Graph Attention Network
+(GAT) (Velickovié et al., 2018) to the constructed
+token graph (G,H). GAT computes attention
+coefficients between nodes via learned functions
+over node features, rather than dot products as in
+Transformer self-attention (Velickovi¢ et al., 2018),
+thereby introducing a complementary inductive
+bias. Prior work has shown that incorporating
+graph-based biases can enhance Transformer ar-
+chitectures on structured data (Dwivedi and Bres-
+son, 2020; Chen et al., 2022). This enables the
+model to capture diverse relational patterns beyond
+
+those represented by self-attention alone. More-
+over, multi-head graph attention facilitates model-
+ing of multiple relation types in parallel (Veli¢kovi¢
+et al., 2018; Vaswani et al., 2017), while also allow-
+ing extensions to sparse or linguistically motivated
+graphs. We apply dropout to both the normalized
+attention coefficients and the hidden features to
+prevent overfitting. The output is a set of graph-
+augmented token representations H®* € R”*4,
+which are passed to the Transformer decoder.
+
+3.4 Transformer Decoder Layer
+
+Following the GAT module, we apply a Trans-
+former decoder (Vaswani et al., 2017) to further
+refine token representations. In our design, both
+the target (tgt) and memory (memory) inputs
+are set to the GAT-enhanced embeddings, i.e.,
+tgt = memory = H®*. We adopt the decoder
+layer rather than an encoder layer to leverage its
+cross-attention mechanism as an additional refine-
+ment step, providing a complementary view be-
+yond standard self-attention. We adopt the stan-
+dard TransformerDecoderLayer from PyTorch
+without any modification, and the cross-attention
+mechanism is preserved. Therefore, the decoder
+does not serve as an autoregressive generator, but
+rather as a refinement layer that re-attends to the
+same sequence. This additional refinement outputs
+He © R"*4, which captures richer contextual
+and compositional dependencies while preserving
+the graph-augmented semantics. The refined em-
+beddings H“ are then passed to the classification
+layer.
+
+3.5 Classification Layer
+
+Refined token embeddings H* are passed through
+a feed-forward classification layer to produce token-
+level label predictions. For training, we use the
+standard CrossEntropyLoss in PyTorch with an
+ignore_index of —100 to mask padding and sub-
+word tokens.
+
+3.6 Training Strategy
+
+We jointly fine-tune PhoBERT together with the
+graph-based and classification components, using
+AdamW with moderate learning rates. This joint
+optimization strategy is designed to reduce overfit-
+ting and training time, making the model effective
+for low-resource sequence labeling tasks.
+
+Our modular design leverages strong pre-
+trained representations, relational reasoning, and
+lightweight adaptation layers to yield competitive
+
+
+results in low-resource, token-level sequence label-
+ing tasks.
+
+Pretrained Embedding Encoder
+(PhoBERT)
++
+
+Graph Construction Module
+
+Graph Attention Network (GAT)
+
+Transformer Decoder Layer
+
+—
+Classification Layer
+(Feed-forward — CrossEntropyLoss)
+
+Figure 1: Overall architecture of the proposed model.
+
+4 Experiments
+
+In this section, we conduct a comprehensive com-
+parison between our proposed method and prior
+state-of-the-art approaches on two fundamental
+Vietnamese token-level classification tasks: Named
+Entity Recognition (NER) and Disfluency Detec-
+tion. For the NER task, we evaluate our model
+on two benchmarks: the COVID-19 NER dataset
+(Truong et al., 2021) and the VietMed-NER dataset
+(Le-Duc et al., 2024), benchmarking against strong
+baselines such as BiLSTM-CRF, XLM-R, and
+PhoBERT models, with reference results reported
+by prior work.
+
+Similarly, for the Disfluency Detection task, we
+adopt the same evaluation setting as (Dao et al.,
+2022), who showed that fine-tuning pretrained mod-
+els like PhoBERT and XLM-R yields superior re-
+sults. By fine-tuning PhoBERT within our architec-
+ture and augmenting it with graph-based relational
+reasoning and transformer-based decoding, we aim
+to push performance even further.
+
+Our primary goal is to demonstrate that a hy-
+brid architecture, which integrates pretrained em-
+beddings with structural inductive bias (via GAT
+and Transformer decoder), can effectively boost
+token-level prediction performance. By jointly op-
+timizing all components—including the pretrained
+language model—we show that the model not only
+captures deep contextual semantics but also learns
+to reason over token interactions, ultimately sur-
+passing or matching strong baselines. This is es-
+pecially impactful for low-resource languages like
+Vietnamese, where architectural innovations can
+
+complement limited annotated data.
+
+4.1 Training Settings
+
+We use PhoBERTharge as the backbone encoder for
+both tasks. For Named Entity Recognition (NER),
+the training is conducted using a maximum se-
+quence length of 128 tokens, batch size of 16, and
+trained over 15 epochs with a learning rate of 5e-
+5. Following common practice in Transformer-
+based models, we apply a weight decay of 0.01
+to prevent overfitting, gradient clipping at 1.0 to
+stabilize training, a warmup ratio of 0.1 to smooth
+the early optimization phase, and dropout proba-
+bility of 0.3 to improve generalization. The GAT
+module is configured with 8 attention heads and a
+hidden size of 256, which are typical settings en-
+suring sufficient model capacity without excessive
+computation. For the PhoNER COVID-19 dataset,
+we follow (Nguyen and Nguyen, 2020) and use a
+learning rate of 5e-5, where PhoBERT achieves its
+best performance. For the more complex VietMed-
+NER dataset, we use a slightly smaller learning rate
+of 3e-5.Compared to the original paper, we adopt
+a much smaller batch size and fewer epochs for
+each dataset. Specifically, for PhoNER, our setting
+uses a batch size of 16 and 15 epochs, whereas
+the original paper used a batch size of 32 and 30
+epochs. For VietMed-NER, we also train with a
+batch size of 16 and 15 epochs, while the origi-
+nal paper used a batch size of 50 and 50 epochs.
+This adjustment enables faster convergence and re-
+duces computational demand, making the approach
+feasible on limited resources without compromis-
+ing performance. Our experiments confirm that
+the model still converges effectively under these
+lighter settings, achieving strong performance with
+only 15 epochs and batch size 16 for PhoNER and
+VietMed, and 10 epochs for Disfluency Detection,
+as presented in the Main Results.
+
+For Disfluency Detection, we further adapt the
+training strategy to reflect the lower complexity of
+this dataset, which is smaller in size and contains
+far fewer label types compared to PhoNER and
+VietMed-NER. Consequently, we train the model
+for only 10 epochs, which is sufficient for con-
+vergence while still optimizing computational ef-
+ficiency. To match this number of epochs, we
+experimented with several typical learning rates
+and selected 2e-5, which achieved the highest per-
+formance. In addition, the number of GAT atten-
+tion heads is reduced from 8 to 4. This reduc-
+tion lowers computational overhead and prevents
+
+
+over-parameterization, while maintaining adequate
+modeling capacity for the simpler structure of the
+disfluency detection task.
+
+The optimizer used in all experiments is AdamW.
+We train all models using PyTorch and Hugging-
+Face Transformers libraries with early stopping
+based on validation Micro-F1 score. In terms of
+efficiency, training on the most complex dataset
+(VietMed-NER) takes approximately 2 hours on
+a single NVIDIA T4 GPU (Google Colab envi-
+ronment), showing that the proposed architecture
+remains computationally feasible even under the
+heaviest training setting.
+
+4.2 Evaluation Metrics
+
+We evaluate both tasks using Micro-F1 and Macro-
+F1 scores. For NER, we further report per-entity
+F1 scores to assess model performance across dif-
+ferent entity types. For Disfluency Detection, we
+report F1 scores for RM (repair markers) and IM
+(interruption markers) categories in addition to the
+overall Micro-F1.
+
+4.3 Main Results
+
+Below, we summarize the comparison results
+across both tasks, highlighting key performance
+metrics and gains.
+
+We evaluate our method against strong baselines
+across three datasets. On the PhoNER-COVID19
+dataset, we compare BiLSTM-CRF, XLM-Rygse;
+XLM-Rjarge, and our method (Table 1). On the
+PhoDisfluency dataset, we compare BiLSTM-CRF,
+XLM-R, PhoBERT, and our method (Table 2). On
+the VietMed-NER dataset, we report results against
+BARTpho, mBART-50, PhoBERT, ViDeBERTa,
+ViT5, XLM-R, and our method (Tables 3 and 4).
+For fair comparison, baseline scores are taken from
+prior work ((Truong et al., 2021) for PhoNER-
+COVID19; (Dao et al., 2022) for PhoDisfluency;
+(Le-Duc et al., 2024) for VietMed-NER).
+
+Our method achieves strong performance on
+both the NER and Disfluency Detection tasks, with
+particularly remarkable gains in Disfluency Detec-
+tion, where all Fl scores exceed those reported for
+the fine-tuned PhoBERTharge in the original study
+((Dao et al., 2022) for PhoDisfluency; (Truong
+et al., 2021) for PhoNER-COVID19). It is worth
+emphasizing that in both benchmark studies, fine-
+tuned PhoBERTiarge was shown to be a highly com-
+petitive baseline, achieving top-tier results. How-
+ever, our proposed method outperforms it substan-
+tially. On the NER task (Table 1), our model
+
+achieves a Micro-F1 score of 0.984, significantly
+higher than the 0.945 reported for PhoBERTharge
+(Truong et al., 2021). For Disfluency Detection (Ta-
+ble 2), our method attains an exceptional Micro-F1l
+score of 0.994, approaching perfect accuracy and
+clearly surpassing the 0.968 score of the fine-tuned
+PhoBERTharge reported in (Dao et al., 2022). On the
+VietMed-NER dataset (Table 3 and Table 4), our
+method achieves a substantial improvement with
+an overall F1 score of 0.892, clearly outperforming
+all baselines reported in (Le-Duc et al., 2024).
+
+The superior performance of our method in
+token-level classification can be attributed to sev-
+eral key architectural innovations. Our method
+employs a hybrid architecture that integrates multi-
+ple complementary components. Input tokens are
+first encoded using PhoBERT, a strong Vietnamese
+pre-trained language model. These contextual em-
+beddings are then linearly projected and passed
+through a Graph Attention Network (GATConv),
+which leverages fully-connected graph structures
+via the edge_index input. This step enables the
+model to enrich contextual representations with
+global token interactions.
+
+The output of the GAT layer is subsequently fed
+into a Transformer Decoder Layer, which models
+complex sequential dependencies and facilitates
+interaction across the entire sequence. Finally, the
+aggregated representations are passed through a
+linear classifier to produce output logits for token-
+level prediction.
+
+Compared to BILSTM-CRF: While BiLSTM-
+CRF models sequential dependencies with CRF
+decoding, it is generally less effective at captur-
+ing long-range dependencies. In contrast, our
+method utilizes transformer-based representations
+and GAT-enhanced structure modeling, enabling
+both local and global context understanding.
+
+Compared to XLM-Ro,gs_ and XLM-Rjg;ge:
+Our method benefits from being grounded in a
+monolingual model tailored specifically for Viet-
+namese. While XLM-R offers strong cross-lingual
+generalization, it may overlook language-specific
+morphological or syntactic cues that are well cap-
+tured by PhoBERT. By combining PhoBERT with
+Vietnamese dependency parses through the GAT
+layer, our model better exploits the characteristics
+of the Vietnamese language.
+
+Compared to PhoBERT),<¢ and
+PhoBERT),;g-:_ Our method yields superior
+results. This improvement is not merely due to
+further fine-tuning but arises from the hybrid
+
+
+Model PAT PER AGE GEN OCC LOC ORG SYM_ TRA_ DAT Mic-Fl Mac-Fl
+Syllable
+BiL-CRF 0.953 0.855 0.943 0.947 0.588 0.915 0.808 0.801 0.794 0.976 0.906 0.858
+XLM-Robase 0.978 0.902 0.957 0.842 0.506 0.941 0.842 0.858 0.924 0.982 0.925 0.879
+XLM-Riarge 0.982 0.933 0.962 0.958 0.692 0.943 0.853 0.854 0.943 0.987 0.938 0.911
+Our Method 0.990 0.942 0.969 0.976 0.839 0.971 0.923 0.923 0.984 0.991 0.982 0.954
+Word
+BiL-CRF 0.953 0.874 0.950 0.947 0.605 0.911 0.831 0.799 0.902 0.976 0.910 0.875
+PhoBERTyase 0.981 0.903 0.962 0.954 0.749 0.943 0.870 0.883 0.966 0.987 0.942 0.920
+PhoBERTyarge 0.980 0.944 0.967 0.968 0.791 0.940 0.876 0.885 0.967 0.989 0.945 0.931
+Our Method = 0.987 0.961 0.978 0.985 0.841 0.969 0.924 0.928 0.983 0.990 0.984 0.958
+Table 1: NER performance on the PhoNER-COVID19 dataset.
+Model RM-Fl IM-Fl Mic-Fl Model Prec. Rec. Fl
+Syllable BARTpho 0.640 0.730 0.680
+BiL-CRF 0.882 0.947 0.915 mBART-50 0.640 0.660 0.650
+XLM-Ropase 0.946 0.977 0.962 PhoBERT pase 0.670 0.780 0.720
+XLM-Riarge 0.953 0.978 0.966 PhoBERT yase-V2 0.680 0.790 0.740
+Our Method 0.978 0.992 0.993 PhoBERT arge 0.690 0.770 0.730
+Word ViDeBERTa),;¢ 0.500 0.410 0.450
+BiL-CRF 0.894 0.946 0.921 vase ean O40 e00
+PhoBERTyase «0.956 —-0.972_—s: 0.965 XLMR, 0710 0770 0740
+PhoBERTiarge (0.953 0.981 0.968 “large
+Our Method 0.978 0.993 0.994 Our Method 0.892 0.893 0.893
+
+Table 2: Disfluency detection performance on the PhoD-
+isfluency dataset.
+
+architectural framework that integrates both
+graph-based and transformer-based modules. The
+synergy between these components, coupled with
+joint fine-tuning, allows the model to go beyond
+the representational power of PhoBERT alone.
+
+In summary, the improvements demonstrated by
+our model are a direct consequence of the archi-
+tectural innovations that combine syntactic struc-
+ture with global context modeling. By jointly fine-
+tuning all components, we achieve performance
+gains that surpass strong baselines, including fine-
+tuned PhoBERTharge. These findings reinforce the
+argument that incorporating explicit structural bi-
+ases, rather than relying solely on backbone models,
+remains a promising direction for advancing token-
+level classification in low-resource or linguistically
+rich languages like Vietnamese.
+
+4.4 Ablation Study
+
+To better understand the contribution of each com-
+ponent in our model, we conduct an ablation study
+on the VietMed-NER dataset. We compare the fol-
+
+Table 3: NER performance on the VietMed-NER
+dataset.
+
+lowing settings: (i) PhoBERT-only baseline, (ii)
+PhoBERT with GAT (without decoder), and (iii)
+the full model with both GAT and Transformer De-
+coder (Table 5) . For fair comparison, we report
+Micro-F1 scores, which are consistent with prior
+work. The PhoBERT-only baseline scores are taken
+from (Le-Duc et al., 2024).
+
+The results show that PhoBERT+GAT consis-
+tently improves over the PhoBERT-only baseline,
+demonstrating the effectiveness of graph-based to-
+ken interactions. Although the full model does
+not significantly improve over PhoBERT+GAT in
+terms of Micro-F1, this behavior is further ana-
+lyzed and explained in Section 5 (Error Analysis),
+where we show that the decoder mainly benefits
+Macro-F1 and rare entity types.
+
+5 Error Analysis
+
+The experimental results reveal a clear perfor-
+mance gap between the model’s performance on the
+VietMed-NER, PhoNER COVID-19, and PhoD-
+isfluency datasets. On PhaoNER COVID-19 (high-
+
+
+Entity Prec. Rec. Fl Support
+AGE 0.330 0.591 0.423 352
+DATETIME 0.712 0.892 0.792 968
+DIAGNOSTICS 0.694 0.912 0.789 570
+DISEASES YMTOM 0.768 0.809 0.788 1795
+DRUGCHEMICAL 0.931 0.919 0.925 628
+FOODDRINK 0.695 0.568 0.625 1205
+GENDER 0.479 0.745 0.583 1228
+LOCATION 0.550 0.433 0.484 934
+MEDDEVICETECHNIQUE 0.190 0.447 0.266 235
+OCCUPATION 0.757 0.786 0.771 1281
+ORGAN 0.691 0.808 0.745 495
+ORGANIZATION 0.731 0.826 0.775 679
+PERSONALCARE 0.636 0.762 0.693 340
+PREVENTIVEMED 0.964 0.935 0.949 61685
+SURGERY 0.282 0.785 0.416 219
+TRANSPORTATION 0.901 0.338 0.492 402
+TREATMENT 0.752 0.773 0.762 1002
+UNITCALIBRATOR 0.669 0.699 0.684 2172
+_ 0.545 0.641 0.589 573
+Micro avg 0.892 0.893 0.893 76763
+Macro avg 0.646 0.719 0.661 76763
+
+Table 4: Per-entity results on the VietMed-NER dataset.
+
+Model Prec. Rec. Micro-F1
+PhoBERT-only 0.690 0.770 0.730
+PhoBERT + GAT 0.889 0.891 0.890
+Full (PhoBERT + GAT + Decoder) 0.892 0.893 0.893
+
+Table 5: Ablation study on VietMed-NER.
+
+est Macro-F1 = 0.958, Micro-F1 = 0.984 see Ta-
+ble 1) and PhoDisfluency (highest Micro-Fl =
+0.994 see Table 2), the model achieves very high
+performance, approaching the upper bound. This
+exceptionally high accuracy can be explained by
+several factors:
+
+1. More balanced label distribution and fewer
+entity types — Both datasets contain a limited
+number of label types (PhoNER COVID-19
+focuses mainly on patient-related information
+and COVID-19 symptoms; PhoDisfluency in-
+volves only a few tags related to fluent and
+disfluent speech), which facilitates faster and
+more stable learning of entity-specific pat-
+terns.
+
+2. Consistent and domain-specific language
+patterns — Sentences in PhoNER COVID-19
+and PhoDisfluency tend to follow consistent
+syntactic structures and vocabulary specific to
+their domains (e.g., news articles tagged with
+COVID-19 from major Vietnamese outlets,
+conversational transcripts), thereby reducing
+the contextual variability the model must han-
+dle.
+
+3. Absence of rare entities — There are no en-
+tity types with extremely low frequency, thus
+avoiding overfitting to small subsets of the
+data or failing to learn meaningful patterns.
+
+It is worth noting that the Micro-F1 score of
+0.994 on PhoDisfluency (see Table 2) is unusually
+high, almost reaching perfect accuracy. This re-
+sult does not indicate overfitting of the model,
+but rather reflects the relative simplicity of the
+dataset: only three label categories, stable dis-
+course patterns, and the absence of rare classes.
+In other words, the task itself is close to a solved
+problem under current architectures, and further
+improvements are naturally bounded by ceiling
+effects. Importantly, this behavior does not gen-
+eralize across datasets: on VietMed-NER, which
+contains a larger vocabulary, more entity types, and
+severe label imbalance, the model’s performance
+drops substantially (Micro-F1 = 0.893 Table 4).
+This contrast confirms that the near-perfect score
+on PhoDisfluency arises from the dataset’s simplic-
+ity rather than model overfitting.
+
+In contrast, VietMed-NER (Macro-F1 = 0.661,
+Micro-Fl = 0.893); see Table 3 and Table 4)
+exhibits noticeably lower performance, particu-
+larly for certain entity types such as MEDDE-
+VICETECHNIQUE (F1 = 0.266), SURGERY (Fl =
+0.416), and AGE (F1 = 0.423). The main contribut-
+ing factors include:
+
+1. Rare entities and imbalanced distribution
+— VietMed-NER contains more than 18 entity
+types with highly skewed frequency distribu-
+tion. Certain types occur only a handful of
+times in the training set, leading to random
+predictions, susceptibility to noisy samples,
+and poor generalization. For instance, the la-
+bel TRANSPORTATION has only 5 training sam-
+ples with just 2 unique entity mentions, which
+severely limits the model’s ability to learn rep-
+resentative patterns.
+
+2. Semantic overlap and ambiguous bound-
+aries — Certain entity types exhibit closely
+related conceptual scopes or unclear lexical
+boundaries (e.g., TREATMENT, PREVEN-
+TIVEMED, SURGERY), making label assign-
+ment prone to confusion.
+
+In summary, the substantial performance dis-
+parity between VietMed-NER and the other two
+datasets is not inherently due to the model architec-
+ture, but rather to the characteristics of the datasets
+
+
+themselves: contextual diversity, the number of
+entity types, and severe label imbalance.
+
+Impact of Transformer decoder. The ablation
+results show that adding the Transformer decoder
+consistently improves performance across datasets,
+though the magnitude of improvement varies with
+task complexity. On VietMed-NER, a dataset with
+a large vocabulary and many rare entity types, the
+decoder yields a substantial Macro-F1 gain (0.571
+— 0.661), while Micro-F1 increases only slightly
+(0.890 — 0.893). This contrast indicates that the
+decoder is particularly effective for rare and diffi-
+cult classes, not just the dominant ones.
+
+By contrast, on medium-scale datasets such as
+PhoNER COVID-19 and PhoDisfluency, the de-
+coder’s effect remains marginal. Macro-Fl im-
+proves only from 0.945 — 0.958 and 0.980 —
+0.988, while Micro-F1 rises just from 0.981 >
+0.984 and 0.990 — 0.994 in word level, respec-
+tively. These results confirm that the PhoBERT
++ GAT backbone already achieves near-ceiling
+Micro-F1 on datasets of moderate complexity, leav-
+ing limited room for further gains.
+
+Overall, while Micro-Fl changes are minor
+across all datasets, the clear Macro-F1 improve-
+ments on VietMed-NER highlight the decoder’s
+role in handling complex domains with unbalanced
+label distributions. We therefore advocate retain-
+ing the Transformer decoder in our full model to
+robustly address large-scale tasks with richer se-
+mantics and many low-frequency entities, whereas
+PhoBERT + GAT alone is already a strong solution
+for simpler datasets.
+
+6 Conclusion
+
+We introduced a novel architecture for Vietnamese
+token-level classification, evaluated on both Named
+Entity Recognition (NER) and Disfluency Detec-
+tion. Our model consistently outperformed strong
+baselines such as PhoBERTyarge and XLM-Riarge,
+achieving state-of-the-art Micro-Fl and Macro-F1
+scores. In Disfluency Detection, it nearly reached
+ceiling performance (Micro-F1 0.993 at the syl-
+lable level, 0.994 at the word level see Table 2)
+without signs of overfitting.
+
+Despite task-specific fine-tuning, we employed a
+unified design, showing that the architecture is ex-
+pressive and adaptable to different token-level prob-
+lems. To our knowledge, this is the first work com-
+bining PhoBERT, Graph Attention, and a Trans-
+former decoder in a single framework for Viet-
+
+namese, covering both written and spoken domains.
+Beyond benchmark gains, the model holds promise
+for practical applications such as healthcare chat-
+bots, educational dialogue systems, and informa-
+tion extraction. Future directions include multi-
+lingual extension and domain adaptation to better
+support low-resource or specialized settings.
+
+Reproducibility. All code and datasets used in
+this study are publicly available at this link, facili-
+tating reproducibility and further research.
+
+Future Directions
+
+Future research may pursue several promising di-
+rections:
+
+¢ Multilingual Transfer: Extending
+TextGraphFuseGAT to multilingual or
+zero-shot cross-lingual NER and disfluency
+detection via shared graph structures.
+
+Domain Adaptation: Leveraging meta-
+learning or adversarial training for efficient
+adaptation to new domains (e.g., medical or
+legal texts) with limited annotation.
+
+Multimodal Cues: Incorporating prosodic
+(pause, pitch) or visual (gestures) features to
+enhance disfluency detection in spontaneous
+speech.
+
+Efficient Graphs: Designing sparse or dy-
+namic graph attention mechanisms to lower
+computational cost and enable real-time pro-
+cessing.
+
+Explainability: Developing interpretable
+GAT modules to highlight key token inter-
+actions, supporting error analysis and model
+trust.
+
+Applications: Embedding robust token-level
+understanding into interactive agents (educa-
+tion, healthcare, dialogue) and deploying in
+real-world systems such as chatbots or infor-
+mation extraction pipelines.
+
+References
+
+Alberto Cetoli, Stefano Bragaglia, Andrew D O’ Harney,
+and Marc Sloan. 2017. Graph convolutional net-
+works for named entity recognition. arXiv preprint
+arXiv:1709.10053.
+
+
+Dexiong Chen, Leslie O’ Bray, and Karsten Borgwardt.
+2022. Structure-aware transformer for graph repre-
+sentation learning. In International conference on
+machine learning, pages 3469-3489. PMLR.
+
+Alexis Conneau, Kartikay Khandelwal, Naman Goyal,
+Vishrav Chaudhary, Guillaume Wenzek, Francisco
+Guzman, Edouard Grave, Myle Ott, Luke Zettle-
+moyer, and Veselin Stoyanov. 2019. Unsupervised
+cross-lingual representation learning at scale. arXiv
+preprint arXiv:1911.02116.
+
+Mai Hoang Dao, Thinh Hung Truong, and Dat Quoc
+Nguyen. 2022. Disfluency detection for vietnamese.
+In Proceedings of the Eighth Workshop on Noisy
+User-generated Text (W-NUT 2022), pages 194—200.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. Bert: Pre-training of deep
+bidirectional transformers for language understand-
+ing. In Proceedings of the 2019 conference of the
+North American chapter of the association for com-
+putational linguistics: human language technologies,
+volume I (long and short papers), pages 4171-4186.
+
+Vijay Prakash Dwivedi and Xavier Bresson. 2020. A
+generalization of transformer networks to graphs.
+arXiv preprint arXiv:2012.09699.
+
+Paria Jamshid Lou and Mark Johnson. 2020. Improving
+disfluency detection by self-training a self-attentive
+model. In Proceedings of the 58th Annual Meeting of
+the Association for Computational Linguistics, pages
+3754-3763, Online. Association for Computational
+Linguistics.
+
+John Lafferty, Andrew McCallum, and Fernando CN
+Pereira. 2001. Conditional random fields: Proba-
+bilistic models for segmenting and labeling sequence
+data.
+
+Guillaume Lample, Miguel Ballesteros, Sandeep Sub-
+ramanian, Kazuya Kawakami, and Chris Dyer. 2016.
+Neural architectures for named entity recognition.
+arXiv preprint arXiv: 1603.01360.
+
+Khai Le-Duc, David Thulke, Hung-Phong Tran, Long
+Vo-Dang, Khai-Nguyen Nguyen, Truong-Son Hy,
+and Ralf Schliiter. 2024. Medical spoken named
+entity recognition. arXiv preprint arXiv:2406. 13337.
+
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Dangi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. arXiv preprint arXiv: 1907.11692.
+
+Diego Marcheggiani and Ivan Titov. 2017. En-
+coding sentences with graph convolutional net-
+works for semantic role labeling. arXiv preprint
+arXiv: 1703.04826.
+
+Dat Quoc Nguyen and Anh Tuan Nguyen. 2020.
+Phobert: Pre-trained language models for vietnamese.
+arXiv preprint arXiv:2003.00744.
+
+Huyen TM Nguyen, Quyen T Ngo, Luong X Vu, Vu M
+Tran, and Hien TT Nguyen. 2018. Vlsp shared task:
+Named entity recognition. Journal of Computer Sci-
+ence and Cybernetics, 34(4):283-294.
+
+Matthew E. Peters, Mark Neumann, Mohit Iyyer, Matt
+Gardner, Christopher Clark, Kenton Lee, and Luke
+Zettlemoyer. 2018. Deep contextualized word repre-
+sentations. In Proceedings of the 2018 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume I (Long Papers), pages 2227-2237,
+New Orleans, Louisiana. Association for Computa-
+tional Linguistics.
+
+Erik Tjong Kim Sang and Fien De Meulder. 2003. In-
+troduction to the conll-2003 shared task: Language-
+independent named entity recognition. In Proceed-
+ings of the Seventh Conference on Natural Language
+Learning at HLT-NAACL 2003, pages 142-147.
+
+David Schlangen and Julian Hough. 2017. Joint, incre-
+mental disfluency detection and utterance segmenta-
+tion from speech. In Proceedings of the International
+Conference of the European Chapter of the Associa-
+tion for Computational Linguistics (EACL).
+
+Thinh Hung Truong, Mai Hoang Dao, and Dat Quoc
+Nguyen. 2021. Covid-19 named entity recognition
+for vietnamese. arXiv preprint arXiv:2104.03879.
+
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz
+Kaiser, and Illia Polosukhin. 2017. Attention is all
+you need. Advances in neural information processing
+systems, 30.
+
+Petar Velickovi¢é, Guillem Cucurull, Arantxa Casanova,
+Adriana Romero, Pietro Lid, and Yoshua Bengio.
+2018. Graph attention networks. In International
+Conference on Learning Representations.
+
+Thanh Vu, Dat Quoc Nguyen, Dai Quoc Nguyen, Mark
+Dras, and Mark Johnson. 2018. Vncorenlp: A viet-
+namese natural language processing toolkit. arXiv
+preprint arXiv: 1801.01331.
+
+Shaolei Wang, Zhongyuan Wang, Wanxiang Che, and
+Ting Liu. 2020. Combining self-training and self-
+supervised learning for unsupervised disfluency de-
+tection. arXiv preprint arXiv:2010.15360.
+
+Zonghan Wu, Shirui Pan, Fengwen Chen, Guodong
+Long, Chengqi Zhang, and Philip S Yu. 2020. A com-
+prehensive survey on graph neural networks. JEEE
+transactions on neural networks and learning sys-
+tems, 32(1):4—24.
+
+Vicky Zayats and Mari Ostendorf. 2019. Giving at-
+tention to the unexpected: Using prosody inno-
+vations in disfluency detection. arXiv preprint
+arXiv: 1904.04388.
+
+Vicky Zayats, Mari Ostendorf, and Hannaneh Hajishirzi.
+2016. Disfluency detection using a bidirectional lstm.
+arXiv preprint arXiv: 1604.03209.
+
+
+Jiawei Zhang, Haopeng Zhang, Congying Xia, and
+Li Sun. 2020. Graph-bert: Only attention is needed
+for learning graph representations. arXiv preprint
+arXiv:2001.05140.
+
+Yuhao Zhang, Peng Qi, and Christopher D Manning.
+2018. Graph convolution over pruned dependency
+
+trees improves relation extraction. arXiv preprint
+arXiv: 1809. 10185.
+
+Qitian Zhou, Lin Fan, and Minlie Cheng. 2020. Trans-
+formers are graph neural networks. In International
+Conference on Learning Representations (ICLR).

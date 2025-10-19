@@ -1,0 +1,1796 @@
+arXiv:2510.11236v1 [cs.CL] 13 Oct 2025
+
+XQuant: Achieving Ultra-Low Bit KV Cache Quantization with
+Cross-Layer Compression
+
+Haogi Yang’, Yao Yao*, Zuchao Li!*, Baoyuan Qi*, Guoming Liu*, Hai Zhao
+
+3
+
+'School of Artificial Intelligence, Wuhan University, Wuhan, China,
+School of Computer Science, Wuhan University, Wuhan, China,
+3School of Computer Science, Shanghai Jiao Tong University, Shanghai, China,
+*Xiaomi Inc., Beijing, China
+{yanghq, zcli-charlie}@whu.edu.cn, yaoyao27@sjtu.edu.cn,
+{qibaoyuan, liuguoming}@xiaomi.com, zhaohai@cs.sjtu.edu.cn
+
+Abstract
+
+Large Language Models (LLMs) have demon-
+strated remarkable capabilities across diverse
+natural language processing tasks. However,
+their extensive memory requirements, particu-
+larly due to KV cache growth during long-text
+understanding and generation, present signif-
+icant challenges for deployment in resource-
+constrained environments. Quantization has
+emerged as a promising solution to reduce
+memory consumption while preserving his-
+torical information. We propose XQuant, a
+training-free and plug-and-play framework that
+achieves ultra-low equivalent bit-width KV
+cache quantization. XQuant introduces two
+key innovations: a computationally negligible
+data-free calibration method and cross-layer
+KV cache compression, enabling quantization
+to sub-1.4 bits. Extensive experiments on
+TruthfulQA and LongBench demonstrate that
+XQuant outperforms state-of-the-art methods
+(e.g., KIVI-2bit and AsymKV- 1.5bit) by achiev-
+ing lower bit-width while maintaining supe-
+rior performance, establishing a better trade-off
+between memory efficiency and model accu-
+racy. The source code is available at https:
+//github.com/brinenick511/XQuant.
+
+1 Introduction
+
+The rapid advancement of Large Language Models
+(LLMs) has propelled significant progress in a wide
+array of natural language processing (NLP) appli-
+cations, including code generation, search systems,
+and many others (Ouyang et al., 2023; Sharma
+et al., 2024; Ma et al., 2024). The exceptional
+performance of LLMs is primarily driven by their
+immense parameter scales, which enable them to
+excel across diverse tasks. However, this remark-
+able success comes with substantial costs: the com-
+putational and memory demands associated with
+deploying LLMs have increased exponentially due
+
+“Corresponding author.
+
+to increasing models parameters and growing in-
+put and output, posing a formidable bottleneck for
+practical deployment. In particular, GPU memory
+consumption has surged to levels that frequently
+surpass the capacities of current hardware infras-
+tructures, making large-scale deployment increas-
+ingly challenging (Shi et al., 2024).
+
+To mitigate this challenge, the Key- Value (KV)
+cache mechanism has been widely adopted (Yao
+et al., 2024; Yang et al., 2024d; Ainslie et al., 2023;
+Kwon et al., 2023). The KV cache optimizes mem-
+ory efficiency by storing and reusing previously
+computed keys and values in the attention mech-
+anism, thereby reducing redundant computations
+and GPU memory usage. Despite its advantages, as
+model sizes and the input/output sequence lengths
+continue to grow, the storage overhead of the KV
+cache itself becomes increasingly significant (Shi
+et al., 2024). For instance, a 30-billion-parameter
+language model with a batch size of 128 and a
+sequence length of 1024 may require up to 180
+GB of memory solely for storing the KV cache
+(Zhang et al., 2023). Although the computational
+and memory requirements are reduced compared
+to not using it, such escalating demands still pose
+substantial challenges for deploying LLMs with
+constrained hardware resources.
+
+To address this problem, prior works have ex-
+plored various strategies from different perspec-
+tives. Some studies (Sheng et al., 2023; Hooper
+et al., 2024; Liu et al., 2024b; Tao et al., 2024) fo-
+cus on quantizing the floating-point KV cache (and,
+in some cases, model weights) to lower precision.
+However, these approaches often experience per-
+formance degradation under extreme compression
+ratios, particularly around 2-bit precision. Alter-
+natively, other methods (Xiao et al., 2023; Zhang
+et al., 2023; Li et al., 2024; Cai et al., 2024) aim
+to alleviate the storage burden by evicting unim-
+portant tokens. These methods dynamically or stat-
+ically identify and discard less critical tokens to
+
+
+reduce memory usage. Nevertheless, these meth-
+ods inherently introduce information loss, resulting
+in reduced memory retention and severe forgetting
+issues, which can undermine the model’s ability
+to maintain consistent performance on longer se-
+quences. Existing KV cache quantization meth-
+ods, due to inherent architectural constraints, fail to
+mitigate the severe performance degradation when
+operating under ultra-low-bit settings.
+
+To address these limitations, this paper focuses
+on training-free KV cache quantization scenarios
+under extreme compression ratios and introduces
+XQuant, a plug-and-play framework for ultra-
+low-bit KV cache quantization. XQuant delivers
+two key improvements over existing quantization
+methods: (1) Data-Free Calibration: Traditional
+quantization methods often face significant limi-
+tations when mapping values to low-bit precision.
+Specifically, they tend to use the two endpoint val-
+ues (e.g., 0 and 1 in 1-bit quantization) as represen-
+tative values, which can result in substantial quan-
+tization errors, particularly under low bit-width set-
+tings. To address this issue, XQuant introduces a
+parameterized calibration scheme that allows for
+more fine-grained mapping of values. By adjust-
+ing the representative values to better reflect the
+actual data distribution, this method significantly
+reduces quantization errors and minimizes perfor-
+mance loss without the need for additional data.
+(2) Cross-Layer KV Cache Compression: We
+observe enhanced KV cache similarity between
+adjacent layers after quantization - a previously
+overlooked phenomenon. This enables effective
+cross-layer compression, where the quantized KV
+cache of one layer is shared across subsequent lay-
+ers, significantly reducing computational and mem-
+ory costs. Meanwhile, a subset of layer-specific
+parameters is preserved to retain the unique char-
+acteristics of each layer, ensuring minimal loss of
+model performance.
+
+To evaluate the effectiveness of XQuant, we con-
+duct extensive experiments on a consumer-grade
+NVIDIA GeForce RTX 3090 GPU (24GB) across
+diverse datasets, including TruthfulQA (Lin et al.,
+2022) and subsets of LongBench (Bai et al., 2024).
+Experimental results demonstrate that XQuant
+achieves an equivalent bit-width of less than 1.4-
+bit across various LLMs, outperforming existing
+methods such as KIVI-2bit (Liu et al., 2024b)
+and AsymKV-1.5bit (Tao et al., 2024). Notably,
+XQuant achieves comparable performance to full-
+precision baselines while offering a significantly
+
+improved trade-off between model performance
+and compression ratio.
+
+2 Related Work
+
+Two mainstream approaches for addressing KV
+cache challenges are Quantization and Eviction
+methods (Shi et al., 2024).
+
+Quantization has emerged as a prominent tech-
+nique for compressing large-scale models by map-
+ping high-precision data to lower-precision formats
+(e.g., 16-bit, 8-bit, or even 4-bit integers). This sig-
+nificantly reduces memory footprints while main-
+taining acceptable levels of model performance.
+A substantial body of work focuses on quantizing
+model weights. AWQ (Lin et al., 2024) optimizes
+neural network weight quantization by dynamically
+adapting the bit-width based on the weights’ sig-
+nificance. By retaining higher precision for more
+impactful weights and reducing precision for less
+critical ones, AWQ minimizes performance loss
+while achieving compression. However, aggres-
+sive compression is constrained by "model hemor-
+rhage" (Ma et al., 2025), a phenomenon identify-
+ing that models possess inherent robustness thresh-
+olds beyond which performance degrades sharply.
+This makes maintaining stability in the ultra-low-
+bit regime a critical challenge.
+
+Another line of research concentrates on the
+quantization of the KV cache. KVQuant, in-
+troduced by Hooper et al. (2024), employs dis-
+tinct quantization strategies for keys and val-
+ues. It applies per-channel quantization to the
+keys—particularly before Rotary Positional Em-
+beddings (RoPE)—and per-token quantization to
+the values, effectively managing outliers and min-
+imizing RoPE-induced distortions. Similarly,
+MiKV (Yang et al., 2024c) introduces a mixed-
+precision KV-cache strategy that retains important
+KV pairs in high precision. Concurrently, KIVI
+(Liu et al., 2024b) develops a tuning-free 2-bit KV
+cache quantization scheme, where the key cache
+is quantized per-channel, and the value cache is
+quantized per-token. Building on this, AsymKV
+(Tao et al., 2024) further combines 1-bit and 2-bit
+representations through an asymmetric and layer-
+wise quantization configuration, achieving a better
+trade-off between precision and compression ratio.
+
+In contrast, some works simultaneously quantize
+both the model weights and the attention cache. For
+example, FlexGen (Sheng et al., 2023) introduces a
+high-throughput inference framework that applies
+
+
+group-wise 4-bit quantization to compress both the
+model weights and KV cache. FlexGen divides ten-
+sors into small groups, computes the minimum and
+maximum values within each group, and performs
+asymmetric quantization. The resulting tensors
+are stored in 4-bit format and later dequantized
+to FP16 during computation, achieving a reduc-
+tion in memory usage and I/O costs with minimal
+accuracy degradation. Despite the advancements
+of these methods, significant performance degra-
+dation remains a challenge when quantizing KV
+cache activations to extremely low-precision levels,
+particularly below 2-bit.
+
+Eviction methods aim to discard unnecessary
+tokens during inference to reduce memory usage.
+StreamingLLM (Xiao et al., 2023) identifies the
+phenomenon of attention sinks, where initial to-
+kens are retained to stabilize attention computa-
+tions. StreamingLLM combines these attention
+sinks with a sliding window of recent tokens to
+introduce a rolling KV cache, effectively balancing
+memory efficiency and model performance. Build-
+ing on this, SirLLM (Yao et al., 2024) uses token
+entropy to preserve critical tokens’ KV cache and
+incorporates a memory decay mechanism to en-
+hance LLMs’ long-term memory while maintain-
+ing short-term reasoning abilities.
+
+Other methods, such as H20 (Zhang et al., 2023)
+and SnapKV (Li et al., 2024), dynamically iden-
+tify and evict non-important tokens based on atten-
+tion scores. PyramidKV (Cai et al., 2024; Yang
+et al., 2024a) observes that attention scores are
+more sparse in higher layers and accordingly al-
+locates different memory budgets across layers.
+SpindleKV (Tang et al., 2025) further develops a
+hybrid approach to balance reduction across layers,
+combining attention-based eviction in deep layers
+with a codebook-based replacement strategy for
+shallow layers. However, most existing KV evic-
+tion methods depend on attention scores to identify
+non-important tokens, which limits their compati-
+bility with common optimizations like FlashAtten-
+tion (Dao, 2023), reducing their practical usability.
+
+Structural Approaches modify the model’s ar-
+chitecture, in contrast to post-hoc data compression.
+For instance, some methods cache only partial lay-
+ers of the KV cache (Wu and Tu, 2024; Sun et al.,
+2024; Brandon et al., 2024), while K V-Latent (Lu-
+ohe et al., 2025) reduces the dimensionality of K
+and V vectors. A key characteristic of these ap-
+proaches is that they all require additional training,
+which contrasts with our plug-and-play framework.
+
+We further clarify the key differences and highlight
+our contributions in Appendix G.
+
+Compared to existing methods, we introduce
+XQuant with two key innovations: (1) A novel,
+simple yet effective data-free calibration method
+that achieves superior compression performance
+even under ultra-low-bit settings, eliminating the
+need for additional calibration data. (2) cross-layer
+KV cache compression that leverages previously
+overlooked quantization-enhanced layer similari-
+ties to achieve significant memory and computa-
+tional savings. While prior work has studied layer
+representation similarities, our approach uniquely
+exploits the quantization-enhanced similarities to
+enable effective ultra-low-bit compression.
+
+3 XQuant
+
+In this section, we present XQuant, a novel quan-
+tization framework for efficient KV cache com-
+pression. As illustrated in Figure 1, our frame-
+work introduces two key innovations: a data-free
+calibration technique that asymmetrically adjusts
+quantization parameters without additional calibra-
+tion data, and a cross-layer KV cache compression
+mechanism that leverages the similarity of quan-
+tized caches between adjacent layers to effectively
+reduce both computational and memory overhead.
+
+3.1 Background
+
+To formalize KV cache quantization, we consider
+a group of floating-point keys or values X. The
+quantization process transforms X into three
+components: a B-bit quantized cache Xq, a
+zero-point z, and a scaling factor s (Liu et al.,
+2024b):
+
+Quantization Phase:
+
+_ _ max(X) — min(X)
+z=min(X),s= (2 —1) (1)
+
+Xr =(X—2)/s,Xq=[Xr]
+
+Dequantization Phase:
+
+K=Xgestz (3)
+
+where X* is the dequantized counterpart and |-|
+is the rounding function. Xp, the transformed
+matrix, is not explicitly cached but is introduced
+as an intermediate variable to facilitate subsequent
+mathematical derivations.
+
+
+Quantization Calibration
+
+Original scaling factor and zero point
+
+Original KVL es
+
+Speedup
+
+Compression
+
+Original KV L+1
+
+Quantization Calibration
+
+Attention L oo
+
+Calibrated scaling factor and zero point
+
+Quantized cache shared between layers
+
+Attention L+1 CL)
+
+Figure |: The illustration of XQuant workflow. XQuant partitions the KV cache into layer-wise pairs. For every
+higher layer in a pair, XQuant only computes and stores the scaling factors and zero-points during quantization
+phase, and then fetches the quantized cache from the lower layer during dequantization phase.
+
+Building upon this framework, prior works in-
+troduce various configurations to enhance perfor-
+mance. For example, Liu et al. (2024b) focuses on
+the element-wise distribution within the KV cache,
+adopting per-channel quantization for the key cache
+and per-token quantization for the value cache.
+Similarly, Tao et al. (2024) introduces layer-wise
+quantization configurations, employing asymmet-
+ric bit-widths for the key and value caches across
+different layers. While effective, these approaches
+often suffer from significant performance degra-
+dation under low-bit quantization settings, partic-
+ularly around 2-bit precision. This limitation mo-
+tivates the need for further advancements in KV
+cache compression techniques.
+
+3.2. Data-Free Calibration
+
+Since existing quantization methods often experi-
+ence significant performance degradation at 2-bit
+precision, achieving ultra-low-bit compression first
+requires bridging this performance gap. In this sec-
+tion, we propose a data-free calibration method that
+effectively preserves model performance, enabling
+more aggressive compression ratios.
+
+To analyze extreme quantization scenarios, we
+start with 1-bit quantization where each parameter
+is constrained to a binary state. Formally, the round-
+to-nearest operation |-| is defined as:
+
+if e € [0,0.5],
+
+0
+=f) if e € (0.5, 1].
+
+where e denotes an element of the transformed ma-
+trix. For any bit-width B, this rounding operation
+maps values to a discrete set within [0,27 — 1],
+where each original value is assigned to its nearest
+representative in the quantized space. As shown
+
+(4)
+
+in Figure 2(a), fixed representative values at end-
+points (0 and 1) yield substantial quantization error
+for 1-bit quantization. We therefore introduce a
+relaxed-constraint mapping function that adaptively
+determines the quantization levels, formulated as:
+
+if e € [0,0.5],
+
+(5)
+if e € (0.5, 1].
+
+f(e,n) = ‘"
+
+1-7
+
+where 7) € [0, 0.5] serves as a calibration parameter
+for determining quantization tendencies. Clearly,
+f (e, 0) is equivalent to the round-to-nearest func-
+tion [e|. We extend this formulation to the general
+case of B-bit quantization and denote the corre-
+sponding parameter as 7p.
+
+We relax the constraint that quantized values
+must be integers and apply fake quantization as a
+preliminary experiment. Table 7 shows that using
+this constraint-relaxed mapping function improves
+model performance, validating our proposed in-
+sight.
+
+However, storing floating-point numbers as so-
+called quantized caches is impractical, as shown in
+Figure 2(b). To address the aforementioned prob-
+lem, we establish an equivalent implementation,
+with the mathematical proof provided below. We
+formalize the final data-free calibration approach
+as:
+
+Consider a group of floating-point keys or values
+X € RY, where g stands for the group size. Note
+that K € [min(X), max(X)]9 = [z,s * (2? —
+1) + z]9, we can deduce:
+
+Xq € [0,27 — 1]9 (6)
+
+from Equation 1 and Equation 2. If we choose
+n * (22 — 1) and (1 — 7) * (2? — 1) generalized
+
+
+SS]
+
+(a) zs Ma |
+Standard
+| Quantization apt ‘with
+
+@ High Hardware Compatibility
+High Quantization Error
+
+a
+(b)
+
+\
+elaxed-Constraint \
+
+Floating-point Mapping
+
+'
+\
+'
+1
+'
+1
+i
+'
+Relaxed- z,8 Xg o Storage 7
+| Constraint
+| Quantization ae with
+1
+' + - >
+1
+X Low Hardware Compatibility
+Low Quantization Error wv
+Kent Kena =
+>
+
+| Quantization
+(c)
+
+\
+I Quantization Calibration 0
+! with
+| Calibration Dequantization/with
+1 2,8
+{
+\
+
+x + + + >
+
+Interger-only
+Storage
+
+@ S4 High Hardware Compatibility
+Bow Quantization Error
+
+Figure 2: The illustration of the proposed data-free
+calibration method.
+
+from Equation 5 as two endpoints, it is equivalent
+to calibrate the zero-point and scaling factor to 2
+and s, and then dequantize with them. Note that
+the dequantized matrix
+
+XK = XQx$+2 € [8*O+4, 8% (27-1) +4]9 (7)
+
+and the corresponding interval given by two end-
+points:
+
+[z + ns(28
+
+By calculation we get the final operations for cali-
+bration:
+
+2=24+ns(22 -1),8=(1-2n)s (9)
+
+Since Xp = (X — z)/s, the reconstruction loss
+MSE(X,X) = s*. MSE(X-y, f(Xv,7)). For
+analytical tractability, particularly for 1-bit quan-
+tization within small group sizes, we can assume
+that X7 ~ U(0, 1). Thus the expected MSE in the
+
+. r | | | [| | |
+_ 80
+x
+& 60
+o
+pa}
+c
+% 40
+fe
+oO I
+oO MEE Delta=3
+20 : = = Mmm Delta=2
+Delta=1
+Delta=0
+0 +
+0 5 10 15 20 25 30
+Layer
+
+Figure 3: Layer-wise analysis of absolute differences
+between adjacent layers in quantized KV Cache matri-
+ces. Here, delta represents the absolute difference of
+quantized values between consecutive layers.
+
+transformed space can be formulated as:
+
+MSE(Xz4, f(Xt,7))
+= E[(Xr — f(Xr,n))”]
+
+0.5 1
+
+= i (x —n)?dx + | (x — (1—n))2aa
+0 0.5
+> td
+
+=" 9" 7
+
+Since the standard quantization scheme is equiv-
+alent to setting 7 = 0, this result confirms that
+any value of 7 € (0, 1/2) will strictly reduce the
+theoretical reconstruction error.
+
+As shown in Figure 2(c), we propose the
+improved quantization scheme with this data-free
+calibration as follows:
+
+Quantization Phase with Calibration:
+
+X) — min(X
+z=min(X),s= ee a (10)
+2=2+ns(2?-1),8=(1-2n)s (12)
+Dequantization Phase with Calibration:
+K=XqeS+é2 (13)
+
+3.3. Cross-Layer Compression
+3.3.1
+
+Building upon Tao et al. (2024)’s investigation of
+ultra-low-bit KV cache asymmetric quantization,
+our reproduction experiments on LongBench (Bai
+
+Motivation
+
+
+et al., 2023) with Mistral (Jiang et al., 2023) demon-
+strate severe limitations of existing approaches, as
+shown in Table 8.
+
+We found that 1-bit asymmetric quantization of
+the key cache is practically infeasible. Even when
+restricting 1-bit quantization to the top 8 layers
+(AsymKV-24/32), significant performance degra-
+dation occurs. Given the limitations of further key
+cache quantization, we turn to cross-layer compres-
+sion techniques as a viable alternative to achieve
+comparable ultra-low-bit quantization without com-
+promising performance.
+
+3.3.2 Analysis on Quantized KV Cache
+
+To enable cross-layer compression, we first analyze
+the characteristics of quantized KV caches by ex-
+amining inter-layer similarities. We hypothesize
+that significant redundancy between adjacent lay-
+ers could create opportunities for more aggressive
+compression. Using the KIVI-2 framework (Liu
+et al., 2024b), we conduct preliminary experiments
+on the Mistral-7B-Instruct-v0.2 model (Jiang et al.,
+2023) with random samples from LongBench (Bai
+et al., 2023).
+
+Under the 2-bit quantization scheme in KIVI-2,
+quantized cache values are restricted to {0, 1, 2,
+3}, naturally constraining element-wise absolute
+differences to the same range. Our analysis, illus-
+trated in Figure 3, reveals a striking pattern: over
+80% of positions between adjacent layers exhibit
+minimal differences (0 or 1), while extreme differ-
+ences (3) occur in less than 5% of positions. This
+pattern becomes even more pronounced in the 1-bit
+scenario, where mapping {0,1} to 0 and {2,3} to 1
+maintains identical values in over 80% of positions
+between adjacent layers. These empirical findings
+demonstrate substantial redundancy in quantized
+KV caches between adjacent layers, suggesting
+significant potential for further compression.
+
+3.3.3 Compression Algorithm
+
+Leveraging these insights into inter-layer similar-
+ities, we propose a novel cross-layer compres-
+sion method that decomposes KV caches into two
+components: shared quantized caches and layer-
+specific parameters. Specifically, adjacent layers
+share a common set of quantized value caches
+(XqQ), while maintaining their individual scaling
+factors and zero-points for dequantization. This
+decomposition enables efficient compression by al-
+lowing each layer to reuse the merged cache from
+its group, while preserving the layer-specific char-
+
+Model Method Bit-width TruthfulQA
+Full Cache 16 32.09
+
+Mistral-7b KIVI 2. 32.17
+AsymKV 1.5 32.80
+XQuant 1.38 34.93
+Full Cache 16 30.77
+
+Llama2-7b KIVI 2 33.92
+AsymKV 1.5 33.84
+XQuant 1.4 34.22
+
+Table 1: Evaluation on TruthfulQA task with normal
+context length.
+
+acteristic through its unique quantization parame-
+ters, namely zero-points and scaling factors.
+
+In the implementation, for a model with L lay-
+ers, we organize the layers into groups of size G.
+Within each group, KV caches are compressed us-
+ing weighted averaging, where each layer / (0 <
+1 < L) is assigned a weight 7, subject to the con-
+straint )> y = 1.
+
+Formally, for every layer / in a group G, the
+quantization workflow with cross-layer compres-
+sion and calibration is utilized as follows:
+
+Quantization Phase with Cross-Layer Com-
+pression and Calibration:
+
+VLEG,
+max(X)) — min(X;)
+(28 — 1)
+
+~1), 8 = (1—2n)si
+
+X) — 2]
+Xg= ox [4 |
+
+leG
+
+z, = min(X)), $, =
+
+4 = 2 + s)(2?
+
+Dequantization Phase with Cross-Layer Com-
+pression and Calibration:
+
+X, =Xq*3 4+ 4
+
+We present the pseudo code for the whole work-
+flow as shown in Appendix J.
+
+3.3.4 Speedup through Cross-layer
+Compression
+
+While our previous discussion introduced weighted
+averaging with the weight 7 for compressing XQ
+within a group, we can further optimize the com-
+putation by setting +, = 1 for a chosen dominant
+layer k, which consequently forces all other y val-
+ues within the group to zero. In this accelerated
+configuration, each subordinate layer only needs
+
+
+Model Method Bit-width HQA 2Wiki MSQ TREC TQA SAMS PC_ Avg
+Full Cache 16 43.02 27.10 18.78 71.00 86.23 42.75 2.75 41.66
+PyramidInfer  / 35.08 23.92 16.90 62.00 85.06 41.45 1.04 32.55
+Mistral-7b-ins_ ——- KTVI 2 41.96 26.08 1813 71.00 86.00 43.70 2.78 41.38
+AsymKV 1.5 37.17 22.77 15.76 70.50 86.25 43.44 3.16 39.86
+XQuant 1.38 42.90 26.65 17.44 71.50 84.50 45.18 5.71 41.98
+Full Cache 16 30.09 2648 9.98 63.00 84.19 41.22 4.50 37.07
+PyramidInfer / 29.14 24.53 7.49 54.00 81.79 40.71 4.00 34.52
+Llama2-7b-chat  KIVI 2 29.10 25.12 9.86 63.00 84.98 40.18 4.00 36.61
+AsymKV 15 27.75 24.82 845 62.00 84.21 41.22 2.75 35.89
+XQuant 14 29.21 25.56 9.69 62.50 84.57 40.01 4.00 36.51
+
+Table 2: Evaluation of different KV cache compression methods on LongBench tasks.
+
+to compute and store its own scaling factors and
+zero-points, significantly reducing computational
+overhead. Specifically,
+
+xX; — “|
+
+Xo =
+
+As illustrated in Figure 1, this optimization elim-
+inates the computations shown in the dashed line,
+effectively streamlining the process. Experimen-
+tal results show that selecting the first layer within
+the group as the dominant layer yields optimal per-
+formance, as demonstrated in Table 4 and Table
+3.
+
+4 Evaluation
+
+4.1 Experimental Setup
+
+Models. We evaluate our XQuant on Llama-2-
+7b / Llama-2-7b-chat (Touvron et al., 2023) and
+Mistral-7B-v0.3 / Mistral-7B-instruct-v0.2 (Jiang
+et al., 2023).
+
+Tasks. For the normal context length task, we
+choose TruthfulQA (BLEU score) from LM-Eval
+(Gao et al., 2021). We also select several sub-
+sets from LongBench (Bai et al., 2023) for the
+long context length tasks, including HotpotQA (F1
+score), 2WikiMultihopQA (F1 score), MuSiQue
+(F1 score), TREC (classification accuracy), Trivi-
+aQA (FI score), SAMSum (Rouge-L) and Passage-
+Count (Exact match accuracy). MultiFieldQA-Zh
+(F1 score) is selected for some ablation studies as
+well.
+
+Baselines and Implementations. We compare
+our framework with previous works, including orig-
+inal 16-bit floating implementation, KIVI-2 (Liu
+et al., 2024b) and AsymKV (Tao et al., 2024).
+All relevant configurations adhere as in KIVI, i.e.,
+quantizing key cache per-channel and value cache
+
+per-token, and with a group size of 32 and a resid-
+ual length of 128. We reproduce AsymKV based
+on the official implementation of KIVI, with a typ-
+ical configuration (AsymKV-32/0) selected from
+the original paper, i.d., quantizing all the key cache
+into 2-bit and value cache into 1-bit, which corre-
+sponds to an equivalent bit-width of 1.5.
+
+A token eviction method (Yang et al., 2024b),
+configured with a 40% KV cache budget, is also
+included as a baseline for the LongBench tasks.
+
+We set the maximum sequence length to 30000
+for the Mistral model to conduct our experiments
+with a single NVIDIA GeForce RTX 3090 GPU
+(24GB), and 8192 for the Llama model as default.
+We do not consider SLERP (Shoemake, 1985; Liu
+et al., 2024a) because of the incompatibility be-
+tween rescale-recover operations and quantized
+cache.
+
+4.2 Performance Comparison
+
+LM-Eval Results. Table | presents the evalua-
+tion of different quantization methods on the Truth-
+fulQA task with a standard context length. XQuant
+not only achieves competitive performance but
+surpasses the full cache baseline, with a Truth-
+fulQA score of 34.93 on Mistral-7b and 34.22 on
+Llama2-7b, outperforming all other methods at sig-
+nificantly lower bit-widths. These results highlight
+that XQuant provides superior performance in con-
+ventional context length settings.
+
+LongBench Results. We evaluate XQuant on the
+LongBench benchmark using two widely adopted
+models: Mistral-7b-Instruct-v0.2 and Llama-2-7b-
+chat. As shown in Table 2, XQuant achieves sig-
+nificant improvements over other KV cache com-
+pression methods, particularly under ultra-low-bit
+settings.
+
+In all datasets of LongBench, XQuant achieves
+
+
+Method _Bit-width 7 72» MFQA-Zh
+Full Cache 16 / / 48.26
+KIVI 2 / 0 42.27
+AsymKV 1.5 0 0 36.30
+0 0 37.20
+XQuant 1.375 f 005 a32
+0.2 0 41.98
+0.2 0.05 44.20
+
+Table 3: Ablation study on the effect of data-free cali-
+bration in XQuant on the MultiFieldQA-Zh benchmark
+from LongBench.
+
+Method Bit-width Yo MuSiQue
+Full Cache 16 / 18.78
+KIVI 2 / 18.13
+Flooring 1.63 / 16.79
+Ceiling 1.63 / 16.36
+1.63 [0,1/6) 12.20
+1.63 (1/6,1/4) 14.05
+. 1.63 (1/4, 1/2) 16.84
+Weighted Average 1.63 (1/2.3/4) 17.32
+1.63 (3/4,5/6) 17.60
+1.63 (5/6,1] 17.32
+
+Table 4: The comparison between different cross-layer
+compression method with group size G = 2, where
+Yo; V1 Stands for the coefficient in the weighted average
+
+(71 + Yo = 1).
+
+performance comparable to the full cache base-
+line while reducing bit-width by 31% compared to
+KIVI-2bit. Notably, XQuant achieves an average
+score of 41.98 for Mistral, surpassing KIVI-2bit
+while maintaining a significantly lower bit-width of
+1.38. Moreover, XQuant outperforms AsymKV on
+nearly all datasets while simultaneously reducing
+bit-width by 8% relative to AsymKV. Additionally,
+compared to PyramidInfer, which sacrifices preci-
+sion to reduce storage overhead, XQuant demon-
+strates clear advantages in maintaining high accu-
+racy across tasks while achieving lower bit-width.
+
+4.3 Ablation and Analysis
+
+In this section, we conduct ablation studies in some
+randomly selected lightweight LongBench subsets.
+
+Calibration Parameter. Table 3 presents an abla-
+tion study on the impact of data-free calibration in
+XQuant on the MultiFieldQA-Zh benchmark. The
+results indicate that applying calibration (n, 4 0
+or 72 # 0) significantly improves XQuant’s perfor-
+mance, reducing the performance gap with the full
+cache baseline.
+
+Method _Bit-width G k MSQ  MFQA-Zh
+Full Cache 16 / 1 18.78 48.26
+KIVI -] / 7 18.13 42.27
+5 0 17.32 37.44
+
+1 12.20 20.48
+
+0 14.92 17.53
+
+3 1 16.97 37.37
+
+XQuant —‘1.63 2 13.21 20.80
+0 14.82 23.53
+
+4 1 12.44 18.68
+
+2 16.12 35.48
+
+3 15.39 20.32
+
+Table 5: The comparison of different group sizes G' and
+selection indices & within each group, where X Quant
+is employed without the calibration step for a clearer
+analysis.
+
+Cross-Layer Compression Method. We further
+explore the weighted average with a group size
+G = 2 and coefficients yo, 71 = 1 — yo, where
+yo falls into six intervals derived in Appendix F.
+Notably, when y € [0,1/6) or yo € (5/6, 1],
+the operation is optimized to directly sharing the
+quantized cache. We evaluate KIVI-2 on Mistral-
+7B-Instruct-v0.2 without our proposed calibration
+methods starting from the 8-th layer. As summa-
+rized in Table 4, the accelerated compression meth-
+ods (yo € [0, 1/6) U (5/6, 1]) avoid redundant op-
+erations seen in the workflow of Liu et al., 2024b,
+which rounds quantized integers into floating-point
+numbers. As shown in Table 4, the accelerated com-
+pression operation demonstrates its effectiveness in
+maintaining sufficient information for model per-
+formance, particularly when yo € (5/6, 1]. This
+configuration effectively allows odd-numbered lay-
+ers to reuse the quantized cache from the preceding
+even-numbered layers without requiring additional
+quantization or storage overhead for odd-numbered
+layers.
+
+We adopt this accelerated compression strategy
+across all experiments due to its favorable balance
+between computational efficiency and information
+preservation.
+
+Group Size. After optimizing the cross-layer
+compression method, another factor is the group
+size. To investigate the effects of layer grouping,
+we partition the total L layers of a model (where
+L = 82 for Mistral-7B and Llama 2-7B) into L/G
+contiguous groups of size G. The parameter / indi-
+cates that we store and share the quantized cache
+
+
+Method Bit-width TREC SAMS
+Full Cache 16 71 42.75
+KIVI 2 71 43.7
+AsymKV 1.5 70.5 43.44
+AsymKV 1.375 69.5 42.76
+XQuant 1.375 71.5 45.18
+AsymKV 1.28 58.5 37.41
+XQuant 1.28 68.5 39.84
+AsymKV 1.15625 41 23.47
+XQuant 1.15625 68.5 39.47
+
+Table 6: The comparison of different configurations
+under extremely-low compression ratio.
+
+only in the k-th layer of each group. We evaluate
+group sizes G € {2,3,4}. This range is motivated
+by the empirical observation that while adjacent
+layers exhibit high similarity in their quantized rep-
+resentations (i.e., G = 2, as shown in Figure 3),
+this similarity diminishes gradually for layer dis-
+tances greater than three. For models with L = 32
+layers, G = 4 thus serves as a sufficient upper
+bound for investigation due to this diminishing sim-
+ilarity. We set all configurations under the same
+compression ratio, namely keep all layers in key
+cache and 20 layers in value cache based on KIVI-
+2bit framework, using Mistral-7b-instruct-v0.2. As
+shown in Table 5, the model achieves the best per-
+formance with the configuration of G = 2 and
+k=0.
+
+Performance-Compression Trade-offs. Table
+6 evaluates the trade-offs between bit-width re-
+duction and performance degradation across dif-
+ferent quantization methods. As shown in Table
+6, XQuant consistently outperforms other methods
+at the same bit-width, achieving higher scores on
+both TREC and SAMS benchmarks. Notably, even
+at an extremely low bit-width of 1.15625, XQuant
+preserves a significant portion of the model’s per-
+formance, maintaining a TREC score of 68.5 com-
+pared to the full-cache baseline of 71. These re-
+sults demonstrate that XQuant effectively balances
+performance retention and compression, achieving
+state-of-the-art trade-offs in ultra-low-bit KV cache
+quantization.
+
+5 Conclusion
+
+To alleviate the growing memory overhead in LLM
+inference, we propose XQuant, a plug-and-play
+framework that quantizes KV cache at an extreme
+compression ratio. Based on our observations on
+classical training-free quantization and the distribu-
+
+tions of quantized integers, we propose a data-free
+calibration method and a compute-efficient cross-
+layer compression method. Extensive experiments
+show that XQuant achieves state-of-the-art trade-
+offs between performance degradation and com-
+pression ratio, without sacrificing computational
+efficiency. Integrating these two novel methods,
+our XQuant achieves comparable performance with
+full-precision baseline under 1.4-bit quantization,
+and still maintains competitive performance for
+some tasks around an extremely 1.16-bit quantiza-
+tion.
+
+Limitations and Future Work
+
+Our work presents several avenues for future explo-
+ration. First, while XQuant demonstrates promis-
+ing results on representative models and bench-
+marks, its robustness and generalizability could
+be further validated by extending evaluations to
+a wider range of newer-generation or larger-scale
+models and more diverse downstream scenarios.
+Second, our current work relies on task-specific
+configurations. Although a unified setting proves
+robust (as shown in Appendix E), the develop-
+ment of an automated method to search for op-
+timal configurations presents a valuable direction
+for future research. Finally, the key innovations
+of XQuant — Data-Free Calibration and Cross-
+layer Compression — are in principle orthogonal to
+other KV cache compression paradigms. A fruitful
+area for future work would be to investigate their
+compatibility and potential synergies with these
+existing methods, potentially yielding even greater
+efficiency gains.
+
+Acknowledgements
+
+This work was supported by the National Nat-
+ural Science Foundation of China (Grant No.
+62306216) and the Natural Science Founda-
+tion of Hubei Province of China (Grant No.
+2023 AFB8 16).
+
+Hai Zhao’s contribution was funded by the Major
+Program of the Chinese National Foundation of
+Social Sciences under Grant "The Challenge and
+Governance of Smart Media on News Authenticity"
+[No. 23&ZD213].
+
+The authors also gratefully acknowledge sup-
+port from the Xiaomi Open-Competition Research
+Program.
+
+
+References
+
+Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury
+Zemlyanskiy, Federico Lebron, and Sumit Sanghai.
+2023. GQA: Training generalized multi-query trans-
+former models from multi-head checkpoints. In Pro-
+ceedings of the 2023 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 4895-
+4901, Singapore. Association for Computational Lin-
+guistics.
+
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu,
+Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao
+Liu, Aohan Zeng, Lei Hou, Yuxiao Dong, Jie Tang,
+and Juanzi Li. 2024. Longbench: A bilingual, multi-
+task benchmark for long context understanding. In
+Proceedings of the 62nd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), ACL 2024, Bangkok, Thailand, Au-
+gust 11-16, 2024, pages 3119-3137. Association for
+Computational Linguistics.
+
+Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu,
+Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao
+Liu, Aohan Zeng, Lei Hou, et al. 2023. Longbench:
+A bilingual, multitask benchmark for long context
+understanding. arXiv preprint arXiv:2308. 14508.
+
+William Brandon, Mayank Mishra, Aniruddha
+Nrusimha, Rameswar Panda, and Jonathan Ragan
+Kelly. 2024. Reducing transformer key-value cache
+size with cross-layer attention. arXiv preprint
+arXiv:2405.12981.
+
+Zefan Cai, Yichi Zhang, Bofei Gao, Yuliang Liu, Tianyu
+Liu, Keming Lu, Wayne Xiong, Yue Dong, Baobao
+Chang, Junjie Hu, et al. 2024. Pyramidkv: Dynamic
+kv cache compression based on pyramidal informa-
+tion funneling. arXiv preprint arXiv:2406.02069.
+
+Tri Dao. 2023. Flashattention-2: Faster attention with
+better parallelism and work partitioning. arXiv
+preprint arXiv:2307.08691.
+
+Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and
+Dan Alistarh. 2022. GPTQ: Accurate post-training
+compression for generative pretrained transformers.
+arXiv preprint arXiv:2210.17323.
+
+Leo Gao, Jonathan Tow, Stella Biderman, Sid Black,
+Anthony DiPofi, Charles Foster, Laurence Golding,
+Jeffrey Hsu, Kyle McDonell, Niklas Muennighoff,
+et al. 2021. A framework for few-shot language
+model evaluation. Version vO. 0.1. Sept, 10:8-9.
+
+Coleman Hooper, Sehoon Kim, Hiva Mohammadzadeh,
+Michael W Mahoney, Yakun Sophia Shao, Kurt
+Keutzer, and Amir Gholami. 2024. Kvquant:
+Towards 10 million context length Ilm inference
+with kv cache quantization. arXiv preprint
+arXiv:2401.18079.
+
+Albert Q Jiang, Alexandre Sablayrolles, Arthur Men-
+sch, Chris Bamford, Devendra Singh Chaplot, Diego
+de las Casas, Florian Bressand, Gianna Lengyel, Guil-
+laume Lample, Lucile Saulnier, et al. 2023. Mistral
+7b. arXiv preprint arXiv:2310.06825.
+
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying
+Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gon-
+zalez, Hao Zhang, and Ion Stoica. 2023. Efficient
+memory management for large language model serv-
+ing with pagedattention. In Proceedings of the 29th
+Symposium on Operating Systems Principles, pages
+611-626.
+
+Yuhong Li, Yingbing Huang, Bowen Yang, Bharat
+Venkitesh, Acyr Locatelli, Hanchen Ye, Tianle Cai,
+Patrick Lewis, and Deming Chen. 2024. Snapkv:
+Llm knows what you are looking for before genera-
+tion. arXiv preprint arXiv:2404. 14469.
+
+Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-
+Ming Chen, Wei-Chen Wang, Guangxuan Xiao,
+Xingyu Dang, Chuang Gan, and Song Han. 2024.
+Awq: Activation-aware weight quantization for on-
+device Ilm compression and acceleration. Proceed-
+ings of Machine Learning and Systems, 6:87—100.
+
+Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+Truthfulqa: Measuring how models mimic human
+falsehoods. In Proceedings of the 60th Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume 1: Long Papers), ACL 2022, Dublin, Ireland,
+May 22-27, 2022, pages 3214-3252. Association for
+Computational Linguistics.
+
+Akide Liu, Jing Liu, Zizheng Pan, Yefei He, Gholam-
+reza Haffari, and Bohan Zhuang. 2024a. Minicache:
+Kv cache compression in depth dimension for large
+language models. arXiv preprint arXiv:2405.14366.
+
+Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong,
+Zhaozhuo Xu, Vladimir Braverman, Beidi Chen, and
+Xia Hu. 2024b. Kivi: A tuning-free asymmetric 2bit
+quantization for kv cache. ArXiv, abs/2402.02750.
+
+Shi Luohe, Zuchao Li, Lefei Zhang, Baoyuan
+Qi, Liu Guoming, and Hai Zhao. 2025. KV-
+latent: Dimensional-level KV cache reduction with
+frequency-aware rotary positional embedding. In
+Proceedings of the 63rd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 1535-1550, Vienna, Austria.
+Association for Computational Linguistics.
+
+Xinbei Ma, Zhuosheng Zhang, and Hai Zhao. 2024.
+Comprehensive cognitive Ilm agent for smartphone
+gui automation. arXiv preprint arXiv:2402.11941.
+
+Ziyang Ma, Zuchao Li, Lefei Zhang, Gui-Song Xia,
+Bo Du, Liangpei Zhang, and Dacheng Tao. 2025.
+Model hemorrhage and the robustness limits of large
+language models. arXiv preprint arXiv:2503.23924.
+
+Shuyin Ouyang, Jie M Zhang, Mark Harman, and Meng
+Wang. 2023. Lim is like a box of chocolates: the non-
+determinism of chatgpt in code generation. arXiv
+preprint arXiv:2308.02828.
+
+Qwen, :, An Yang, Baosong Yang, Beichen Zhang,
+Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li,
+Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin,
+Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang,
+
+
+Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang,
+Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li,
+Mingfeng Xue, Pei Zhang, Qin Zhu, Rui Men, Runji
+Lin, Tianhao Li, Tianyi Tang, Tingyu Xia, Xingzhang
+Ren, Xuancheng Ren, Yang Fan, Yang Su, Yichang
+Zhang, Yu Wan, Yugiong Liu, Zeyu Cui, Zhenru
+Zhang, and Zihan Qiu. 2025. Qwen2.5 technical
+report. Preprint, arXiv:2412.15115.
+
+Nikhil Sharma, Q Vera Liao, and Ziang Xiao. 2024.
+Generative echo chamber? effect of Ilm-powered
+search systems on diverse information seeking. In
+Proceedings of the CHI Conference on Human Fac-
+tors in Computing Systems, pages 1-17.
+
+Ying Sheng, Lianmin Zheng, Binhang Yuan, Zhuo-
+han Li, Max Ryabinin, Beidi Chen, Percy Liang,
+Christopher Ré, Ion Stoica, and Ce Zhang. 2023.
+Flexgen: High-throughput generative inference of
+large language models with a single gpu. In Inter-
+national Conference on Machine Learning, pages
+
+31094-31116. PMLR.
+
+Luohe Shi, Hongyi Zhang, Yao Yao, Zuchao Li, and
+Hai Zhao. 2024. Keep the cost down: A review on
+methods to optimize Ilm’s kv-cache consumption.
+arXiv preprint arXiv:2407.18003.
+
+Ken Shoemake. 1985. Animating rotation with quater-
+nion curves. In Proceedings of the 12th annual con-
+ference on Computer graphics and interactive tech-
+niques, pages 245-254.
+
+Yutao Sun, Li Dong, Yi Zhu, Shaohan Huang, Wenhui
+Wang, Shuming Ma, Quanlu Zhang, Jianyong Wang,
+and Furu Wei. 2024. You only cache once: Decoder-
+decoder architectures for language models. arXiv
+preprint arXiv:2405.05254.
+
+Zicong Tang, Shi Luohe, Zuchao Li, Baoyuan Qi,
+Liu Guoming, Lefei Zhang, and Ping Wang. 2025.
+SpindleKV: A novel KV cache reduction method bal-
+ancing both shallow and deep layers. In Proceedings
+of the 63rd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 28428-28442, Vienna, Austria. Association
+for Computational Linguistics.
+
+Qian Tao, Wenyuan Yu, and Jingren Zhou. 2024.
+Asymkv: Enabling 1-bit quantization of kv cache
+with layer-wise asymmetric quantization configura-
+tions. arXiv preprint arXiv:2410.13212.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Baptiste Roziére, Naman Goyal, Eric Hambro,
+Faisal Azhar, et al. 2023. Llama: Open and effi-
+cient foundation language models. arXiv preprint
+arXiv:2302.13971.
+
+Haoyi Wu and Kewei Tu. 2024. Layer-condensed kv
+cache for efficient inference of large language models.
+arXiv preprint arXiv:2405.10637.
+
+Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song
+Han, and Mike Lewis. 2023. Efficient streaming
+language models with attention sinks. arXiv.
+
+Dongjie Yang, Xiaodong Han, Yan Gao, Yao Hu, Shilin
+Zhang, and Hai Zhao. 2024a. Pyramidinfer: Pyramid
+KV cache compression for high-throughput LLM
+inference. In Findings of the Association for Compu-
+tational Linguistics, ACL 2024, Bangkok, Thailand
+and virtual meeting, August 11-16, 2024, pages 3258—
+3270. Association for Computational Linguistics.
+
+Dongjie Yang, XiaoDong Han, Yan Gao, Yao Hu, Shilin
+Zhang, and Hai Zhao. 2024b. Pyramidinfer: Pyra-
+mid kv cache compression for high-throughput Ilm
+inference. arXiv preprint arXiv:2405.12532.
+
+June Yong Yang, Byeongwook Kim, Jeongin Bae,
+Beomseok Kwon, Gunho Park, Eunho Yang, Se Jung
+Kwon, and Dongsoo Lee. 2024c. No token
+left behind: Reliable KV cache compression via
+importance-aware mixed precision quantization.
+CoRR, abs/2402.18096.
+
+Yifei Yang, Zouying Cao, Qiguang Chen, Libo
+Qin, Dongjie Yang, Hai Zhao, and Zhi Chen.
+2024d. Kvsharer: Efficient inference via layer-
+wise dissimilar kv cache sharing. arXiv preprint
+arXiv:2410.18517.
+
+Yao Yao, Zuchao Li, and Hai Zhao. 2024. Sirllm:
+Streaming infinite retentive lm. arXiv preprint
+arXiv:2405.12528.
+
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong
+Chen, Lianmin Zheng, Ruisi Cai, Zhao Song, Yuan-
+dong Tian, Christopher Ré, Clark Barrett, et al. 2023.
+H2o0: Heavy-hitter oracle for efficient generative
+inference of large language models. Advances in
+Neural Information Processing Systems, 36:34661-
+34710.
+
+
+Method _Bit-width 7 72» MFQA-Zh
+Full Cache 16 / / 48.26
+KIVI 2 / 0 42.27
+KIVI 2 / 0.05 44.34
+AsymKV 1.5 0 0 36.30
+AsymKV 1.5 0 0.05 41.28
+AsymKV 1.5 0.2 0 42.78
+AsymKV 1.5 0.2 0.05 43.81
+
+Table 7: The comparison using different quantization
+methods with and without our calibration method in
+MultiFieldQA-Zh tasks from LongBench.
+
+A Preliminary Study on
+Relaxed-Contraint Mapping
+
+As demonstrated in Figure 2, the traditional quan-
+tization workflow faces higher quantization error
+in low-bit scenarios. In Section 3.2, we propose a
+flexible mapping to mitigate the quantization error
+in this aspect. Moreover, to provide empirical evi-
+dence supporting the effectiveness of the flexible
+mapping in the proposed calibration method, we
+employ its generalized form and conduct a prelimi-
+nary study on the default KIVI-2bit and AsymKV-
+32/0 configurations. We extend this approach to a
+generalized B-bit quantization mechanism, where
+1B serves as the corresponding parameter. Notably,
+when 7p = 0, the B-bit quantization operates with-
+out the flexible mapping.
+
+The results in Table 7 demonstrate that incor-
+porating the flexible mapping function enhances
+model performance across different quantization
+settings.
+
+B_ Preliminary Experiment on Layer-Wise
+Asymmetric Quantization
+
+In the existing method (Tao et al., 2024), the KV
+cache for each layer is quantized using either 1-bit
+or 2-bit precision. A straightforward strategy to
+maximize the compression ratio is to apply 1-bit
+quantization to a greater number of layers.
+
+However, a significant bottleneck arises, as it
+is nearly impossible to quantize the key cache at
+1-bit precision without compromising performance.
+As shown in Table 8, further compression by in-
+creasing the number of 1-bit quantized key cache
+layers is not feasible, as it leads to substantial per-
+formance degradation. This observation motivates
+us to explore alternative compression methodolo-
+gies.
+
+Method Bit-width # Key Layers in 1-bit MFQA-Zh
+Full Cache 16 / 48.26
+KIVI (32/32) 2 0 42.27
+AsymKV-24/32 1.875 8 37.10
+AsymKV-16/32 1.75 16 21.36
+AsymKV-8/32 1.625 24 13.16
+AsymKV-0/32 1.5 32 7.66
+
+Table 8: Evaluation on LongBench based on AsymKV
+shows that the key cache is nearly impossible to quan-
+tized under 1-bit.
+
+C Equivalent Bit-width Analysis
+
+Formally, let b, h, s, d be the batch size, the num-
+ber of heads in GQA (Ainslie et al., 2023), the
+sequence length and the dimension per head. The
+original L layers of KV cache occupies 2L * bhsd «
+16 bit, which equals to 2L « n « 16 bit if we set
+n = bhsd for convenience.
+
+Consider a typical KV cache quantization
+scheme (Liu et al., 2024b). If we quantize all L
+layers of key cache and value cache into b-bit, the
+quantized KV cache memory usage is 2D «nb bit.
+Tao et al., 2024 uses a asymmetrical configura-
+tions for key and value caches across different lay-
+ers. In their paper, Asym-/;/l, means quantizing
+the initial J; layers of key cache and 1, of value
+cache into 2-bit, and quantizating 1-bit for oth-
+ers. So the quantized KV cache memory usage is
+(2 * ly + (32 —1,) +2 *ly + (32 —1,)) *n bit. For
+example, Asym-1.5bit stands for Asym-32/0 in our
+paper, which can be calculated to 3L * n bit and
+can be equivalently considered as a 1.5-bit symmet-
+rical quantization for better understanding of the
+compression ratio.
+
+The related parameters in XQuant are kq,
+vg, km, and vm. The equivalent bit-width
+B can be expressed as follows: B =
+((32 — max(kq,km))/2 + (max(kq,km) —
+min(kq, km))+(maax(kq, km)+min(kq, km))*
+2+ (32 — max(vuq,um))/2 + (max(vg,vm) +
+min(ug, um))+(maa(vg, vm)+min(ug, vm))*
+2) /64.
+
+In the classical configuration in our paper, kq =
+30, vg = 2, km = 32, and vm = 16, in key
+cache we apply 2-bit quantization to the layers
+[0, kq) and 1-bit quantization to the layers [kq, 32),
+and cross-layer compression to the layers [km, 32).
+The value cache is processed in the same manner.
+Therefore, the equivalent bit-widths of the key and
+value caches are computed as follows:
+
+32 — 30) + 30 *2
+
+= 1.9375
+32
+
+B, - |
+
+
+22000 21842ms
+
+21500
+21000
+20500
+20000
+19500
+
+19000
+18807ms
+
+18500
+
+18000
+
+KIVI Xquant
+(2-bit) (1.38-bit, Ours)
+
+Figure 4: Comparison of Execution Time.
+
+(32 — 16)/2+ (16-2) +2*2
+32
+
+The average bit-width is therefore 1.375, which
+appears as 1.38 in most parts of this paper. More
+parameter sets used in our experiments are listed in
+Appendix I.
+
+To maintain consistency with seminal works
+(e.g., KIVI (Liu et al., 2024b) and GPTQ (Frantar
+et al., 2022)), our reported "equivalent bit-width"
+for asymmetrical quantization methods considers
+only the quantized integer tensors, excluding meta-
+data overhead like scaling factors and zero-points.
+The comparisons remain rigorous, as all evaluated
+quantization methods were implemented with iden-
+tical group sizes and residual lengths. This ensures
+the unaccounted overhead is uniform across all
+methods and does not affect their relative perfor-
+mance rankings.
+
+By = = 0.8125
+
+D_ Efficiency analysis
+
+Using Mistral-7B as an example, we theoretically
+analyze the computational cost of our two key im-
+provements. During the calibration step, generat-
+ing each token incurs only 64 additional floating-
+point multiplications and 32 additions (Equation
+12), which are negligible in practice. Moreover, as
+described in Section 3.3.4, the cross-layer com-
+pression step optimizes efficiency by skipping cer-
+tain parts of the quantization process (Equation 2).
+
+To evaluate inference efficiency, we adopt the
+same experimental setup as implemented in KIVI’s
+
+repository, using a batch size of 16, a prompt length
+of 1024, and an output length of 128. As shown in
+Figure 4, XQuant, by leveraging its unique speedup
+mechanism, demonstrates competitive inference
+efficiency.
+
+E Hyperparameter
+
+The related parameters in XQuant are kq, vq, km,
+and vm. In XQuant, we quantize the lower kq,
+ug layers of key and value cache into 2-bit, while
+quantizing others into 1-bit. We apply cross-layer
+compression from the km th, vm th layer of key
+and value cache. All the configurations are summa-
+rized in Table 11.
+
+As demonstrated in Table 9, additional experi-
+ments on the Mistral-7B-Instruct model using the
+LongBench benchmark show that XQuant, with a
+fixed 7, = 1/6 and 72 = 0.045, consistently de-
+livers strong performance as well. These results
+suggest that this fixed set of hyperparameters are
+robust and can generalize effectively across differ-
+ent datasets. Therefore, task-specific hyperparam-
+eter tuning is superior but not necessary, and the
+method can achieve reliable performance with a
+fixed, pre-selected set of hyperparameters.
+
+F Cross-Layer Compression Strategy
+
+Under 2-bit quantization, the values in the KV
+cache are restricted to the discrete integer set
+{i € Z| 0 <i < 3}. Therefore, a rounding
+operation is required after weighted averaging. If
+standard rounding-to-nearest is applied, the range
+of Yo can be divided into six disjoint intervals, as
+summarized in Table 4. The derivation is as fol-
+lows:
+
+Let eg and e; denote the B-bit quantized values
+at the same position in adjacent layers of XQ. Then
+the merged value e,,, after cross-layer compression
+is computed as:
+
+| - ne)
+Em = | _—__—
+y+
+
+= |yoe0 + (1 — yo)e1|
+=e + |yo(e0 — e1)]-
+
+Without loss of generality, assume eg > e, and
+define 6 = €9 — €; > 0. Then we have:
+em = €1 + [09] , (14)
+
+where yo € [0,1] and 6 € ZN [0,3]. Since 7d €
+[0, 6], the rounding term | 700] in Eq. 14 can only
+
+
+Method Bit-width Hyperparameters HQA 2Wiki MSQ TREC TQA SAMS PC_ Avg
+Full Cache 16 / 43.02 27.10 18.78 71.00 86.23 42.75 2.75 41.66
+AsymKV 1.5 / 37.17 22.77 15.76 70.50 86.25 43.44 3.16 39.86
+XQuant 1.38 Task-specific 42.90 26.65 1744 71.50 84.50 45.18 5.71 41.98
+XQuant 1.38 Static 42.64 25.16 16.91 70.50 84.50 42.64 4.57 40.99
+
+Table 9: Evaluation of different KV cache compression methods using static hyperparameters setting.
+
+take 6 + 1 discrete values. Let |yo06] = c, where
+c € ZN 0, 6]. Then:
+
+1
+d€
+
+which yields the following constraint for yo, when
+6>0:
+
+(<= 1/2 ¢+1/2
+Yo € ’
+
+1
+5) [0,6], (5)
+
+5 ) N(0,1). (16)
+
+We now enumerate all valid combinations of 6
+and c from Equation 16:
+
+* ) =0: Only one possible value exists; trivial
+case omitted.
+
+*d=1:
+
+* c=0: 70 € [0, 1/2)
+*c=1: 70 € (1/2,1]
+
+“d=2
+* c=0: 70 € [0, 1/4)
+*c=1: 7 € (1/4,3/4)
+° c= 2: % € (3/4, 1]
+“(=3
+* c=0: 70 € [0, 1/6)
+*c=1: 9 € (1/6, 1/2)
+* c= 2: 70 € (1/2, 5/6)
+°c=3: 9 € (5/6, 1]
+
+Collectively, this yields six effective intervals of
+Yo, aS summarized in Table 4.
+
+G Comparison with Other Cross-Layer
+Compression Methods
+
+Several prior works have explored inter-layer re-
+dundancy from different perspectives. To elimi-
+nate potential confusion, we clarify several key
+distinctions and highlight innovations as follows:
+(a) Most existing methods compute KV caches at
+a subset of layers. However, these approaches re-
+quire additional training steps and, in some cases,
+
+Method Bit-width 2Wiki HQA
+Full Cache 16 58.20 61.88
+AsymKV_ 1.4 38.55 44.69
+XQuant 1.4 54.16 57.44
+
+Table 10: Comparison of XQuant with Full Cache
+and AsymKV on the Qwen2.5-14B model using the
+LongBench benchmark.
+
+even full retraining, significantly limiting scala-
+bility. In contrast, XQuant is designed as a plug-
+and-play solution that leverages deeper insights
+to enable effective redundancy reduction without
+any additional training. (b) XQuant is the only
+method that explicitly considers inter-layer redun-
+dancy through the lens of quantization. After quan-
+tization, the KV cache is decomposed into three
+components: the quantized cache, zero-points, and
+scaling factors. We demonstrate that the quantized
+cache, consisting solely of integers, exhibits sub-
+stantial inter-layer similarity. Meanwhile, the zero-
+points and scaling factors, which require minimal
+storage, are retained individually to preserve per-
+layer characteristics without being compressed. (c)
+MiniCache (Liu et al., 2024a) is another training-
+free method that primarily introduces a retention-
+recovery mechanism for cache magnitudes and un-
+mergable tokens. However, such operations are not
+directly compatible in mainstream open-source KV
+quantization frameworks. Furthermore, its use of
+the SLERP function imposes several constraints,
+making it inapplicable to quantized caches, which
+fundamentally differs from XQuant.
+
+H_ Evaluation on Qwen2.5-14B
+
+As shown in Table 10, we evaluated XQuant on a
+larger-scale and newer-generation model, Qwen?2.5-
+14B (Qwen et al., 2025), using the LongBench
+benchmark. The results demonstrate that X Quant
+generalizes well to different models, maintaining a
+superior trade-off between model performance and
+compression ratio.
+
+
+Model Dataset kq vq km vm etal eta2
+
+Mistral-7b-v0.3 TruthfulQA 30 2 32 16 O 0
+HQA 30 2 32 16 1/6 0.045
+2Wiki 32 0 32 16 O 0.09
+MSQ 32 0 32 16 1/6 O
+Mistral-7b-instruct-v0.2_ TREC 30 2 32 16 146 O
+TQA 30 2 32 16 1/6 0.09
+SAMS 30 2 32 16 O 0
+PC 32 0 32 16 O 0.045
+Llama2-7b TruthfulQA 28 O 32 28 13 40
+HQA 28 O 32 28 1/6 0.045
+2Wiki 28 O 32 28 1/3 0.045
+MSQ 28 O 32 28 1/3 #420
+Llama2-7b-chat TREC 32 0 32 20 1/6 O
+TQA 32 0 32 20 1/6 O
+SAMS 32 0 32 20 O 0
+PC 32 0 32 20 1/3 0.045
+
+Table 11: The configurations of our main experiments.
+
+I Configurations
+
+The Configurations of XQuant in our main experi-
+ments are summarized in Table 11
+
+J XQuant Pseudo Code
+
+The pseudo code for the whole workflow is pro-
+vided in Algorithm 1 and 2.
+
+
+Algorithm 1: XQuant Procedure
+
+1
+2
+3
+
+Input :kq, vg, km, vm, [2]
+Output : Optimized Quantized Cache
+for 1 < 0 to 31 do
+if 1 < vmor | mod 2 == 0 then
+KeyCache|/] <—
+Quantize(X/, 2 if 1 < kq else 1)
+else
+KeyCache{/] <—
+PseudoQuantize(X;/, 2 if 1 <
+kq else 1)
+if | < vqgor 1 mod 2 == 0 then
+ValueCache|]] <—
+Quantize(X!, 2 if 1 < vq else 1)
+else
+ValueCache[/] <—
+PseudoQuantize(X!, 2 if] <
+ug else 1)
+for 1 < 0 to 31 do
+if 1 < kmorl mod 2 == 0 then
+DequantizedKey Dequantize (
+KeyCache[!] [0],
+KeyCache|/][1],
+KeyCache[I][2])
+
+oS
+
+else
+DequantizedKey Dequantize (
+
+KeyCache
+KeyCache
+KeyCache
+
+(2)
+
+if 1 < vmor | mod 2 == 0 then
+Dequantized Value Dequantize(
+
+ValueCache
+ValueCache
+ValueCache
+else
+
+ValueCache
+ValueCache
+ValueCache
+
+[0],
+q(l,
+1)(2])
+
+Dequantized Value Dequantize(
+
+1)(2])
+
+Algorithm 2: Supporting Functions
+
+1 Function PseudoQuantizeCX, n_bits):
+
+2
+
+14
+
+15
+
+16
+
+20
+
+zero_point ~ min(X)// Find the
+
+minimum value of X;
+
+max(X )—min(X)
+Qn_bits —1
+
+scaling_factor <¢
+// Calculate scaling factor;
+return
+Calibrate(zero_point,
+scaling_factor, n_bits),
+None;
+
+Function QuantizeCX, n_bits):
+
+zero_point ~ min(X);
+
+max(X)—min(X) ,
+Qn_bits — >
+
+scaling_factor <¢
+quantized_cache <—
+
+X—zero_point
+round (eet) // Round to
+
+nearest quantized value;
+return
+Calibrate(zero_point,
+scaling_factor, n_bits),
+quantized_cache;
+
+Function Dequantize(zero_point,
+
+scaling_factor, quantized_cache):
+return quantized_cache -
+scaling_factor + zero_point
+// Reconstruct original value;
+
+Function Calibrate(zero_point,
+scaling_factor, n_bits):
+zero_point_cali <— zero_point +
+scaling_factor - n|n_bits]
+// Adjust zero point based on 7;
+scaling_factor_cali <—
+scaling_factor - (1 — 2+ n[n_bits])
+// Adjust scaling factor based
+on 7;
+return
+
+// Return calibrated values;
+
+zero_point_cali, scaling_factor_cali

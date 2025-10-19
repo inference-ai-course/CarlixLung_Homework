@@ -1,0 +1,1590 @@
+2302.02016v1 [cs.CL] 3 Feb 2023
+
+arXiv
+
+Improving Interpretability via Explicit
+Word Interaction Graph Layer
+
+Arshdeep Sekhon, Hanjie Chen, Aman Shrivastava, Zhe Wang, Yangfeng Ji, Yanjun Qi
+
+University of Virginia, Charlottesville, USA
+asScu @virginia.edu, hc9mx @virginia.edu, as3ek @virginia.edu, zw6sg @ virginia.edu, yj3fs @ virginia.edu, yanjun @ virginia.edu
+
+Abstract
+
+Recent NLP literature has seen growing interest in improv-
+ing model interpretability. Along this direction, we propose
+a trainable neural network layer that learns a global interac-
+tion graph between words and then selects more informative
+words using the learned word interactions. Our layer, we call
+WIGRAPH, can plug into any neural network-based NLP text
+classifiers right after its word embedding layer '. Across mul-
+tiple SOTA NLP models and various NLP datasets, we demon-
+strate that adding the WIGRAPH layer substantially improves
+NLP models’ interpretability and enhances models’ prediction
+performance at the same time.
+
+1 Introduction
+
+Deep neural networks (DNNs) have achieved remarkable
+results in the field of natural language processing (NLP)
+(Zhang, Zhao, and LeCun 2015a; Miwa and Bansal 2016;
+Wu et al. 2016; Wolf et al. 2020). Trustworthy real-world
+deployment of NLP models requires models to be not only
+accurate but also interpretable (Xie et al. 2020). Literature has
+included a growing focus on providing posthoc explanations
+or rationales for NLP models’ predictions (Ribeiro, Singh,
+and Guestrin 2016; Lundberg and Lee 2017; Murdoch, Liu,
+and Yu 2018; Singh, Murdoch, and Yu 2018; Chen, Zheng,
+and Ji 2020). However, explaining DNNs using a posthoc
+manner cannot improve a model’s intrinsic interpretability.
+As shown in (Chen and Ji 2020), two NLP models may
+have the same prediction behavior but different interpretation
+ability. This concept of "intrinsic interpretability" motivates a
+compelling research direction to improve the interpretability
+of NLP models. A few recent studies used user-specified
+priors as domain knowledge to guide model training (Cam-
+buru et al. 2018; Du et al. 2019; Chen and Ji 2019; Erion
+et al. 2019; Molnar, Casalicchio, and Bischl 2019), hence
+improving model interpretability. Such information priors,
+however, may not be available in many tasks. Several other
+studies proposed to develop inherently interpretable mod-
+els (Alvarez-Melis and Jaakkola 2018a; Rudin 2019), but
+these require intensive engineering efforts. More recently,
+Chen and Ji (2020) proposed to add a variational word mask,
+
+Copyright © 2023, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+‘code: https://github.com/QData/WIGRAPH
+
+VMASK, to improve the interpretability of NLP neural clas-
+sifiers.
+
+The aforementioned literature on improving NLP mod-
+els’ intrinsic interpretability have mostly focused on high-
+lighting important words. Strategies like VMASK just select
+important words unilaterally, without accounting for how
+one word influences other words regarding interpretability.
+Studies have shown that word interactions are critical in ex-
+plaining how NLP models make decisions (Halford, Wilson,
+and Phillips 2010). For instance, for a sentiment classifica-
+tion task, when without a context, it is hard to conclude if the
+word ‘different’ by itself is vital for sentiment? However, if
+we find ‘different’ highly relates to the word ‘refreshingly’, it
+will likely contribute substantially to the model’s sentiment
+prediction (see Table | 2,
+
+Along this direction, we propose a novel neural network
+layer, we call WIGRAPH, to improve NLP models’ intrin-
+sic interpretability. WIGRAPH is a plug-and-play layer and
+uses a graph-oriented neural network design: (1) It includes
+a stochastic edge discovery module that can discover signifi-
+cant interaction relations between words for a target predic-
+tion task; (2) It then uses a neural message passing module to
+update word representations by using information from their
+interacting words; and (3) It designs a variational information
+bottleneck based loss objective to suppress irrelevant word in-
+teractions (regarding target predictions). We call such a loss:
+VIB-WI loss. To improve a target text classifier’s intrinsic
+interpretability, we propose to add the proposed WIGRAPH
+layer right after the word embedding layer and fine-tune such
+an augmented model using a combination of the original
+objective and VIB-WI loss objective.
+
+In summary, this paper makes the following contributions:
+
+¢ We design WIGRAPH to augment neural text classifiers
+to improve these models’ intrinsic interpretability. WI-
+GRAPH does not require external user priors or domain
+knowledge. WIGRAPH can plug-and-play into any neural
+NLP models’ architectures, right after the word embed-
+ding layer.
+
+e We provide extensive empirical results showing that
+adding WIGRAPH layer into SOTA neural text classifiers
+
+These attribution interpretations were generated by LIME
+(Ribeiro, Singh, and Guestrin 2016) and use BERT-base model
+on SST-2 dataset to explain two models’ predictions.
+
+
+Model Explanation
+
+BASE still , this thing feels flimsy and ephemeral
+
+WIGRAPH still , this GHG feels HSY and Ephemeral)
+
+BASE so young , so smart , such talent , such a wise
+
+WIGRAPH so young , SO smart , such talent , such 4 wise
+
+BASE it is risky , intelligent , romantic and rapturous
+from start to finish
+
+WIGRAPH it is risky , HSWIGER , FORAGE and Faptirous
+fFOM start to finish
+
+BASE take care of my cat offers a refreshingly different
+slice of asian cinema
+
+WIGRAPH take care of my cat SRfEtS @ refreshingly different
+
+slice of asian cinema
+
+Table 1: Top ranked important words are shown in pink for
+BASE and blue for WIGRAPH augmented BASE model. We
+can tell that word attributions from WIGRAPH augmented
+model are easier to understand, and highlight more relevant
+sentiment words. This indicates WIGRAPH augmented model
+has better intrinsic interpretibility than BASE.
+
+results in better explanations (locally, globally as well as
+regarding interactions) and better model predictions at the
+same time.
+
+2 Method: A Novel WIGRAPH Layer
+
+Our main hypothesis is: a novel layer that can extract crucial
+global word interactions will improve neural text classifiers’
+interpretability. This is because we envision plugging such
+a layer will enhance a target model’s decision-making pro-
+cess by providing explicit guidance on what words are more
+important using the information on those words they inter-
+act with. We aim for three properties in such a layer design:
+(1) plug-and-play; (2) model agnostic; and (3) no loss of
+prediction performance.
+
+We denote vectors using lowercase bold symbols. We as-
+sume text inputs include a maximum length of L tokens. We
+denote the whole word vocabulary as set V. We use V to
+denote its size (the total number of unique words in this vo-
+cabulary V). Besides, we use f to describe a neural text classi-
+fication model. f classifies an input text into y € {1,...,C},
+where C is the number of classes. For an input sentence, we
+denote its 7-th word as w; and its embedding representation
+as vector x;: Vi € {1,..., L}. Therefore, the embeddings of
+an input text make a matrix form XK = [x,,...,xz]” (this
+means X € R’*¢ where L is the length of input and d is the
+dimension of each x;.).
+
+2.1 To Discover Word Interaction Graph: A
+
+Now we explain the first component of the proposed WI-
+GRAPH layer. This module aims to discover how words glob-
+ally interact for a predictive task. Our primary strategy to
+describe how words relate is to treat words as nodes and their
+
+interaction as edges in an interaction graph. We follow such
+an idea and choose to learn an undirected word interaction
+graph using a stochastic neural network module. We repre-
+sent this unknown graph as A = {Aj;}vxv. A includes
+the edges representing word interactions. We assume each
+Aj; € {0,1} is one binary random variable. A is stochastic
+whose Aj, specifies the presence or absence of an interaction
+between word i and word j in vocabulary V. A;; € {0,1}
+is sampled from Sigmoid(7;;), following Bernoulli distribu-
+tion with parameter Sigmoid(7;). In Section 2.2, we show
+how A can help us understand how certain words are more
+important than others owing to the learned word interactions.
+Learning the word interaction graph A means to learn the
+parameter matrix y = {yi;}vxv.- In Section 2.4, we show
+how 7 (and therefore A) is learned through the variational
+information bottleneck framework(Alemi et al. 2016).
+
+2.2 Message Passing on Word Interaction Graph
+using Graph Convolution: E’
+
+In our second module, we represent the 7-th word x; of an
+input text x as a node on the A graph. We use a modified
+version of graph convolutional operation (Kipf and Welling
+2016) to update each x; with its neighboring words x,;. Here
+j € N(i), and NV’ (i) denotes those neighbor nodes of x; on
+the graph A and in x. Specifically, we denote the resulting
+word representation vector as e;. Each x; is revised using
+a graph based summation from its neighbors’ embedding
+
+xj, Jj © N(2):
+
+eho stn ‘> s). (1)
+JEN ()
+
+Eq. (1) is motivated by the design of Graph convolutional net-
+works (GCNs) that were recently introduced to learn useful
+node representations that encode both node-level features and
+relationships between connected nodes (Kipf and Welling
+2016). Different from the ReLU activation function used in
+vanilla GCNs, we use GeLU as the o(-) , the non-linear acti-
+vation function proposed in (Hendrycks and Gimpel 2016).
+
+We want to point out that Eq. (1) is different from a typical
+GCN operation from (Kipf and Welling 2016). First, we only
+conduct one hop of neighbor aggregation in Eq. (1). A typical
+GCN module does multi-hops. Second, we drop W' € R?*4
+used for t-th hop of GCN update in (Kipf and Welling 2016).
+This is because we assume that the BASE text classifier
+model f has taken into account this prior and our WIGRAPH
+layer will not bias to prefer short range interactions. The third
+difference is the most important distinction that differentiates
+ours apart from (Kipf and Welling 2016). The graph has been
+given apriori to typical GCNs. However, in our work, we
+need to learn the graph A (see Section 2.4 on how to learn
+A).
+
+We can compute the simultaneous update of all words in
+input text x together by concatenating all e/. This gives us
+one matrix E’ ¢ R’*4, where L is the length of input and
+dis the embedding dimension of each x;. The simultaneous
+update can be written as:
+
+B! =o(A'X). (2)
+
+
+A Graph
+
+when did as state
+ested when
+| did | | ae
+
+become become
+poate
+state
+
+Learnt Interaction Graph A
+
+Convolution
+Update gcc
+
+Figure 1: WIGRAPH layer (components inside the gray box): during inference, embeddings of words (for example, Hawaii and
+state) are aggregated based on their interactions using a modified Graph Convolutional operation. Here graph A was learnt from
+training along with the prediction task. A WIGRAPH layer is inserted into a neural text classifier right after the word embedding
+
+input layer.
+
+where A’ = D~2(A, + I)D~®?, that is the normalized
+adjacency matrix and D is the diagonal degree matrix of
+(Ax + I). Note: Ax denotes those edges from A that are
+local for the current sample text x. In summary, our second
+module computes:
+
+E’ = gac(X, A)
+
+2.3. To Build and Use WIGRAPH Layer: X — Z
+
+Our design of WIGRAPH layer is that it can take the em-
+bedding matrix of a text example as input (X € R’**), and
+output a revised matrix representing each word with revised
+embedding (Z € R’*“), WIGRAPH layer aids the selection
+of more informative words based on their interactions for
+current predictive task. The proposed layer does not need
+significant efforts on engineering network architectures and
+does not require pre-collected importance attributions or ex-
+planations.
+
+Our main goal is to improve the intrinsic interpretability
+of neural text classifiers with a simple model augmentation.
+Therefore, for a given neural text classifier, we propose to
+simply insert a WIGRAPH layer right after the word embed-
+ding input layer and before the subsequent network layers of
+that target model.
+
+There exist many possible ways to build WIGRAPH layer
+from our first two modules (Section (2.1) and Section (2.2)).
+The simplest way is that we can just pass E’ as Z.
+
+Z=EF' (3)
+Figure 1 visualizes how this vanilla version of WIGRAPH
+layer updates word representations with the X > E’ > Z
+
+data flow during inference. During training, it needs to learn
+the graph A.
+
+2.4 Model Training with VIB-WI loss
+
+Now we propose to train WIGRAPH jointly with other lay-
+ers using a new objective that we name as variational infor-
+mation bottleneck loss for word interaction (VIB-WI loss).
+VIB-WI loss aims to restrict the information of globally irrel-
+evant word interactions flowing to subsequent network layers,
+
+hence forcing the model to focus on important interactions
+to make predictions. Following the Information Bottleneck
+framework (Alemi et al. 2016), we aim to learn A and all
+subsequent layers’ weights {W}, to make Z maximally in-
+formative of the prediction label Y, while being maximally
+compressive of X (see Figure 1). That is
+
+maxa,tw}{l(Z; Y) — BI(Z; X)} (4)
+
+Here I(-;-) denotes the mutual information, and 6 € Ry isa
+
+coefficient balancing the two mutual information terms.
+Given a specific example (x™, y™), we can further sim-
+
+plify the lower bound of first term [(Z; Y) in Eq. (4) as:
+
+I(z;y™) = Eqczjxmylog(p(y™ |x; A, {W}))  G)
+
+Similarly for the second term (Z; X) in Eq. (4) and for a
+given example (x, y”’), we can simplify its upper bound
+as:
+
+T(2;x"") < KL(q(A[x"™)||pao(A)) (6)
+
+Due to the difficulty in calculating two mutual information
+terms in Eq. (4), we follow (Schulz et al. 2020; Alemi et al.
+2016) to use a variational approximation g(X, Y, Z) to ap-
+proximate the true distribution p(X, Y, Z). Details on how
+to derive Eq. (5) and Eq. (6) are in Section (A.4). Now com-
+bining Eq. (5) and Eq. (6) into Eq. (4), we get the revised
+objective as:
+
+Mar Rw) t{Eq(z[xmylog(p(y™ |x"; A, R, {W}))
+—BgKL(q(A|x™)||pao(A))}
+
+Eq. (7) is the proposed VIB objective for a given observation
+(x™,y™).
+
+Detailed Model Specification: During training, for the
+stochastic interaction graph A, we learn its trainable param-
+eter matrix y € RIV!*!, that is also optimized along with
+the model parameters during training. Further, we use the
+mean field approximation (Blei, Kucukelbir, and McAuliffe
+
+2017), that is, q(Ase|x) = TTi2y 0jy (Aci. |Xi xy).
+
+(7)
+
+
+Equation 7 requires prespecified prior distributions pao.
+We use a Bernoulli distribution prior (a non-informative
+prior) for each word-pair interaction qg[Az,,¢;|Xi,X,]-
+
+Pao(Az) = TW, Tj Pao (Ax,,x;) and Pao(Az,,x;) =
+Bernoulli(0.5). This leads to:
+
+KL(q(Ax|x™)||Pao(A)) = —Hq(Axlx”) (8)
+
+Here, H, denotes the entropy of the term A,.|x’” under the g
+distribution. Besides, we add a sparsity regularization on Ax
+to encourage learning of sparse interactions. Now, we have
+the following loss function for (x, y™):
+
+—(Exp(y|x"™; A, {W}) + BgHg(Ax|x™))
++Bsparse||Ax||1
+
+During training, A is discrete and is drawn from Bernoulli
+distributions that are parametrized with matrix y € R!V!*!V1,
+We, therefore, use the Gumbel-Softmax(Jang, Gu, and Poole
+2016) trick to differentiate through the sampling step and
+propagate the gradients to the respective parameters y.
+
+(9)
+
+2.5 Variation: WIGRAPH-A-R
+
+We also try another possible design of WIGRAPH that in-
+cludes one more separate module that learns an attribution
+word mask R on top of E’. Aiming for better word selection,
+R is designed as a stochastic layer we need to learn and
+R € {0, 1}”. Each entry in R (e.g., R; € {0, 1}) follows a
+Bermoulli distribution with parameter ¢ (to be learned).
+
+During inference, for an input text x, we get a binary vector
+R, from R that is of size L. Its i-th entry Rx, € {0,1} is
+a binary random variable associated with the word token at
+the i-th position. We use the following operation (a masking
+operation!) to generate the final representation of the 2-th
+word from a WIGRAPH layer:
+
+z; = Rx,€, (10)
+
+We can compute the simultaneous update of all words
+in input text x together by concatenating all z; denoted as
+matrix Z € R’*4, The simultaneous update can then be
+written as:
+
+Z = diag (Rx) py, ELxa (11)
+
+During training, we need to learn both A and R. Now the
+loss function VIB-WI loss turns to:
+
+—(Exp(y|x"”; A, R, {W}) + 6; Hg(Rx|x™)+
+BgHg(Ax|x™)) Bapavwe||Asel|1
+Due to page limit, we put detailed derivations of above and
+specification of R in Section (A.1). We call the vanilla ver-
+
+sion of WIGRAPH as WIGRAPH-A and the version with the
+word mask R as WIGRAPH-A-R.
+
+3 Connecting to Related Work
+
+Our design orients from one basic notion that we treat inter-
+pretability as an intrinsic property of neural network models.
+We expect a neural text classifier will be more interpretable,
+when focusing on important word interactions to make pre-
+dictions. Our work connects to multiple related topics:
+
+Self-Explaining Models Recent literature has seen grow-
+ing interests in treating interpretability as an inherent property
+of NLP deep models. (Alvarez-Melis and Jaakkola 2018b;
+Rudin 2019) proposed to design self-interpretable models by
+requiring human annotations in model engineering. (Chen
+and Ji 2020) proposed VMASK layer for improving NLP
+models’ interpretability. This layer automatically learns task-
+specific word importance and guides a model to make predic-
+tions based on important words. However, this method does
+not consider interactions between words.
+
+Explanations as Feedback Anoter category of work uses
+explanations as feedback for improving model prediction
+performance as well as to encourage explanation faithfulness.
+(Cambutu et al. 2018; Chen and Ji 2019; Erion et al. 2019;
+Molnar, Casalicchio, and Bischl 2019) focuses on aligning
+human judgments with generated explanations and further
+incorporating it into the training of the model. These methods
+require human annotations that are expensive to obtain and
+also have the risk of not aligning well with the separately
+trained model’s decision making process. (Ross, Hughes,
+and Doshi-Velez 2017; Ross and Doshi-Velez 2017; Rieger
+et al. 2020) use explanations as feedback into the model
+to improve prediction performance. However, these heavily
+rely on ground-truth explanations and domain knowledge.
+Differently, our proposed method augments a model with a
+special layer that improves both prediction performance and
+interpretability (see Section (4)).
+
+Graph Neural Networks Graph Neural Networks (GNNs)
+generalize neural networks from regular grids, like images to
+irregular structures like graphs. There exists a wide variety
+of GNN architectures like (Kipf and Welling 2016; Scarselli
+et al. 2008; Veli¢kovié et al. 2017; Santoro et al. 2017). They
+share the same underlying concept of message passing be-
+tween connected nodes in the graph. However, little attention
+has been paid to address cases when the underlying graph
+is unknown. In contrast, in WIGRAPH, we do not know the
+global interaction graph apriori. It is learnt along with the
+prediction model as part of the training.
+
+Post-Hoc Explanation NLP literature includes a number
+of methods that focus on disentangling the rationales of a
+trained NLP model’s decision by finding which words con-
+tributed most to a prediction, including the popularly used
+LIME(Ribeiro, Singh, and Guestrin 2016) and SampleShap-
+ley (Kononenko et al. 2010) methods. Recent studies have
+proposed to generate post-hoc explanations beyond word-
+level features by detecting feature interactions, including
+for instance, contextual decomposition by (Murdoch, Liu,
+and Yu 2018). Other work adopted Shapley interaction index
+to compute feature interactions (Lundberg, Erion, and Lee
+2018). In contrast to these post-hoc interpretation systems,
+our method focuses on designing a strategy to improve the
+inherent interpretability of NLP models.
+
+Information Bottleneck Based Methods The informa-
+tion bottleneck method was first proposed by (Tishby, Pereira,
+and Bialek 2000; Tishby and Zaslavsky 2015). (Alemi et al.
+2016) introduced a variational approximation to the informa-
+tion bottleneck that enables usage for deep neural networks.
+
+
+BASE Models IMDB SST-1 SST-2 AG News TREC Subj
+BASE 88.39 43.84 83.74 91.03 90.40 90.20
+LSTM VMASK 90.07 44.12 84.35 92.19 90.80 91.20
+WIGRAPH 90.12 41.73. 46.47 49.63 86.21 42.63. 91.16.4913 92.2041.89 91.40 41.20
+BASE 91.88 51.63 92.15 92.05 97.40 96.40
+BERT VMASK 93.04 51.36 92.26 94.24 97.00 96.40
+WIGRAPH 92.48 +0.60 52.49 +0.86 92.59 +0,.44 92.72 +0.67 97.40 +0.00 96.60 +0.20
+BASE 89.87 55.20 94.73 93.46 96.2 96.00
+RoBERTa VMASK 90.02 54.21 93.47 93.47 96.0 96.50
+WIGRAPH = 90.10.4023 55.52.4932 94.75 092 = 93.52 40.06 96.60.20 96.40 4.0.40
+BASE 86.96 51.31 90.50 93.34 97.20 96.20
+disiIBERT VMASK 87.00 48.01 89.02 93.81 95.20 95.00
+WIGRAPH 88.32 4136 50.81 90.77 4.9.0 93.85 +0.51 97.40 +0.20 96.30 +0.10
+
+Table 2: Prediction Accuracy (%). Models augmented with WIGRAPH layer predict better than BASE.
+
+Dataset Train/Dev/Test C Vv L
+sstl 8544/1101/2210 5 17838 50
+sst2 6920/872/1821 2 16190 50
+imdb 20K/5K/25K 2 29571 250
+AGNews 114K/6K/7.6K 4 = 21838 50
+TREC 5000/452/500 6 8026 15
+Subj 8000/1000/1000 2 9965 25
+
+Table 3: Summary of datasets we use in experiments:
+number of classes (C’), vocabulary size (V) and sen-
+tence length (L).
+
+(Schulz et al. 2020; Bang et al. 2019) utilized the informa-
+tion bottleneck principle to generate post-hoc explanations
+by highlighting important features while suppressing unim-
+portant ones. Differently, we incorporate the information bot-
+tleneck in model training to make model prediction behavior
+more interpretable.
+
+4 Experiments
+We design experiments to answer the following:
+
+1. Are NLP models augmented with WIGRAPH layer more
+interpretable models?
+
+2. Do NLP models augmented with WIGRAPH layer predict
+well?
+
+Besides, we extend WIGRAPH to one concept based vision
+task in Section 4.5.
+
+4.1 Setup: Datasets, Models and Metrics
+
+Datasets Our empirical analysis covers six popular text
+classification datasets as detailed by Table 3. These six
+datasets are "sst1", "sst2"(Socher et al. 2013), "imdb"(Maas
+et al. 2011), "AG news"(Zhang, Zhao, and LeCun 2015b),
+"TREC"(Li and Roth 2002) and "Subj"(Pang and Lee 2005).
+Three of the datasets are for binary classification, and the rest
+are for multi-class text classification tasks.
+
+BASE Models We use four commonly used neural text
+classifiers to evaluate WIGRAPH: LSTM, and transformer
+
+based SOTA models including BERT, RoBERTa and distil-
+BERT. As Section 2.4 described, we plug our WIGRAPH
+layer right after the word embedding input layer. For the
+LSTM models(Hochreiter and Schmidhuber), we initialize
+word embeddings from (Mikolov et al. 2013) with dimension
+d = 300. For BERT, RoBERTa and distiIBERT models, we
+use fine-tuned base models from (Wolf et al. 2020) on each
+dataset (Table 3).
+
+Hyperparameter Tuning We perform fine-tuning on each
+model (batch size=64). We fix the word embedding layer
+and train WIGRAPH layer along with the rest of a BASE
+model. For the LSTM models, we vary the hidden size
+€ {100,300,500}, and dropout in {0.0,0.2,0.3}. We
+set Bsparse € {le — 02,le — 03,le — 04}, By €
+{1.0, le — 02, le — 03,1le — 04} and 6; € {1.0,le —
+02, le — 03, le — 04}. The learning rate is tuned from the
+set {0.0001, 0.0005, 0.005, 0.001}. For transformer based
+models, we vary dropout in range {0.2,0.3,0.5}, hid-
+den dimension to compute R € {128,256,512}. We set
+Bsparse, 2g, i = 1.0 and anneal it by a factor of 0.1 every
+epoch. For the larger vocabulary cases IMDB, AG-News
+datasets and transformer-base models), we filter words for
+learning our interaction matrix A, i.e., we learn interactions
+for the top frequent 10, 000 words.
+
+Baselines: To our best knowledge, WIGRAPH is the only
+plug-and-play layer to improve a target neural text classifier’s
+interpretability using explicit pairwise word interactions. In
+our experiments, we compare WIGRAPH to a BASE model
+without WIGRAPH layer and to a BASE model augmented
+by the VMASK layer. (Chen and Ji 2020) proposed VMASK
+layer for improving NLP models’ intrinsic interpretability,
+though this layer does not consider word interactions.
+
+Evaluation Metrics: We use three types of evaluations to
+compare WIGRAPH with baselines. (a) Prediction accuracy:
+this is to measure if NLP models augmented with WIGRAPH
+layer predict well. (b) To compare different models’ inter-
+pretability, we will apply two post-hoc attribution techniques:
+LIME(Ribeiro, Singh, and Guestrin 2016) and SampleShap-
+ley (Kononenko et al. 2010) on model predictions. The re-
+sulting feature attribution outputs will be evaluated using
+
+
+Metrics BASE Models IMDB. SST-1 SST-2. AGNews TREC Subj
+AGEs BASE 1434. 876 1703 7.00 11.95 9.67
+LSTM VMASK 151 952 2214 739 11.97 11.68
+
+GE-LIME WIGRAPH-A 17.8 10.33. 22.34. =—-14.94. 20.13 16.27
+Genemted BASE 10.63 26.08 43.96. 7.12 68.82 44.13
+Bxplatiations BERT VMASK 12.64. 275. 41.6—Ss—«8AT—“‘«é«‘ SSCA AL
+WIGRAPH-A 10.96 34.81 44.59 11.13 6851 44.90
+
+BASE 10.30 32.00 41.51 15.7 66.07 43.00
+
+RoBERTa = VMASK 9.88 26.02 4069 847 6458 43.66
+
+WIGRAPH-A 10.23. 32.70 42.64 15.72 66.27. «44.22
+
+BASE 11.00 27.92 4225 883 67.63 44.93
+
+distiIBERT | VMASK 920 22.11 39.77 8.00 63.14 40.65
+
+WIGRAPH-A 11.32 36.21 44.33 9.02 68.74. 43.97
+
+AOPGeo? BASE 1580 7.91 2238 662 11.90 11.66
+LSTM VMASK —-:16.48.—«9.73.s«22.52s—«s72.65.—Ss«*W'.8—s«d'.:TA
+
+SampleShapley WIGRAPH-A 21.73. 9.78 49.40 27.60 —«68.27.—-29.29
+Generated BASE 13.00 28.65 41.65. 7.21 65.37 33.22
+Explanations BERT VMASK 12.18 29.92 41.53. 10.02 65.14. 44.41
+WIGRAPH-A 14.16 36.02 44.75 10.43 66.30--44.91
+
+BASE 9.13 36.01 35.89 6.01 66.07 13.08
+
+RoBERTa — VMASK 8.00 2989 4264 568 54.85 43.75
+
+WIGRAPH-A 8.50 38.01 42.78 7412 67.56 43.61
+
+BASE 12.03. 28.07 42.24. 15.09 47.78 13.08
+
+distiBERT | VMASK 9.26 18.67 35.03 13.95 59.53 40.93
+
+WIGRAPH-A 12.18 35.29 43.14 14.21. 66.08 43.97
+
+Table 4: AOPCs (%) obtained from results using LIME and SampleShapley to interpret the base, WIGRAPH-based models and
+the baseline VMASK across four SOTA models, and over six different datasets.
+
+explanation faithfulness scores like AOPCs (details in Sec-
+tion (4.3)). (3) We further design interaction interpretability
+measures to compare different models in Section (4.4).
+
+4.2 Prediction Performance Comparison
+
+In Table 2, we compare prediction performance using four
+different SOTA models across six different datasets. This
+makes 24 different (BASE, data) combinations , and on each
+case, we compare BASE model, VMASK augmented base
+model versus our WIGRAPH augmented model regarding the
+prediction accuracy. Here we refer to WIGRAPH as the best
+performing model between WIGRAPH-A and WIGRAPH-
+A-R. Table 2 shows that adding WIGRAPH layer into SOTA
+neural text classifier models makes the models predict better!
+Empirically, the performance gains on LSTM models appear
+more than on Transformer models.
+
+4.3 Attribution Interpretability Comparison:
+Area Under Perturbation Curve (AOPC)
+
+Here we empirically check our hypothesis that training a
+model augmented with WIGRAPH layer leads to improve-
+ments of model explanation faithfulness during downstream
+post-hoc interpretation analyses. We use Area Over Pertur-
+bation Curve (AOPC) (Nguyen 2018; Samek et al. 2016)
+as the evaluation metric. AOPC is defined as the average
+change of prediction probability on the predicted class over a
+test dataset by deleting top K words in explanations. Higher
+AOPC scores reflect better interpretation faithfulness.
+
+1 K
+AOPC = = » < f(x) — f(&\1,....4) >pexy (12)
+
+We generate word-level attribution explanations using two
+popular post-hoc explanation methods: LIME(Ribeiro, Singh,
+and Guestrin 2016) and SampleShapley (Kononenko et al.
+2010). Across all datasets, we use 500 test samples and k €
+{1,..., 10}. Table 4 shows that WIGRAPH-A outperforms
+the original BASE model and the BASE with VMASK.
+
+When LIME is used to post-hoc explain models, across
+all 24 cases of (model, dataset) combinations, WIGRAPH
+outperforms the original BASE model and the BASE with
+VMASK layer regarding AOPC score in 21 cases. The
+only three exception include the IMDB/BERT, TREC/BERT
+and IMDB/RoBERTa setups. When SampleShapley is used,
+WIGRAPH outperforms the original BASE model and the
+BASE with VMASK layer in 22 cases out of 24 (model,
+dataset) combinations.
+
+4.4 Interaction Analysis and Ablation
+
+In this experiment, we introduce a new metric: Interaction
+Occlusion Score (oS). The IoS score measures the interaction
+interpretability faithfulness of a target model on its learnt
+interactions.
+
+WIGRAPH discovers globally informative interactions
+with the importance score E,|A,, ,|x;,;] (see q in Sec-
+tion (2.4)). We sort entries of A and filter out the top k
+global interaction scores, denoted by A*,. We then calcu-
+late the accuracy of the model after only using these top k&
+interactions via:
+
+1 M
+1OS(k) = 35 SO lym=vk,
+
+m=1
+
+(13)
+
+
+BASE Models IMDB SST-1 SST-2 AGNews TREC Subj
+LSTM WIGRAPH-A-R- 89.12 44.32 84.08 91.16 91.65 90.60
+WIGRAPH-A 90.12 46.47 86.21 90.87 92.20 91.40
+WIGRAPH-A-R- 90.81 = 52.49 92.59 90.13 96.60 96.40
+
+BERT WIGRAPH-A 92.48 52.04 91.54 92.72 97.40 96.60
+WIGRAPH-A-R- 90.10 = 52.90 = 92.97 91.54 95.20 95.50
+
+RoBERTa WIGRAPH-A 88.21 54.52 94.45 93.52 96.60 96.40
+WIGRAPH-A-R 88.32 550.81 88.19 93.85 96.40 96.20
+
+disiI]BERT |= WIGRAPH-A 88.07 49.95 90.77 91.08 97.40 96.30
+
+Table 5: Ablations analysis regarding prediction accuracy from: WIGRAPH-A and WIGRAPH-A-R.
+
+Here, we represent the label of the model on the m*” test
+sample as y,,. Table 6 in Section (A.2) shows using the
+top interactions outperforms the setting when no pairwise
+interactions are used during inference.
+
+Ablation: We perform extensive ablation analysis to com-
+pare WIGRAPH-A and WIGRAPH-A-R. Table 7 provides
+comparison analysis regarding prediction accuracy and we
+can tell no clear winner between the two variations across all
+24 cases of (BASE, data) combinations. See Section (A.2)
+and Table 8 for more ablation results via other metrics. We
+recommend to use WIGRAPH-A in most real-world appli-
+cations, due to less parameters.
+
+Qualitative Visualization Section (A.2) includes an exten-
+sive list of qualitative analyses we make to understand WI-
+GRAPH, including correlation analysis of interaction against
+co-occurrence, word clouds visualization, and interacting
+word-pair examples. We show in Figure 2 that our learned
+interaction matrix does not merely mirror the co-occurrence
+statistics, instead learns more general informative global inter-
+actions. Figure 3 uses word clouds to visualize top interacting
+word pairs obtained from TREC, SST1, and SST2 datasets.
+The word pairs are consistent with corresponding tasks.
+
+4.5 Modeling Concept Interaction in Vision
+
+Koh et al. (2020) introduced the notion of high-level con-
+cepts as an intermediate interpretable interface in the input-
+model-predictions pipeline. These concepts describe high
+level attributes of an image. This enables users to directly
+interact with a model by intervening on human-interpretable
+concepts. The interactions between these concepts can affect
+prediction, however these interactions are unknown. In this
+section, we investigate the utility of learning these interac-
+tions for aiding prediction using our WIGRAPH layer. We
+train a concept bottleneck (Koh et al. 2020) model on the
+CUB dataset (Wah et al. 2011) which is jointly trained with a
+WIGRAPH layer. In Section B, we show that the WIGRAPH
+layer is able to learn concept embeddings, model interac-
+tions between concepts, and can also be used with test time
+concept intervention to improve prediction accuracy on the
+final task. In order to extend WIGRAPH for this setup, we
+introduce a dynamic interaction graph with concepts and the
+image as nodes. Intuitively, the image is considered to be a
+composition of concept embeddings. The interaction between
+
+the concepts are learned variables whereas the interactions
+between an image and its concepts are computed using the
+cosine similarity. The details of our model architecture are in
+Section B.2.
+
+Results: Asa baseline, we fine-tune an Inception V3-based
+joint concept bottleneck model (Koh et al. 2020) that achieve
+a prediction accuracy of 80.04% on the CUB dataset (Wah
+et al. 2011). Together with this model, we jointly train our
+WIGRAPH and the concept embedding layer to learn the in-
+teractions between the concepts. As described in (Koh et al.
+2020), test time intervention (TTD helps improve predic-
+tion accuracy to 89.41%(+9.37%). Interestingly, we observe
+that TTI achieves more improvements of prediction accuracy
+when using WIGRAPH augmented concept vision model to
+95.74%(+15.70%).
+
+5 Conclusions
+
+In this paper, we try to answer the question: Does adding
+a special layer in the form of discovering word-word inter-
+actions lead to improvements in a neural text classifier’s
+interpretability? Our paper gives a firm "Yes" to the question
+and provides a neural-network based design for making such
+a layer. The second component of WIGRAPH layer uses the
+message passing framework and it can be expanded to allow
+for learning and accounting for higher-order interactions (not
+only pairwise) in a scalable way. We will explore this in our
+future works. Furthermore, WIGRAPH can easily extend to
+cross sentence tasks like Natural Language Inference, and
+we will leave it to future.
+
+
+References
+Alemi, A. A.; Fischer, I.; Dillon, J. V.; and Murphy, K. 2016.
+Deep variational information bottleneck. arXiv preprint
+arXiv: 1612.00410.
+Alvarez-Melis, D.; and Jaakkola, T. S. 2018a. Towards ro-
+bust interpretability with self-explaining neural networks. In
+NeurIPS.
+Alvarez-Melis, D.; and Jaakkola, T. S. 2018b. Towards Ro-
+bust Interpretability with Self-Explaining Neural Networks.
+arXiv: 1806.07538.
+Bang, S.; Xie, P.; Lee, H.; Wu, W.; and Xing, E. 2019. Ex-
+plaining a black-box using deep variational information bot-
+tleneck approach. arXiv preprint arXiv: 1902.06918.
+Blei, D. M.; Kucukelbir, A.; and McAuliffe, J. D. 2017. Vari-
+ational inference: A review for statisticians. Journal of the
+American statistical Association, 112(518): 859-877.
+Camburu, O.-M.; Rocktiaschel, T.; Lukasiewicz, T.; and Blun-
+som, P. 2018. e-snli: Natural language inference with natural
+language explanations. In Advances in Neural Information
+Processing Systems, 9539-9549.
+Chen, H.; and Ji, Y. 2019. Improving the Explainability of
+Neural Sentiment Classifiers via Data Augmentation. arXiv
+preprint arXiv:1909.04225.
+Chen, H.; and Ji, Y. 2020. Learning Variational Word Masks
+to Improve the Interpretability of Neural Text Classifiers.
+arXiv preprint arXiv:2010.00667.
+Chen, H.; Zheng, G.; and Ji, Y. 2020. Generating hierarchi-
+cal explanations on text classification via feature interaction
+detection. arXiv preprint arXiv:2004.02015.
+Chen, J.; Song, L.; Wainwright, M. J.; and Jordan, M. I. 2018.
+Learning to explain: An information-theoretic perspective on
+model interpretation. arXiv preprint arXiv: 1802.07814.
+Du, M.; Liu, N.; Yang, F; Ji, S.; and Hu, X. 2019. On attri-
+bution of recurrent neural network predictions via additive
+decomposition. In The World Wide Web Conference, 383—
+393.
+Erion, G.; Janizek, J. D.; Sturmfels, P.; Lundberg, S.; and Lee,
+S.-L 2019. Learning explainable models using attribution
+priors. arXiv preprint arXiv: 1906. 10670.
+Halford, G. S.; Wilson, W. H.; and Phillips, S. 2010. Rela-
+tional knowledge: the foundation of higher cognition. Trends
+in cognitive sciences, 14(11): 497-505.
+Hendrycks, D.; and Gimpel, K. 2016. Gaussian error linear
+units (gelus). arXiv preprint arXiv: 1606.08415.
+Hochreiter, S.; and Schmidhuber, J. ???? Long short-term
+memory. 9(8): 1735-1780.
+Jang, E.; Gu, S.; and Poole, B. 2016. Categorical
+reparameterization with gumbel-softmax. arXiv preprint
+arXiv:1611.01144.
+Kipf, T. N.; and Welling, M. 2016. Semi-supervised classi-
+fication with graph convolutional networks. arXiv preprint
+arXiv: 1609.02907.
+Koh, P. W.; Nguyen, T.; Tang, Y. S.; Mussmann, S.; Pierson,
+E.; Kim, B.; and Liang, P. 2020. Concept bottleneck models.
+In International Conference on Machine Learning, 5338-
+5348. PMLR.
+
+Kononenko, L; et al. 2010. An efficient explanation of indi-
+vidual classifications using game theory. Journal of Machine
+Learning Research, 11(Jan): 1-18.
+
+Li, X.; and Roth, D. 2002. Learning question classifiers.
+In COLING 2002: The 19th International Conference on
+Computational Linguistics.
+
+Lundberg, S. M.; Erion, G. G.; and Lee, S.-I. 2018. Consistent
+individualized feature attribution for tree ensembles. arXiv
+preprint arXiv: 1802.03888.
+
+Lundberg, S. M.; and Lee, S.-I. 2017. A unified approach
+to interpreting model predictions. In Advances in neural
+information processing systems, 4765-4774.
+
+Maas, A.; Daly, R. E.; Pham, P. T.; Huang, D.; Ng, A. Y.; and
+Potts, C. 2011. Learning word vectors for sentiment analysis.
+In Proceedings of the 49th annual meeting of the association
+for computational linguistics: Human language technologies,
+
+142-150.
+
+Mikolov, T.; Sutskever, I.; Chen, K.; Corrado, G. S.; and
+Dean, J. 2013. Distributed representations of words and
+phrases and their compositionality. In Advances in neural
+information processing systems, 3111-3119.
+
+Miwa, M.; and Bansal, M. 2016. End-to-end relation ex-
+traction using Istms on sequences and tree structures. arXiv
+preprint arXiv: 1601.00770.
+
+Molnar, C.; Casalicchio, G.; and Bischl, B. 2019. Quantifying
+model complexity via functional decomposition for better
+post-hoc interpretability. In Joint European Conference on
+Machine Learning and Knowledge Discovery in Databases,
+193-204. Springer.
+
+Murdoch, W. J.; Liu, P. J.; and Yu, B. 2018. Beyond word
+importance: Contextual decomposition to extract interactions
+from LSTMs. arXiv preprint arXiv: 1801.05453.
+
+Nguyen, D. 2018. Comparing automatic and human evalu-
+ation of local explanations for text classification. In Pro-
+ceedings of the 2018 Conference of the North American
+Chapter of the Association for Computational Linguistics:
+Human Language Technologies, Volume I (Long Papers),
+1069-1078.
+
+Pang, B.; and Lee, L. 2005. Seeing stars: Exploiting class
+relationships for sentiment categorization with respect to
+rating scales. arXiv preprint cs/0506075.
+
+Rezende, D. J.; and Mohamed, S. 2015. Variational inference
+with normalizing flows. arXiv preprint arXiv: 1505.05770.
+
+Ribeiro, M. T.; Singh, S.; and Guestrin, C. 2016. Why should
+i trust you?: Explaining the predictions of any classifier. In
+Proceedings of the 22nd ACM SIGKDD international confer-
+ence on knowledge discovery and data mining, 1135-1144.
+ACM.
+
+Rieger, L.; Singh, C.; Murdoch, W.; and Yu, B. 2020. Inter-
+pretations are useful: penalizing explanations to align neural
+networks with prior knowledge. In International Conference
+on Machine Learning, 8116-8126. PMLR.
+
+Ross, A. S.; and Doshi-Velez, F. 2017. Improving
+the Adversarial Robustness and Interpretability of Deep
+
+Neural Networks by Regularizing their Input Gradients.
+arXiv:1711.09404.
+
+
+Ross, A. S.; Hughes, M. C.; and Doshi-Velez, F. 2017.
+Right for the right reasons: Training differentiable mod-
+els by constraining their explanations. arXiv preprint
+arXiv: 1703.03717.
+
+Rudin, C. 2019. Stop explaining black box machine learning
+models for high stakes decisions and use interpretable models
+instead. Nature Machine Intelligence, 1(5): 206-215.
+Samek, W.; Binder, A.; Montavon, G.; Lapuschkin, S.; and
+Miiller, K.-R. 2016. Evaluating the visualization of what
+a deep neural network has learned. [EEE transactions on
+neural networks and learning systems, 28(11): 2660-2673.
+Santoro, A.; Raposo, D.; Barrett, D. G.; Malinowski, M.;
+Pascanu, R.; Battaglia, P.; and Lillicrap, T. 2017. A sim-
+ple neural network module for relational reasoning. arXiv
+preprint arXiv:1706.01427.
+
+Scarselli, F.; Gori, M.; Tsoi, A. C.; Hagenbuchner, M.; and
+Monfardini, G. 2008. The graph neural network model. IEEE
+transactions on neural networks, 20(1): 61-80.
+
+Schulz, K.; Sixt, L.; Tombari, F.; and Landgraf, T. 2020.
+Restricting the flow: Information bottlenecks for attribution.
+arXiv preprint arXiv:2001.00396.
+
+Singh, C.; Murdoch, W. J.; and Yu, B. 2018. Hierarchical
+interpretations for neural network predictions. arXiv preprint
+arXiv: 1806.05337.
+
+Socher, R.; Perelygin, A.; Wu, J.; Chuang, J.; Manning, C. D.;
+Ng, A.; and Potts, C. 2013. Recursive deep models for se-
+mantic compositionality over a sentiment treebank. In Pro-
+ceedings of the 2013 conference on empirical methods in
+natural language processing, 1631-1642.
+
+Tishby, N.; Pereira, F. C.; and Bialek, W. 2000. The informa-
+tion bottleneck method. arXiv preprint physics/0004057.
+
+Tishby, N.; and Zaslavsky, N. 2015. Deep learning and the
+information bottleneck principle. In 20/5 [EEE Information
+Theory Workshop (ITW), 1-5. TEEE.
+
+Velickovi¢, P.; Cucurull, G.; Casanova, A.; Romero, A.; Lio,
+P.; and Bengio, Y. 2017. Graph attention networks. arXiv
+preprint arXiv:1710.10903.
+
+Wah, C.; Branson, S.; Welinder, P.; Perona, P.; and Belongie,
+S. 2011. The caltech-ucsd birds-200-2011 dataset.
+
+Wolf, T.; Chaumond, J.; Debut, L.; Sanh, V.; Delangue, C.;
+Moi, A.; Cistac, P.; Funtowicz, M.; Davison, J.; Shleifer, S.;
+et al. 2020. Transformers: State-of-the-art natural language
+processing. In Proceedings of the 2020 Conference on Em-
+pirical Methods in Natural Language Processing: System
+Demonstrations, 38-45.
+
+Wu, Y.; Schuster, M.; Chen, Z.; Le, Q. V.; Norouzi, M.;
+Macherey, W.; Krikun, M.; Cao, Y.; Gao, Q.; and Macherey,
+K. 2016. Google’s neural machine translation system: Bridg-
+ing the gap between human and machine translation. arXiv
+preprint arXiv: 1609.08144.
+
+Xie, N.; Ras, G.; van Gerven, M.; and Doran, D. 2020. Ex-
+plainable deep learning: A field guide for the uninitiated.
+arXiv preprint arXiv:2004.14545,
+
+Zhang, X.; Zhao, J.; and LeCun, Y. 2015a. Character-level
+convolutional networks for text classification. In Advances
+in neural information processing systems, 649-657.
+
+Zhang, X.; Zhao, J. J.; and LeCun, Y. 2015b. Character-level
+Convolutional Networks for Text Classification. In N/PS.
+
+
+A Appendix
+
+A.1 Model Training for WIGRAPH-A-R
+
+We propose to train WIGRAPH jointly with other layers using
+a new objective that we name as variational information bot-
+tleneck loss for word interaction (VIB-WI loss). VIB-WI loss
+aims to restrict the information of globally irrelevant word
+interactions flowing to subsequent network layers, hence
+forcing the model to focus on important interactions to make
+predictions. Following the Information Bottleneck framework
+(Alemi et al. 2016), we aim to learn A, R and all subsequent
+layers’ weights {W}, to make Z maximally informative of
+Y, while being maximally compressive of X (see Figure 1).
+That is
+
+mata r«w}tl(Z; ¥) — BL(Z; X)} (14)
+
+Here I(-;-) denotes the mutual information, and 6 € Ry isa
+
+coefficient balancing the two mutual information terms.
+Given a specific example (x, y™), we can further sim-
+
+plify the lower bound of first term [(Z; Y) in Eq. (14) as:
+
+I(z;y™) > Eqaixmylog(p(y™|x™; A,R, {W})) (15)
+
+Similarly for the second term [(Z; X) in Eq. (14) and for
+a given example (x, y™), we can simplify its upper bound
+as:
+
+I(z;x™) < KL(q(R|x™)||pro(R))
++KL(q(A[x™)||pao(A)) (16)
+
+Due to the difficulty in calculating two mutual information
+terms in Eq. (14), we follow (Schulz et al. 2020; Alemi
+et al. 2016) to use a variational approximation q(X, Y, Z)
+to approximate the true distribution p(X, Y, Z). Details on
+how to derive Eq. (15) and Eq. (16) are in Section (A.4).
+Now combining Eq. (15) and Eq. (16) in Eq. (14), we get the
+revised objective as:
+
+marta Rwy Eq(z|xn)log(pl(y™ |x”; A, R, {W}))
+—B, KL(q(R|x”™)||pro(R))
+— Bg KL(q(A|x™)||Pao(A))}
+
+(17)
+
+Eq. (17) is the proposed VIB objective for a given observa-
+tion (x,y). To increase the flexibility, we associate two
+different coefficients from R, with the two KL-terms. In
+practice we treat them as hyper-parameters.
+
+Detailed Model Specification: In this section, we describe
+in detail how to learn discrete A and R along with the model
+parameters during training. To learn the word mask R, we
+use amortized variational inference(Rezende and Mohamed
+2015). That is, we use a single-layer feedforward neural
+network as the inference network q¢(Rz,|x1), associated pa-
+rameters ¢ are optimized with the model parameters during
+training. For the interaction mask (graph) A, we use a train-
+able parameter matrix y € R!V!*!"|, that is also optimized
+along with the model parameters during training. Further,
+we use the mean field approximation (Blei, Kucukelbir, and
+McAuliffe 2017) for both the word mask and the variational
+interaction mask, that is, g(R|x) = i, q(Ra,|Xz) and
+
+q(Axlx) = Tiiy jet a( Acie, |i, 4).
+
+Equation 17 requires prespecified prior distributions
+Pro and pao. We use the Bernoulli distribution prior
+(a non-informative prior) for each word-pair interaction
+
+L aL
+do|Ae;.«; [x:, Xj]. Pao(Ax) = Hits Tja1 Pao(Ax;,x; ) and
+Pao(Ax;,c;) = Bernoulli(0.5). This leads to:
+
+KL(q(Ax|x"")||Dao(A)) = —Hg(Ax|x””) (18)
+
+Here, H, denotes the entropy of the term A,|x” under
+the g distribution. Similarly, for the word mask, p,o(R) =
+
+Tle, pro(Ree,); and p,o(Rx,) = Bernoulli(0.5). There-
+fore,
+
+KL(q(Rx|x"™)||pao(R)) = —Hg(Rx|x™) (19)
+
+Finally, we have the following loss function for (x, y”’):
+
+—(Exp(y|x™; A, R, {W}) + 5: Hq(Rx|x”)+
+Bg Hq(Ax|x”™”)) ob Bsvarse!| |Ax| ly
+
+We use stochastic gradient descent to optimize the above
+loss using all training samples. During training, both A and
+R are discrete samples drawn from Bernoulli distributions
+in Eq. (2) and Eq. (11). We, therefore, use the Gumbel-
+Softmax(Jang, Gu, and Poole 2016) trick to differentiate
+through the sampling step and propagate the gradients to
+their respective parameters yy and @.
+
+(20)
+
+A.2. More results on ablations and Global
+Interaction Analysis results
+
+We present our results on the IoS score proposed in Sec-
+tion 4.4 in Table 6. We show using the top interactions out-
+performs the setting when no pairwise interactions are used
+during inference.
+
+We perform further ablations to calculate the different
+proposed interpretability scores in Table 8. We use LIME as
+the post-hoc explanation method for AOPC. WIGRAPH-A
+achieves higher interpretability scores, both global and local,
+than its variations.
+
+A.3 More Qualitative Results
+
+We show in Figure 2 that our learnt interaction matrix does
+not merely mirror the co-occurrence statistics, instead learns
+more general informative global interactions. Figure 3 use
+word clouds to visualize interacted word pairs obtained from
+TREC, SST1 and SST2 datasets. The interactions are ranked
+based on E,[Az, ,|X:,;]. The selected word pairs are consis-
+tent with the corresponding tasks. Figure 4 visualizes exem-
+plar words’ interactions that an improved model considers
+during inference.
+
+In Table 9, we observe that the correlation between WI-
+GRAPH’s word importance score E,[Rz,|x¢] and word fre-
+quency is lower than VMASK. This indicates WIGRAPH can
+discover some important words that VMASK can not. Table
+9 also show a weak negative correlation between the interac-
+tion importance scoreE,[A., ,|;,;] and word co-occurrence
+frequency.
+
+
+
+Methods Models IMDB SST-1 SST-2  AGNews TREC _ Subj
+
+LSTM WIGRAPH-NOA_ 88.53. 45.70 = 83.96 —- 911.07 91.00 90.30
+WIGRAPH-topA 88.84 45.82 84.48 90.91 91.27 90.58
+
+BERT WIGRAPH-NOA_ 85.62 51.31 = 89.18 +=: 90.79 96.40 95.90
+WIGRAPH-topA 85.67 51.52 89.02 90.47 97.04 95.97
+
+RoBERTa WIGRAPH-NOA 89.02 52.10 91.52 90.13 95.2 95.50
+WIGRAPH-topA 90.02 53.84 92.51 91.50 96.00 96.20
+
+distiIBERT WIGRAPH-NOA_ 85.08 47.10 86.82 90.08 95.00 95.20
+WIGRAPH-topA 86.32 47.25 87.00 90.10 96.40 96.00
+
+Table 6: Global Interaction Analysis: Average Post Hoc Interaction Occlusion Score when using top /X scoring interactions for
+prediction. We compare to WIGRAPH-NOA that sets A to identity matrix.
+
+Models Method IMDB SST-1 SST-2  AGNews TREC Subj
+LSTM VMASK 89.42 45.96 85.11 92.00 93.48 92.50
+WIGRAPH-A-R- 88.2. 43.00 = 83.21 91.78 91.15 91.60
+WIGRAPH-A 88.12 44.26 84.78 92.89 93.03 91.50
+
+VMASK 92.90 51.95 92.32 93.72 96.68 98.00
+
+BERT WIGRAPH-A-R_ = 90.50 = 52.77. 92.43 90.10 96.68 97.90
+WIGRAPH-A 91.88 50.50 92.89 92.00 96.02 97.60
+
+VMASK 87.00 53.68 93.35 94.05 96.68 97.50
+
+RoBERTa WIGRAPH-A-R- 83.12 52.01 93.46 93.91 95.38 97.30
+WIGRAPH-A 86.20 53.41 93.81 94.55 95.50 97.20
+
+VMASK 88.24 48.86 90.14 94.20 93.58 95.80
+
+distiIBERT WIGRAPH-A-R 88.14 49.5 90.14 93.01 93.14 95.50
+WIGRAPH-A 89.12 49.05 91.17 94.00 95.58 97.10
+
+Table 7: Validation Prediction Accuracy
+
+imask
+
+Score a(y)
+
+Interaction Importance
+
+:
+
+3
+. . i
+~i -- | :
+
+0.0 0.2 0.4 0.6 o.8 1.0
+
+Word-word co-occurrence
+
+Figure 2: SST2 dataset with LSTM model. Interaction Impor-
+tance Score vs word co-occurrence.
+
+A.4 Detailed Derivation
+
+We follow the markov factorization : p(X,Y,Z) =
+D(Z|X,¥)P(X,Y) = P(Z|X,Y)P(Y|X)P(X) =
+P(Z|X)P(Y|X) P(X), motivated from the Markov assump-
+tion: Y «++ X +> Z, i.e. Y and Z are independent of
+each other given X. We assume the data are generated us-
+ing the above assumption where Z is not observed, i.e. a
+latent variable. Our derivation is based on (Chen et al. 2018;
+Schulz et al. 2020; Alemi et al. 2016), where we start from
+
+an approximation q(X, Y, Z) instead of the true distribution
+p(X, Y, Z).
+
+The lower bound for [(Z; Y).
+
+I(
+
+Z, Y)
+
+I
+
+oz a(y)q(z)
+q(y|z)
+Y= aly, 2) log q(y|z)
+
+(21)
+
+where H,(-) represents entropy, and can be ignored for the
+purpose of training the model.
+
+
+scratch- Ss) ter USE EE Eorsin EE
+
+-- la buffs ~~ lacks- successful | engugh-quirky ™ a
+“Pp we ~ inothin ng: =great tirue-hollywood
+most - SCr emai: ali mes lacks-heart priceless-these == laudable-n‘t
+cecal A A0-TCANKLUEL ne: itt
+
+as tre ademark * cher = nder ful’
+
+never senna
+~ remarkably - ng
+i
+am! Part -wor
+
+oter-what:: = good- ee pric DBE
+
+M e- fe) at “best-COLiNn miccoqenserigraph-what  § wi OME, _too-intrieuing | LO U-f OLE Srealistic-episode = om EXQUISITE -DOUPZCO1S. A. tamed: fascinating
+
+ppery-powerful
+
+museng-problems
+
+mccismaralys works
+ly-great
+
+@ Srealistic-episode 5 exquisite- TH OVE flamed-tascinating
+
+Figure 3: Pairwise Word Interactions Cloud on LSTM model for (left) TREC, (middle) SST-2, and (right) SST-1.
+
+Thi SeeS5 influences influences influences influences influences influences influences influences influences influences influences influences
+
+wn
+e c it 's not nearly as good as any of its influences
+&
+=
+<
+- good good good good good good good good good good good good
+8 F it ‘s not nearly as good as any of its influences
+Do
+
+as as as as as as as as as as as as as
+
+no r it 's not nearly as good as any of its influences
+a as as as as as as as as as as as as as
+6 no , it 's not nearly as good as any of its influences
+> nearly nearly nearly nearly nearly nearly nearly nearly nearly nearly nearly nearly nearly
+= no F it 's not nearly as good as any of its influences
+v
+
+no i it 's not nearly as good as any of its influences
+» goodnessgoodnessgoodnessgoodnessgoodnessgoodnessgoodnessgoodnessgoodnessgoodnessgoodness goodnessgoodnessgoodnessgoodness
+g proves that a movie about goodness is not the same thing as a good movie
+3
+°
+co}
+Do
+> good good good good good good good good good good good good good good good
+g proves that a febvis | about goodness is not the same thing as a good movie
+fo)
+ie as as as as as as as as as as as as as as as
+© proves that a movie about goodness is not the same thing as a good movie
+4 proves proves proves proves proves proves proves | [4/55] proves proves proves proves proves | > proves
+2 proves that a movie about goodness is not the same thing as a good movie
+g
+o® same same same same same same same same same same same same same same same
+€ proves that a movie about goodness is not the same thing as a good movie
+a
+
+proves that a movie about goodness is not the same thing as a good movie
+
+Figure 4: Visualization of some learnt interactions viewed at the sentence level: For example, for the input sentence: "no, it’s not
+nearly good as any of it’s influences": "good" was picked out as an important word, "not" by itself was not an important word,
+using R, prediction using WIGRAPH aggregates "good" with "not" in the sentence as ’not-good’ is an important interaction
+globally, which is used to make a prediction.
+
+
+Metric Models
+
+TREC  SST-2
+
+IoS
+
+WIGRAPH-A-R-topA 96.20 86.90
+WIGRAPH-A-topA 96.40 87.00
+
+BASE
+VMASK
+
+AOPC
+
+67.63 42.25
+63.14 = 39.77
+
+WIGRAPH-A-R 61.52 36.22
+
+WIGRAPH-A
+
+68.74 44.33
+
+Table 8: Ablations analysis for TREC and SST-2 datasets on distilbert model regarding : IoS scores and AOPC from LIME
+post-hoc explanation model for ablations WIGRAPH-A and WIGRAPH-A-R.
+
+Dataset | WIGRAPH-A-R | WIGRAPH-A | VMASK
+SST2 -0.0095 -0.1182 -0.0064
+SST1 -0.0101 -0.1059 -0.0054
+SUBJ -0.0137 -0.0912 -0.0077
+TREC -0.0139 -0.1016 -0.0118
+
+Table 9: Correlation with co occurrence statistics: We sum-
+marize these observations using correlation statistics: WI-
+GRAPH has a lower correlation of the global word importance
+score E,[x;|x:] with word frequency(Column WIGRAPH-
+R) than when it does not account for interactions (Column
+VMASK). We also show the correlation of the interaction
+importance scores Ey|Az, x ,|i, Xj] with the co-occurrence
+frequency, which shows a weak negative correlation for all
+datasets(Column-WIGRAPH-A).
+
+S- aly, 2) log q(yl|z)
+
+yz
+
+=a a(ylz)p(ylz)
+= 29.7) 08 Tye) plylz)
+(22)
+
+- Tal a(y, 2) log p(y|z) + KL[q(y|z)||p(y|z)]
+>So aly,z) log p(y|z),
+
+where KL[-||-] denotes Kullback-Leibler divergence. This
+gives us the following lower bound:
+
+I(Z,¥) > S° q(y,2) log p(y|z) + Hy(y)
+
+y,Z
+
+= S- q(x, y, 2) log p(y|z) + Ha(y) (23)
+yY,Z,x
+
+=) “a(x, y)q(z|x) log p(y|z) + Ha(y),
+
+Y,Z,x
+
+where the last step uses q(x,y,z) = q(x)q(y|x)q(z|x),
+which is a factorization based on the conditional dependency:
+y + x © Zz: y and z are independent given x.
+
+Given a sample, (x), y“"")), we can assume the empiri-
+cal distribution q(x™, y°™) simply defined as a multipli-
+cation of two Delta functions
+
+g(x =x y =y™) = dxem (x) - dyom(y). (24)
+
+So we simplifying further of the first term:
+
+T(z;y) 2 Daal (z|x'"")) log p(y” |z)
+(25)
+
+= Sseayeom low(pty” )\z))
+Since Z = diag (Rx) E’
+of A, we have:
+
+T(z; y¥™) > Egcajeomylog(p(y
+The upper bound for /(Z; X).
+
+1(Z,X) = S-q(x,z) log ie
+
+, and E’ is a deterministic function
+
+(MIR, A,x(™)) (26)
+
+oo x)q(z)
+_ xz) low 2)
+= da ,Z) log (a)
+
+= S-a(x,z) log q(a|x)
+~~ q(x, 2) log q(z)
+
+By replacing q(z) with a prior distribution of z, po(z), we
+have
+
+S/ a(x, 2) log q(z) > Sq(x,2)logpo(z). (27)
+
+X,Z X,Z
+
+Then we can obtain an upper bound of the mutual information
+
+I(Z;X) < S- q(x, Z) log q(z|x)
+_ S- q(x, z) log po(z)
+= YS a(x) KL{q(2|x)||po(2)]
+
+x
+
+= Eq) KL[q(2|x)||po(2)]- (28)
+For a given sample (x'", y™),
+T(2;x') = KL [q(z|x"”)||po(2)] (29)
+
+Given X, we assume R and A are independent. We also
+assume a factorable prior 9 (Zz) = p,o(R)pao(A). This gives
+us:
+
+I(z,x'™) < KL(q(B|x"™)||p,0(R))
++KL(q(A|x’)||pao(A)) (30)
+
+
+Top 10 Most Similar Concepts
+
+Ui thas breast icoloriigrey
+8. has bill shape: :cone
+
+Top 10 Most Similar Concepts
+
+3. has_wing color::black
+
+Figure 5: Qualitative assessment of the WIGRAPH layer. We find the most similar concepts to a given image by sorting them
+using cosine distances between the image and concept embeddings. Ground truth concepts are highlighted in green.
+
+B_ Extending WIGRAPH for Capturing
+Concept Interactions in Vision Tasks
+
+In this section, we demonstrate the application of the WI-
+GRAPH layer in the context of image modeling with convolu-
+tional neural networks.
+
+B.1_ Dataset and Concept Pre-processing
+
+We train a joint concept bottleneck (Koh et al. 2020) model on
+the CUB dataset (Wah et al. 2011) which comprises of 11,788
+photographs of birds from 200 species, where each image has
+additional annotations of 312 binary concepts corresponding
+to bird attributes like wing color, beak shape, etc. The concept
+annotations in the CUB dataset are noisy, hence we adopt
+the method described in concept bottleneck models (Koh
+et al. 2020) to pre-process the concept level annotations and
+remove noisy labels. Each concept annotation was provided
+by a single crowdworker who is not an avian expert, and the
+concepts can be quite similar to each other, e.g., some anno-
+tators might say a bird has a red belly, while other annotators
+might say that the belly is rufous (reddish-brown) instead. In
+order to deal with such issues, we aggregate instance-level
+concept annotations into class-level concepts via majority
+voting, i.e if more than 50% of crows have black wings in
+the data, then the class crow is considered to always have
+black wings. As a result, images with the same class have
+the same concept annotations. While this approximation is
+mostly true for this dataset, there are some exceptions due
+to visual occlusion, as well as sexual and age dimorphism.
+After majority voting, we further filter out concepts that are
+too sparse, keeping only concepts (binary attributes) that are
+present after majority voting in at least 10 classes. After this
+filtering, we are left with 112 concepts.
+
+B.2. Method
+
+Given an image x € R%, its class label y, and concept labels
+c, which is a vector of k concepts; we train a concept bot-
+tleneck model with a WIGRAPH layer in order to model the
+interactions between the k concepts. Additionally, we encode
+concepts as learned high-dimensional representations in a
+shared image-concept latent space, such that a dynamic inter-
+action graph A’ can be defined with concepts and the image
+as neighboring nodes. Next we use the graph convolutional
+operation step to update the representation of each node with
+
+its neighbors. The resulting node representations are max-
+pooled and the final image-concept representation is used
+for task classification. Overall, we learn a global interaction
+matrix A = {A}; x between concepts, we use the learnt
+graph and concept representations to train a task prediction
+head for the final task.
+
+Consider an image encoder model, f : R¢ + R*, that
+encodes the image into a d-dimensional representation, f(z).
+This representation is then transformed through a shallow
+MLP, g : R? —> R* which maps the image from the represen-
+tation space to the concept space to give g(f(x)). This is then
+passed through a concept prediction head layer and treated as
+a mutli-label classification problem for predicting concepts.
+We also define a MLP h : R* -+ R which finally maps
+the representation from the concept to the task prediction
+space which is modeled as a multi-class classification prob-
+lem. Now, in order to adapt the WIGRAPH layer for learning
+concept interactions, we need to formulate these concepts as
+high-dimensional representations in the image embedding
+space, such that the WIGRAPH layer can used to treat the
+concept embeddings as nodes and their interactions as the
+edges in an interaction graph. As such we define a randomly
+initialized embedding layer that helps us query concept rep-
+resentations given concept labels c. We make the assumption
+that the latent space for the concept representation is aligned
+with that of image representations. Intuitively, we are assum-
+ing that the image itself can be represented as a composition
+of different concept representations and hence can be em-
+bedded in the same space. This allows us to use the image
+representation f(a) as another node in the A graph during the
+subsequent graph convolution update step. Therefore during
+training, we dynamically compute the interaction between the
+image and the concept representations as their cosine similar-
+ity scaled between 0 and 1. These interactions are then used to
+expand the graph to give A’ = {A’} (441) x(k41) Where each
+A’;; € {0,1} with image as the added node and the image-
+concept scaled similarities as the corresponding interactions
+in the original graph A. The dynamic interaction graph A’,
+image representation f (2), and concept embeddings X,. are
+transformed using the graph convolution update described in
+section 2.2 as, E’ = gec(X’, A’), where X’ = [f(x), X¢]
+is a concatenation of the image and concept representations
+corresponding to the interaction graph A’. Output representa-
+
+
+tions E’ are max-pooled and passed to the prediction head
+p: R¢ > R. The classification loss at the prediction head is
+used to train the WIGRAPH layer.
+
+Overall, for each data point {x, y,c}, we get the image
+representation f(a) from the CNN encoder, and correspond-
+ing concept representations for each c; from the embedding
+layer. The interactions are computed between f(a) and each
+concept representation and the image itself is added to the
+interaction graph as the neighbor of the observed concepts,
+c. Similar to previous formulations, we intend to learn the
+unknown graph A = {A}y,v where each A;; € {0,1}
+specifies the strength of the interaction. Through this task we
+also learn concept embeddings in the same latent space as
+the image embeddings from the CNN encoder.
+
+B.3 Results
+
+We use a concept bottleneck models (Koh et al. 2020) as a
+baseline to demonstrate the applicability of WIGRAPH for
+image modeling scenarios. Specifically, we train an Inception-
+
+V3 model with a concept bottleneck for the bird identifi-
+cation task on the Caltech-UCSD Birds-200-2011 (CUB)
+dataset (Wah et al. 2011). With the model, we jointly train
+a WIGRAPH layer to learn the interactions between the con-
+cepts. WIGRAPH also learns concept embeddings in a joint
+image-concept space. In order to demonstrate this, we use
+the image representation to find most similar concepts using
+the cosine metric. In Figure 5, we show that the model is
+able to encode the image very close to the ground-truth con-
+cept embeddings. Additionally, as demonstrated in Koh et al.
+(2020), the model is able to predict concepts very accurately
+at the bottleneck while maintaining a final bird classification
+task accuracy of 80.04%. Note that this allows us to reason-
+ably intervene on the concepts. With test-time intervention,
+the model is able to improve its performance by +9.37%
+to 89.41%. Similar to this, WIGRAPH when used with the
+CNN’s image representation and intervened concepts is able
+to achieve a prediction accuracy of 95.74%(+15.70%) at its
+prediction head.

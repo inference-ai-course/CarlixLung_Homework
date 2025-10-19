@@ -1,0 +1,2456 @@
+arX1v:2301.09112v2 [cs.CL] 23 Oct 2023
+
+Differentially Private Natural Language Models: Recent Advances and
+Future Directions
+
+Lijie Hu', Ivan Habernal’, Lei Shen®, and Di Wang!
+1CEMSE, King Abdullah University of Science and Technology
+?TrustHLT, Technical University of Darmstadt
+3JD AI Research, Beijing, China
+{lijie.hu, di.wang } @kaust.edu.sa, ivan.habernal @tu-darmstadt.de, shenlei20 @jd.com
+
+Abstract
+
+Recent developments in deep learning have led
+to great success in various natural language
+processing (NLP) tasks. However, these appli-
+cations may involve data that contain sensitive
+information. Therefore, how to achieve good
+performance while also protecting the privacy
+of sensitive data is a crucial challenge in NLP.
+To preserve privacy, Differential Privacy (DP),
+which can prevent reconstruction attacks and
+protect against potential side knowledge, is be-
+coming a de facto technique for private data
+analysis. In recent years, NLP in DP mod-
+els (DP-NLP) has been studied from different
+perspectives, which deserves a comprehensive
+review. In this paper, we provide the first sys-
+tematic review of recent advances in DP deep
+learning models in NLP. In particular, we first
+discuss some differences and additional chal-
+lenges of DP-NLP compared with the standard
+DP deep learning. Then, we investigate some
+existing work on DP-NLP and present its re-
+cent developments from three aspects: gradient
+perturbation based methods, embedding vec-
+tor perturbation based methods, and ensemble
+model based methods. We also discuss some
+challenges and future directions.
+
+1 Introduction
+
+The recent advances in deep neural networks have
+led to significant success in various tasks in Natu-
+ral Language Processing (NLP), such as sentiment
+analysis, question answering, information retrieval,
+and text generation. However, such applications
+always involve data that contains sensitive infor-
+mation. For example, a model of aid typing on a
+keyboard which trained from language data might
+contain sensitive information such as passwords,
+text messages, and search queries. Moreover, lan-
+guage data can also identify a speaker explicitly by
+name or implicitly, for example, via a rare or unique
+phrase. Thus, one often encountered challenge in
+NLP is how to handle this sensitive information. To
+
+overcome the challenge, privacy-preserving NLP
+has been intensively studied in recent years. One of
+the commonly used approaches is based on text
+anonymization (Pilan et al., 2022), which iden-
+tifies sensitive attributes and then replaces these
+sensitive words with some other values. Another
+approach is injecting additional words into the orig-
+inal text without detecting sensitive entities in order
+to achieve text redaction (Sanchez and Batet, 2016).
+However, removing personally identifiable infor-
+mation or injecting additional words is often unsat-
+isfactory, as it has been shown that an adversary can
+still infer an individual’s membership in the dataset
+with high probability via the summary statistics
+on the datasets (Narayanan and Shmatikov, 2008).
+Moreover, recent studies claim that deep neural net-
+works for NLP tasks often tend to memorize their
+training data, which makes them vulnerable to leak-
+ing information about training data (Shokri et al.,
+2017; Carlini et al., 2021, 2019). One way that
+takes into account the limitations of existing ap-
+proaches by preventing individual re-identification
+and protecting against any potential data recon-
+struction and side-knowledge attacks is designing
+Differentially Private (DP) algorithms. DP (Dwork
+et al., 2006) provides provable protection against
+identification and is resilient to arbitrary auxiliary
+information that might be available to attackers.
+Thanks to its formal guarantees, DP has become
+a de facto standard tool for private statistical data
+analysis.
+
+Although there are numerous studies on DP
+machine learning and DP deep learning, such as
+(Abadi et al., 2016; Bu et al., 2019; Yu et al., 2019),
+most of them mainly focus on either the continuous
+tabular data or image data, and less attention has
+been paid to adapting variants of DP algorithms to
+the context of NLP and the text domain. On the
+other side, while there are several surveys on DP
+and its applications, such as (Ji et al., 2014; Dankar
+and Emam, 2013; Xiong et al., 2020; Wang et al.,
+
+
+2020a; Desfontaines and Pej6, 2020), none of them
+study its applications to the NLP domain. Recently,
+Klymenko et al. (2022) gave a brief introduction to
+applications of DP in NLP, but the reviewed work
+is not exhaustive, and it lacks a technical and sys-
+tematic view of DP-NLP. Thus, to fill in this gap, in
+this paper, we provide the first technical overview
+of the recent developments and challenges of DP
+in language models.
+
+Specifically, we give a survey on the most recent
+70! papers on deep learning based approaches for
+NLP tasks under DP constraints. First, we show
+some specificities of DP-NLP compared with the
+general deep learning with DP. Then we discuss
+current results from three perspectives via the ways
+of adding randomness to ensure DP: the first one
+is gradient perturbation based methods which in-
+cludes DP-SGD and DP-Adam; the second one
+is embedding vector perturbation based methods
+which includes DP auto-encoder; the last one is
+ensemble model based methods which includes
+PATE. For each type of approach, we also consider
+its applications to different NLP tasks. Finally, we
+present some potential challenges and future direc-
+tions.
+
+Due to space limits, in Appendix A, we give a
+preliminary introduction to DP to readers who are
+unfamiliar with DP.
+
+2 Specificities of NLP with DP
+
+We first discuss some specificities for DP-NLP
+compared with the standard DP deep learning. Gen-
+erally speaking, there are two aspects: one is pri-
+vacy notations, and another is privacy levels.
+
+2.1 Variants of DP Notions in NLP
+
+Recall that DP ensures data analysts or adversaries
+will get almost the same information if we change
+any single data sample in the training data, i.e., it
+treats all records as sensitive. However, such an
+assumption is quite stringent. On the one side, un-
+like image data, for text data, it is more common
+that only several instead of all attributes need to be
+protected. For example, for the sentence "My cell
+phone number is 1234567890", only the last token
+with the actual cell phone number needs to be pro-
+tected. On the other side, canonical DP requires
+that the log of the ratio between the distribution
+
+'Note that we did not cover all related works, see the
+Limitations and Future Directions sections for the works that
+are not included in this paper.
+
+probabilities is always upper bounded by the pri-
+vacy parameter ¢ for any pair of neighboring data.
+However, such a requirement is also quite restric-
+tive. For example, for the sentence "I will arrive
+at 2:00 pm", we want the adversary not to distin-
+guish it from the sentence "I will arrive at 4:00
+pm". However, DP also can ensure the adversary
+cannot distinguish it from the sentence "I will ar-
+rive at 100:00 pm", which is meaningless. Thus,
+for language data, besides the canonical DP, it is
+also reasonable to study its relaxations for some
+specific scenarios. Actually, this is quite different
+from the existing work on DP deep learning, which
+mainly focuses on standard DP definitions. In the
+following, we will discuss some commonly used
+relaxations of DP for language models.
+
+SDP. As we mentioned above, in some scenarios,
+the sensitive information in text data is sparse, and
+we only need to protect some sensitive attributes
+instead of the whole sentence. Based on this, Shi
+et al. (2021) propose a new privacy notion, namely
+selective differential privacy (SDP), to provide pri-
+vacy guarantees on the sensitive portion of the data
+to improve model utility. From the definition as-
+pect, the main difference between SDP and DP is
+the definition of neighboring datasets. Informally,
+in SDP, two datasets are adjacent if they differ in at
+least one sensitive attribute. However, it is hard to
+define such neighboring datasets directly as there
+are some correlations between sensitive and non-
+sensitive attributes, indicating that we can still in-
+fer information on sensitive attributes (Kifer and
+Machanavajjhala, 2011). To address the issue, Shi
+et al. (2021) leverage the Pufferfish framework in
+(Kifer and Machanavajjhala, 2014).
+
+Metric DP. To relax the requirement that the log
+probability ratio is uniformly bounded by e for
+all neighboring data pairs, Feyisetan et al. (2020)
+first adopt the Metric DP (or d,-privacy) to the
+problem of private embedding, which is proposed
+by (Chatzikokolakis et al., 2013) for location data
+originally. In particular, a Metric DP mechanism
+could report a token in a privacy-preserving manner
+while giving a higher probability to tokens that
+are close to the current token, and a negligible
+probability to tokens in a completely different part
+of the vocabulary, where we will use some distance
+function d to measure the distance between two
+tokens.
+
+Definition 1. For a data domain (vocabulary) %,
+
+
+Method Type Publications Scenarios Definition Model Architecture DP Level Downsteam Tasks
+Hoory et al. (2021) DP BERT Sample-level Entity-extraction
+Anil et al. (2021) Pre-trained BERT Sample-level —
+Yin and Habernal (2022) BERT Sample-level Classification, QA
+Senge et al. (2022) BERT, XtremeDistil Sample-level Classification, NER, POS, QA
+Ponomareva et al. (2022) TS Sample-level NLU
+Yu et al. (2022) RoBERT, GPT-2 Sample-level NLG, NLU
+Yu et al. (2021) BERT Sample-level Classification, NLU
+Dupuy et al. (2021) BERT,BiLSTM Sample-level Classification, NER
+Li et al. (2021) GPT-2, (Ro)BERT Sample-level Classification, NLG
+Lee and Sggaard (2023) GPT-2, DialoGPT Sample-level Meeting Summarization
+Xia et al. (2023) GPT-2, (Ro)BERT Sample-level Classification
+Behnia et al. (2022) (Ro)BERT Sample-level NLU
+Bu et al. (2023) GPT-2, (Ro)BERT Sample-level Classification
+Gupta et al. (2023) (Ro)BERT Sample-level GLU
+Du and Mi (2021) Fine-tuning DP GPT-2, (Ro)BERT Sample-level Classification, NLG
+Gradient Bu et al. (2022) (Ro)BERT Sample-level Classification, NLG
+Perturbation Yue et al. (2022) GPT-2 Sample-level Synthetic Text Generation
+Based Mireshghallah et al. (2022) GPT-2 Sample-level Synthetic Text Generation
+Methods Carranza et al. (2023) TS Sample-level Query Generation
+Igamberdiev and Habernal (2021) GPT-2 Sample-level Classification
+Aziz et al. (2022) GPT-2 Sample-level Synthetic Text Generation
+Wunderlich et al. (2021) BERT,CNN Sample-level Classification
+Li et al. (2022) LSTM Sample-level Classification
+Amid et al. (2022) LSTM Sample-level Classification
+Shi et al. (2021) SDP RNN Sample-level NLG, Dialog System
+Shi et al. (2022) SDP GPT-2, (Ro)BERT Sample-level NLG, NLU
+McMahan et al. (2018) LSTM, RNN User-level Prediction, Classification
+Ramaswamy et al. (2020) LSTM User-level Prediction, Classification
+Kairouz et al. (2021) LSTM User-level, Sample-level Prediction, Classification
+Choquette-Choo et al. (2022) Federated Learning LDP LSTM User-level, Sample-level Prediction
+Koloskova et al. (2023) LSTM User-level, Sample-level Prediction
+Denisov et al. (2022) LSTM User-level, Sample-level Prediction
+Agarwal et al. (2021) LSTM User-level, Sample-level Prediction
+Wang et al. (2023) LaMDA User-level Prediction
+Xu et al. (2023) Gboard User-level Prediction
+Lyu et al. (2020b) BERT Word-level Classification
+Lyu et al. (2020a) BERT Word-level Classification
+Plant et al. (2021) BERT Word-level Classification
+Krishna et al. (2021) Private Embedding LDP Auto-Encoder Word-level Classification
+Habernal (2021) Auto-Encoder Word-level Classification
+Alnasser et al. (2021) Auto-Encoder Word-level Classification
+Igamberdiev et al. (2022) Auto-Encoder Word-level Classification
+Maheshwari et al. (2022) Auto-Encoder Word-level Classification
+Bollegala et al. (2023) GloVe Word-level Classification
+Chen et al. (2023) GloVe, BERT Token-level Classification
+Duet al. (2023b) Fine-tuning Sequence LDP BERT Sentence-level Classification, QA
+Embedding Meehan et al. (2022) Private Embedding DP SBERT Sentence-level Classification
+Vector Feyisetan et al. (2020) GloVe, BiLSTM Word-level Classification, QA
+Perturbation Xu et al. (2020) GloVe Word-level Classification
+Based Xuet al. (2021b) GloVe,FastText Word-level Classification
+Methods Xu et al. (2021a) GloVe, CNN Word-level Classification
+Carvalho et al. (2021b) Private Embedding LMDP GloVe Word-level Classification
+Feyisetan and Kasiviswanathan (2021) GloVe, FastText Word-level Classification
+Feyisetan et al. (2019) GloVe Word-level Classification, Prediction
+Carvalho et al. (2021a) GloVe, FastText Word-level Classification
+Tang et al. (2020) GloVe Word-level Classification
+Imola et al. (2022) GloVe, FastText Word-level Classification
+Arnold et al. (2023a) GloVe Word-level Classification
+Arnold et al. (2023b) GloVe Word-level Classification
+Qu et al. (2021) Fine-tuning BERT, BiLSTM Token-level Classification. NLU
+Duet al. (2023a) Private Embedding BERT Sentence-level Classification, QA
+Li et al. (2023) Private Prompt Tuning BERT, TA Word-level Classification, QA
+Yue et al. (2021) Private Embedding UMLDP BERT, GloVe Word-level Classification,QA
+Ensemble Duan et al. (2023) GPT-3 Sample-level Classification
+Model Wu et al. (2023) In-context Learning GPT-3 Sample-level Classification, QA, Dialog Summarization
+Based Tang et al. (2023) GPT-3 Sample-level Classification, Information Extraction
+Methods Tian et al. (2022) Fine-tuning GPT-2 Sample-level, User-level Synthetic Text Generation
+
+Table 1: An overview of studies for DP-NLP.
+
+
+a randomized algorithm A: VY 1 RF is called
+(e, 6)-Metric DP with distance function d if for any
+S,S' € X' and T C R we have
+
+Pri A(S) € T] < M5 PrLA(S") € T] +6.
+
+From the above definition, we can see the prob-
+ability ratio of observing any particular output y
+given two possible inputs S and S’ is bounded by
+e®4(5".S) instead of e* in DP. Motivated by Metric
+DP and local DP, (Feyisetan et al., 2020) provides
+the Local Metric DP (LMDP) and uses it for pri-
+vate word embeddings (see Section 4 for details).
+Motivated by Utility-optimized LDP (ULDP) (Mu-
+rakami and Kawamoto, 2019) rather than LDP, re-
+cently Yue et al. (2021) propose Utility-optimized
+Metric LDP (UMLDP). It exploits the fact that
+different inputs have different sensitivity levels to
+achieve higher utility. By assuming the input space,
+such as the set of tokens is split into sensitive and
+non-sensitive parts, UMLDP achieves a privacy
+guarantee equivalent to LDP for sensitive inputs.
+
+2.2 Variants Levels of Privacy in NLP
+
+When we consider using DP, the first question is
+what kind of information we aim to protect. In the
+previous studies on DP deep learning, we always
+wanted to protect the whole data sample. However,
+in the NLP domain, such one data sample could be
+either a word, a sentence, a paragraph, etc. If we
+ignore the concrete privacy level and directly apply
+the previous DP methods, we may have mediocre
+results. Thus, unlike the sample level privacy in DP
+deep learning, researchers in NLP consider differ-
+ent levels of privacy. Especially, they focus on the
+word level and sentence level, which aims to pro-
+tect each word and sentence respectively (Meehan
+et al., 2022; Feyisetan et al., 2019).
+
+In the federated learning setting, there is a cen-
+tral server and several users each of them has a
+local dataset, the sample level of DP may be insuf-
+ficient. For example, in language modeling, each
+user may contribute many thousands of words to
+the training data, and each typed word makes its
+own contribution to the RNN’s training objective.
+In this case, just protecting each word is unsatis-
+factory, and it is still possible to re-identify users.
+Thus, besides the sample level, we also have the
+user level of privacy, which aims to protect users’
+histories. After discussing some specificities of
+DP-NLP. In the following, we categorize its recent
+studies into three classes based on their methods
+
+to ensure DP: gradient perturbation based methods,
+embedding vector perturbation based methods, and
+ensemble model based methods. See Tab. 1 for an
+overview.
+
+3 Gradient Perturbation Based Methods
+
+Given a training dataset with n samples D =
+{zi }"_,, a loss function (such as cross-entropy
+loss) is defined to train the model, which takes the
+parameter 6 € R¢ of neural network and samples
+and outputs a real value:
+
+n
+
+> 46, 21). (1)
+
+w=
+
+L(0,D) =
+
+The goal is to find the weights of the network that
+minimizes L(0,D), i.e., 0* = argming L(O, D).
+With additional constraint on DP, now we aim to
+design an (¢,6)/e-DP algorithm A to make the
+private estimated parameter 0; close to @*.
+Example: In Language Modeling (LM), we have
+a corpus D = {21,--- ,%,} where each text
+sequence x; consists of multiple tokens 7; =
+(Xi1,°++ ,®im,) with a,j; as the j-th token of 2;.
+The goal of LM is to train a neural network (e.g.,
+RNN) parameterized by @ to learn the probability
+of the sequence pg(xz), which can be represented
+as the following objective function
+
+n Mm;
+
+— ST log po(aisleir,-
+
+i=1 j=l
+
+) Eg¢g_1))»
+
+We first review the DP-SGD method (Abadi
+et al., 2016). In the non-private case, to minimize
+the objective function (1), the most fundamental
+method is SGD, i.e., in the ¢-th iteration, we update
+the model as follows:
+
+t+1 _ gt
+ott — ot _en ng Vee
+
+xeEB
+
+where B is a subsampled batch of random ex-
+amples, 7 is the learning rate and 0° is the cur-
+rent parameter. DP-SGD modifies the SGD-based
+methods by adding Gaussian noise to perturb the
+(stochastic) gradient in each iteration of the train-
+ing, i.e., during the ¢-th iteration DP-SGD will com-
+pute a noisy gradient as follows:
+
+mo # '4N (0,07C7I4)), (2)
+
+aj,EB
+
+
+o is the noise multiplier, gf is some vector com-
+puted from V¢(6',«;) and g‘ is the (noisy) gra-
+dient used to update the model. The main rea-
+son here we use gj instead of the original gradient
+vector is that we wish to make the term )> gj has
+bounded f2-sensitivity so that we can use the Gaus-
+sian mechanism to ensure DP. The most commonly
+used approach to get a g! is clipping the gradient:
+gt = Ve(O"", x) min{1, wrote i.e., each gra-
+dient vector is clipped by a hyper-parameter C’ > 0.
+Since the @)-sensitivity of )> gf is bounded by C,
+after the clipping, we can add Gaussian noise to
+ensure DP. As there are several iterations, and in
+each iteration, we use some subsampling strategy,
+we can use the composition theorem and privacy
+amplification to compute the total privacy cost of
+DP-SGD. Equivalently, given a fixed privacy bud-
+get (€,6), number of iterations and subsampling
+strategy, one can get the minimal noise multiplier o
+to ensure DP, see (Asoodeh et al., 2021; Gopi et al.,
+2021; Mironov et al., 2019; Wang et al., 2020b;
+Zheng et al., 2020; Zhu and Wang, 2019) for de-
+tails.
+
+Its main idea is to use the noisy and clipped sub-
+sampled gradient g‘ to approximate the whole gra-
+dient VL(0°, D). In fact, besides SGD, we can use
+this idea for any optimizer, such as Adam (Kingma
+and Ba, 2015), whose private version DP-Adam
+is proposed and applied in BERT by (Anil et al.,
+2021). In the past few years, there has been a long
+list of work on DP-SGD from different perspec-
+tives, such as the subsampling strategy, faster clip-
+ping procedures, private clipping parameter tuning,
+and the selection of batch size. In the following,
+we will only discuss the previous work on using
+DP-SGD-based methods for variants of NLP tasks.
+
+3.1 DP Pre-trained Models
+
+Recent developments in NLP have led to successful
+applications in large-scale language models with
+the appearance of transformer (Devlin et al., 2019).
+It combines the contextual information into lan-
+guage models with a more powerful ability of rep-
+resentation. These models are called pre-trained
+models, which train word embedding in large cor-
+pora targeting various tasks and gain the knowledge
+for downstream tasks (Peters et al., 2018). In this
+section, we review some papers that focus on pre-
+trained NLP models under DP constraints.
+
+The workflow of BERT (Devlin et al., 2019) is
+pre-training the unlabeled text using some large cor-
+pora first. Then, the downstream tasks first initial-
+
+ize the model using the same parameters and fine-
+tune the parameters according to different tasks.
+Despite the benefits of powerful representation abil-
+ity given by the pre-training process, it also has
+privacy issues since the model would memorize
+sensitive information such as words or phrases.
+
+In order to solve this privacy leakage issue, there
+are several studies on how to train BERT privately.
+Hoory et al. (2021) successfully trained a differ-
+entially private BERT model by modifying the
+WordPiece algorithm to satisfy DP, and conducted
+experiments on the problem of entity extraction
+tasks from medical text. They construct a tailored
+domain-specific DP-based trained vocabulary de-
+signed to generate a new domain-specific vocabu-
+lary while maintaining user privacy and then use
+the original DP-SGD in the training process. For
+the DP vocabulary part, they first construct a word
+histogram by dividing the text into a sequence of
+N-word tuples and then add Gaussian noise to the
+histogram to ensure (¢€, 6)-DP. Finally, they clip the
+histogram with some threshold. For the training
+phase, they use the original DP-SGD to meet pri-
+vacy guarantees. Besides, they also use the parallel
+training trick to make the training faster. Very re-
+cently, Yin and Habernal (2022) applied DP-BERT
+to the legal NLP domain. While DP-BERT can
+achieve good performance with privacy guarantees
+in language tasks. There are still two problems: a
+large gap between non-private accuracy and private
+accuracy, and computation inefficiency of clipping
+every sample gradient in DP-SGD. In order to miti-
+gate these issues, Anil et al. (2021) later privatizes
+the Adam optimizer to improve the performance.
+Instead of adding noise and clipping every entry
+in every batch in DP-SGD, it selects a pre-defined
+number of samples randomly and sums the clipped
+gradients of these selected samples, then it updates
+average gradients with Gaussian noise adding the
+sum in each batch. Besides, it also uses an increas-
+ing batch size schedule instead of a fixed one. It
+finds that large batch size can improve accuracy,
+and the increasing batch size schedule can improve
+training efficiency. (Senge et al., 2022) recently
+studied five different typical NLP tasks with vary-
+ing complexity using modern neural models based
+on BERT and XtremeDistil architectures. They
+showed that to achieve adequate performance, each
+task and privacy regime requires special treatment.
+
+Besides BERT, Ponomareva et al. (2022) pri-
+vately pre-train TS (Raffel et al., 2020) via their pro-
+posed private tokenizer called DP-SentencePiece
+
+
+and DP-SGD. They show that DP-T5 does not suf-
+fer a large drop in pre-training utility, nor in train-
+ing speed, and can still be fine-tuned to high accu-
+racy on downstream tasks.
+
+3.2. DP Fine-tuning
+
+Besides training pre-trained models using DP al-
+gorithms, another direction is how to fine-tune pre-
+trained models privately. Here, the main difference
+is that we assume the pre-trained models, such as
+BERT have been trained with some public data,
+and our goal is to privately fine-tune targeting spe-
+cific downstream tasks that involve sensitive data.
+It is noted that in this section, we also include some
+related work on training shallow neural networks
+in DP such as RNN or LSTM such as (Li et al.,
+2022; Amid et al., 2022) as these methods can be
+directly applied to DP fine-tuning.
+
+In this topic, the first direction is to investigate
+different tasks in the DP model and to compare
+its performance compared to the non-private one
+for studying the utility-privacy trade-off. Yue et al.
+(2022) consider the task of synthetic text genera-
+tion and show that simply fine-tuning a pre-trained
+GPT-2 with the vanilla DP-SGD enables the model
+to generate useful synthetic text. Mireshghallah
+et al. (2022) recently extended to generating latent
+semantic parses in the DP model and then generat-
+ing utterances based on the parses. Carranza et al.
+(2023) use DP-SGD to fine-tune a publicly pre-
+trained LLM on a query generation task. The result-
+ing model can generate private synthetic queries
+representative of the original queries which can
+be freely shared for downstream non-private rec-
+ommendation training procedures. Very recently,
+Lee and Sggaard (2023) adopted the DP-SGD to
+the meeting summarization task and showed that
+DP can improve performance when evaluated on
+unseen meeting types. Aziz et al. (2022) use GPT-
+2 and DP-SGD based methods to generate syn-
+thetic EHR data which can de-identify sensitive
+information for clinical text. Wunderlich et al.
+(2021) study the hierarchical text classification task,
+and they use DP-SGD to Bag of Words (BoW),
+CNNs and Transformer-based architectures. They
+find that Transformer-based models achieve bet-
+ter performance than CNN-based models in large
+datasets, while CNN-based models are superior to
+Transformer-based models in small datasets.
+
+The second direction is to reduce the huge
+memory cost of storing individual gradients and
+decrease the added noise, which suffers notori-
+
+ous dimensional dependence in DP-SGD. Specif-
+ically, the studies in this direction always pro-
+pose a general method for DP-SGD and then per-
+form the method for different NLP tasks. Yu
+et al. (2021) propose a variant of DP-SGD called
+the Reparametrized Gradient Perturbation (RGP)
+method. The framework of RGP parametrizes each
+weight matrix with two low-rank carrier matrices
+and a residual weight matrix, which will be used
+to approximate the original one. Such a way can
+reduce the memory cost for computing individual
+gradient matrices and can maintain the optimiza-
+tion process via forward/backward signals. Later,
+based on RGP, Yu et al. (2022) show that advanced
+parameter-efficient methods such as (Houlsby et al.,
+2019; Karimi Mahabadi et al., 2021) can lead
+to simpler and significantly improved algorithms
+for private fine-tuning. Instead of DP-SGD, Du
+and Mi (2021) propose a DP version of Forward-
+Propagation. Specifically, it clips representations
+followed by noise addition in the forward propaga-
+tion stage.
+
+Besides adapting the optimization method in
+vanilla DP-SGD, there are also some works on
+modifying the clipping operation or the fine-tuning
+method directly to save the memory cost. Li et al.
+(2021) propose a memory-saving technique that
+allows clipping in DP-SGD for fine-tuning to run
+without instantiating per-example gradients for any
+linear layer in the model. The technique enables
+private training Transformers with almost the same
+memory cost as non-private training at a modest
+run-time overhead. Dupuy et al. (2021) propose
+another variant of DP-SGD via micro-batch com-
+putations per GPU and noise decay and apply it to
+fine-tuning models. Specifically, they scale gradi-
+ents in each micro-batch and set a decreasing noise
+multiplier with epoch. Then, they add scaled Gaus-
+sian noise to gradients. In this way, they can make
+the training faster and adapt it for GPU training.
+Bu et al. (2023) develop a novel Book-Keeping
+(BK) technique that implements existing DP op-
+timizers, with a substantial improvement on the
+computational cost while also keeping almost the
+same accuracy as DP-SGD. Gupta et al. (2023)
+propose a novel language transformer finetuning
+strategy that introduces task-specific parameters in
+multiple transformer layers. They show that the
+method of combining RGP and their novel strat-
+egy is more suitable for low-resource applications.
+Bu et al. (2022) privatize the bias-term fine-tuning
+(BiTFiT) and show that DP-BiTFiT matches the
+
+
+state-of-the-art accuracy for DP algorithms and the
+efficiency of the standard BiTFiT (Zaken et al.,
+2022). Igamberdiev and Habernal (2021) apply
+DP-Adam in Graph Convolutional Networks to per-
+form the private fine-tuning for text classification.
+Specifically, they first split the graph into discon-
+nected sub-graphs and then add noise to gradients.
+
+Rather than reducing the memory cost, there are
+some papers considering developing variants of the
+DP-SGD method to improve performance. For ex-
+ample, Xia et al. (2023) propose a per-sample adap-
+tive clipping algorithm, which is a new perspective
+and orthogonal to dynamic adaptive noise and co-
+ordinate clipping methods. Behnia et al. (2022)
+use the Edgeworth accountant (Wang et al., 2022)
+to compute the amount of noise that is required
+to be added to the gradients in SGD to guaran-
+tee a certain privacy budget, which is lower than
+the original DP-SGD. Li et al. (2022); Amid et al.
+(2022) propose new private optimization methods
+under the setting where there are some public and
+non-sensitive data.
+
+The last direction is to relax the definition of
+DP and propose new DP-SGD variants. Shi et al.
+(2021) tailor DP-SGD to SDP. Their method SDP-
+SGD first splits the text into the sensitive and non-
+sensitive parts, and applies normal SGD to the non-
+sensitive part while applying DP-SGD to the sensi-
+tive part respectively. Later, Shi et al. (2022) extend
+to large language models and propose a method,
+namely Just Fine-tune Twice to private fine-tuning
+with the guarantee of SDP.
+
+3.3 Federated Learning Setting
+
+In the previous parts, we reviewed the related work
+on DP pre-trained models and DP fine-tuning mod-
+els. Note that all the previous work only considers
+the central DP setting where all the training data
+samples are already collected before training, in-
+dicating that these methods cannot be applied to
+the federated learning (FL) setting. Compared to
+central DP, there are fewer studies on DP Federated
+Learning for NLP. McMahan et al. (2018) apply
+DP-SGD in the FedAvg algorithm to protect user-
+level privacy for LSTM and RNN architectures in
+the federated learning setting. Specifically, they
+first sample users with some probability, and then
+add Gaussian noise to model updates of the sam-
+pled users on the server side. Based on this, Ra-
+maswamy et al. (2020) develop the first consumer-
+scale next-word prediction model.
+
+Rather than adopting DP-SGD, Kairouz et al.
+
+(2021) provides a new paradigm for DP-FL by us-
+ing the Follow-The-Regularized-Leader (FTRL)
+algorithm, which achieves state-of-the-art perfor-
+mance, and it is recently improved by Choquette-
+Choo et al. (2022); Koloskova et al. (2023);
+Denisov et al. (2022); Agarwal et al. (2021).
+
+It is notable that all the previous studies only
+consider shallow neural networks such as RNN
+and LSTM and do not consider the large language
+model. Until very recently, there have been some
+papers studying DP-FL fine-tuning. For example,
+Wang et al. (2023) consider the cross-device setting
+and use DP-FTRL to privately fine-tune. Moreover,
+they propose a distribution matching algorithm that
+leverages both private on-device LMs and public
+LLMs to select public records close to private data
+distribution. Xu et al. (2023) deploy DP-FL ver-
+sions of Gboard Language Models (Hard et al.,
+2018) via DP-FTRL and quantile-based clip esti-
+mation method in Andrew et al. (2021).
+
+4 Embedding Vector Perturbation Based
+Methods
+
+Generally speaking, this type of approach consid-
+ers privatizing the embedding vector for each to-
+ken. Specifically, in this framework, the text data
+is first transformed into a vector (text representa-
+tion) via some word embedding method such as
+Word2Vec (Mikolov et al., 2013) and BERT. Then
+we use some DP mechanism to privatize each rep-
+resentation and train NLP models based on these
+privatized text representations. Due to the post-
+processing property of DP, we can see the main
+strength of this approach is any further training on
+these private embeddings also preserves the DP
+property, while gradient perturbation based meth-
+ods heavily rely on the network structure. We can
+see that the main step of this method is to design
+the best private text representation. Note that since
+we need to privatize each embedding representation
+separately, the whole algorithm could be consid-
+ered as an LDP algorithm, and thus, it can also be
+used in the LDP setting. It is also notable that dif-
+ferent studies may consider different notions and
+levels of privacy. In fact, most of the existing work
+considers the word level of privacy.
+
+4.1 Vanilla DP
+
+The most direct approach is to design private em-
+bedding mechanisms that satisfy the standard DP.
+Lyu et al. (2020b) first study this problem and they
+
+
+propose a framework. Specifically, firstly, for each
+word, the embedding module of such framework
+outputs a 1-dimensional real representation with
+length r, then it privatizes the vector via a variant
+of the Unary Encoding mechanism in (Wang et al.,
+2017). In order to remove the dependence of dimen-
+sionality in the Unary Encoding mechanism, they
+propose an Optimized Multiple Encoding, which
+embeds vectors with a certain fixed size. Their post-
+processing procedure was then improved by (Plant
+et al., 2021). In (Plant et al., 2021), it first gets the
+final layer representation of the pre-trained model
+for each token, then normalizes it with sequence
+and adds Laplacian noise, and finally trains this
+classifier with adversarial training. To further im-
+prove the fairness for the downstream tasks on pri-
+vate embedding, later Lyu et al. (2020a) propose to
+dropout perturbed embeddings to amplify privacy
+and a robust training algorithm that incorporates
+the noisy training representation in the training pro-
+cess to derive a robust target model, which also
+reduces model discrimination in most cases.
+Krishna et al. (2021); Habernal (2021); Alnasser
+et al. (2021) also study privatizing word embed-
+dings. However, instead of using the Unary Encod-
+ing mechanism or dropout, Krishna et al. (2021);
+Alnasser et al. (2021) propose ADePT, which is an
+auto-encoder-based DP algorithm. Let u be the in-
+put, an auto-encoder model consists of an encoder
+that returns a vector representation r = Enc(u)
+for the input u, which is then passed into the de-
+coder to construct an output v = Dec(r). In (Kr-
+ishna et al., 2021), it first normalized the word
+embedded vector by some parameter C i.e., w =
+Enc(u) min{1, Tecate then it adds Laplacian
+noise to the normalized vector w and get r. Unfor-
+tunately, Habernal (2021) points out that ADePT
+is not differentially private by thorough theoretical
+proof. The problem of ADePT lies in the sensitiv-
+ity calculation and could be remedied by adding
+calibrated noise or tighter bounded clipping norm.
+Later, Igamberdiev et al. (2022) provides the source
+code of DP Auto-Encoder methods to improve re-
+producibility. Recently, Maheshwari et al. (2022)
+proposed a method that combines differential pri-
+vacy and adversarial training techniques to solve
+the privacy-fairness-accuracy trade-off in local DP.
+In their framework, first, the input text will be fed
+into encoders, then it will be normalized and pri-
+vatized by using the Laplacian mechanism. Next,
+it will be fed into a normal classifier and adver-
+sarial training separately to combine a loss that
+
+contains normal classification loss and adversar-
+ial loss. They find that the model can improve
+privacy and fairness simultaneously. To further im-
+prove the performance, (Bollegala et al., 2023) pro-
+pose a Neighbourhood-Aware Differential Privacy
+(NADP) mechanism considering the neighborhood
+of a word in a pre-trained static word embedding
+space to determine the minimal amount of noise
+required to guarantee a specified privacy level.
+
+Besides the work on word-level privacy we men-
+tioned above, recently, there have been some works
+studying sentence-level and token-level private em-
+beddings. Meehan et al. (2022) propose a method,
+namely DeepCandidate, to achieve sentence-level
+privacy. They first put public and private sentences
+into a sentence encoder to get sentence embed-
+dings. Then, they use a method, namely DeepCan-
+didate, to choose the candidate sentence embed-
+dings that are near to private embeddings. Finally,
+they use some DP mechanism to sample from the
+candidate embeddings for each private embedding.
+This method somehow solves the challenge of the
+sentence-level privacy problem by taking advan-
+tage of clustering in differential privacy. (Du et al.,
+2023b) consider sentence-level privacy for private
+fine-tuning and propose DP-Forward fine-tuning,
+which perturbs the forward pass embeddings of
+every user’s (labeled) sequence. However, it is no-
+table that they consider a variant of LDP called
+sequence local DP. Chen et al. (2023) propose
+a novel Customized Text (CusText) sanitization
+mechanism that provides more advanced privacy
+protection at the token level.
+
+4.2 Metric DP
+
+In Metric DP for text data, each sample of the in-
+put can be represented as a string x with at most /
+words, thus, the data universe will be W’ where W
+is a dictionary. Also we assume that there is a word
+embedding model ¢ : W +> R” and its associ-
+ated distance d(x, x’) = x\_, || (wi) — ¢(w)|l2,
+where % = wiw2--+ wand 2! = ww --- wy are
+two samples. Thus, the goal is to design a mecha-
+nism for each ¢(w;) with the guarantee of Metric
+DP. Since we aim to randomize each ¢(w;) for each
+sample. The whole algorithm is also suitable for
+local metric DP with word-level privacy.
+Feyisetan et al. (2020) first study this problem.
+Generally speaking, their mechanism consists of
+two steps. The first step is perturbation, we add
+some noise N to text vector ¢(w;) to ensure e-
+LDP, where WN has the density probability function
+
+
+pn(z) « exp(—ellz||2). The main issue of this
+approach is that after the perturbation, di may be
+inconsistent with the word embedding. That is,
+there may not exist a word wu such that u = dj.
+Thus, to address this issue, we need to project the
+perturbed vector into the embedding space. That is
+the second step. Feyisetan et al. (2020) show that
+the algorithm is e-local Metric DP.
+
+Note that the method was later improved from
+different aspects. For example, Xu et al. (2020)
+reconsider the problem setting and they observe
+that the distance used in (Feyisetan et al., 2020)
+is the Euclidean norm d(x, x’) = S~!_, ||¢(w;) —
+?(w')||2, which cannot describe the similarity be-
+tween two words in the embedding space. To
+address the issue, they propose to use the Maha-
+lanobis Norm and modify the algorithm by us-
+ing the Mahalanobis mechanism, which can im-
+prove performance. To further improve the utility
+in the projection step, Xu et al. (2021c) further
+propose the Vickrey mechanism in case the first
+nearest neighbors are the original input or some
+rare words need large-scale noise to perturb and
+hard to find the corresponding words. In order to
+solve this problem, they use a hyperparameter in
+their algorithm to adjust the selection of the first
+and second nearest neighbors (words). To further
+allow a smaller range of nearby words to be consid-
+ered than the multivariate Laplace mechanism, (Xu
+et al., 2021a; Carvalho et al., 2021b) propose an
+improved perturbation method via the Truncated
+Gumbel Noise. To further address the high dimen-
+sional issue, Feyisetan and Kasiviswanathan (2021)
+uses the random projection for the original text rep-
+resentation to a lower dimensional space and then
+projects back to the original space after adding ran-
+dom noise to preserve DP. Besides, Feyisetan et al.
+(2019) define the hyperbolic embeddings and use
+the Metropolis-Hastings (MH) algorithm to sample
+from hyperbolic distribution. However, it is re-
+markable that if we consider the LDP setting, then
+all the previous methods need to send real num-
+bers to the server, which has a high communication
+cost. To address the issue, Carvalho et al. (2021a)
+proposes to use the binary randomized response
+mechanism by using binary embedding vectors. Re-
+cently, Tang et al. (2020) consider the case where
+different words may have different levels of privacy.
+They first divide the words into two types, and then
+add corresponding noise according to different lev-
+els of privacy. Imola et al. (2022) recently proposed
+an optimal Meric DP mechanism for finite vocab-
+
+ulary, they then provided an algorithm that could
+quickly calculate the mechanism. Finally, they
+applied it to private word embedding. Instead of
+developing new private mechanisms, there are also
+some studies on improving the embedding process.
+The previous metric DP mechanisms are expected
+to fall short of finding substitutes for words with
+ambiguous meanings. To address these ambiguous
+words, Arnold et al. (2023a) provide a sense em-
+bedding and incorporate a sense disambiguation
+step prior to noise injection. Arnold et al. (2023b)
+account for the common semantic context issue that
+appeared in the previous private embedding mech-
+anisms. They incorporate grammatical categories
+into the privatization step in the form of a constraint
+to the candidate selection and show that selecting
+a substitution with matching grammatical proper-
+ties amplifies the performance in downstream tasks.
+Qu et al. (2021) recently points out that (Lyu et al.,
+2020a) does not address privacy issues in the train-
+ing phase since the server needs users’ raw data to
+fine-tune. Moreover, its method has a high com-
+putational cost due to the heavy encoder workload
+on the user side. Thus, Qu et al. (2021) improve it
+and consider the federated setting where users send
+their privatized samples via some local metric DP
+mechanism to the server, and the server conducts
+privacy-constrained fine-tuning methods. More-
+over, besides the text-to-text privatization given in
+(Feyisetan et al., 2020) and the sequence private
+representation proposed by Lyu et al. (2020a), Qu
+et al. (2021) proposed new token-level privatiza-
+tion and text-to-text privatization methods. In the
+token representation privatization method, they add
+random noise using metric DP to token embedding
+and send it to the server. They add noise to the
+embedded token and output the closest neighbor
+token in the embedding space.
+
+Instead of the local Metric DP, Yue et al. (2021)
+consider UMLDP and propose SANTEXT and
+SANTEXT+ algorithms for text sanitization tasks.
+Specifically, they divide all the text into a sensitive
+token set Vg and a remaining token set Vy. Then
+Yg and Vy will use a privacy budget of € and €9
+respectively via the composition theorem in LDP.
+After deriving token vectors, SANTEXT samples
+new tokens via local Metric DP with Euclidean
+distance. Compared with SANTEXT, SANTEXT+
+samples new tokens when the original tokens are
+in sensitive set Vg. They apply it to BERT pre-
+training and fine-tuning models.
+
+While there are many studies on the benefits of
+
+
+private embedding with word-level privacy. There
+are also some shortcomings to such notion of pri-
+vacy, as mentioned by (Mattern et al., 2022) re-
+cently. For example, in the previous private word
+embedding methods, we need to assume the length
+of the string for each sample is the same. More-
+over, since we consider the word level of privacy,
+the total privacy budget will grow linearly with the
+length of the sample. To mitigate some shortcom-
+ings, Mattern et al. (2022) propose an alternative
+text anonymization method based on fine-tuning
+large language models for paraphrasing. To ensure
+DP, they adopt the exponential mechanism to sam-
+ple from the softmax distribution. They apply their
+method in fine-tuning models with GPT-2.
+
+Recently, Du et al. (2023a) studied sentence-
+level private embedding in local metric DP. Bor-
+rowing the wisdom of normalizing sentence em-
+bedding for robustness, they impose a consistency
+constraint on their sanitization. They propose two
+instantiations from the Euclidean and angular dis-
+tances. The first one utilizes the Purkayastha mech-
+anism (Weggenmann and Kerschbaum, 2021), and
+the other is upgraded from the generalized planar
+Laplace mechanism with post-processing.
+
+Very recently, besides pre-training and fine-
+tuning, private word embedding has also been used
+in the task of prompt tuning for Large Language
+Models. The goal of private prompt tuning is to
+protect the privacy of examples demonstrated in the
+prompt. Specifically, Li et al. (2023) leverages the
+above private embedding methods to ensure local
+metric DP. To mitigate the performance degrada-
+tion when imposing privacy protection, they pro-
+pose a privatized token reconstruction task moti-
+vated by the recent findings that the masked lan-
+guage modeling objective can learn separable deep
+representations. Then, the objective of privatized
+token reconstruction is to recover the original con-
+tent of a privatized special token sequence from
+LLM representations.
+
+5 Ensemble Model Based Methods
+
+Unlike gradient perturbation and private embed-
+ding based methods, the general idea of ensem-
+ble model based methods is first we divide the
+whole private data into several subsets, then we
+non-privately train a model for each private sub-
+set. To ensure privacy, for each time of inference
+or query, we will do a private aggregation for all
+models. Compared with the previous two types
+
+of approach, the main advantage of the ensemble
+model based method is the noise we add will be
+independent of the scale of the model or the dimen-
+sion of the embedding space, indicating the noise is
+much smaller. However, the weakness is that here,
+we cannot release private embeddings or the pri-
+vate model, and each query or inference will cost
+a privacy budget. Generally speaking, based on
+different private aggregations, there are two types
+of approaches: the PATE-based method, and the
+Sample-and-Aggregation method.
+
+5.1 PATE-based Method
+
+PATE (Papernot et al., 2016) was originally crafted
+for addressing classification tasks, and it incorpo-
+rates both a private dataset and a public unlabeled
+dataset within its framework, drawing parallels to
+the principles of semi-supervised learning. PATE
+ensures DP by employing a teacher-student knowl-
+edge distillation framework consisting of multiple
+teacher models and a student model. In this setup,
+the student model acquires knowledge from the
+private dataset through knowledge distillation fa-
+cilitated by the teacher models. The PATE frame-
+work consists of three key components: (i) Teacher
+Model Training: The private dataset is first shuf-
+fled and divided into M distinct subsets. Each
+teacher model is subsequently trained on one of
+these subsets. (ii) Teacher Aggregation: To lever-
+age the knowledge of the individual teacher models,
+their outputs are aggregated, and this aggregated
+information serves as supervision for the student
+model. Each of the trained teachers contributes
+their insights to guide the learning process of the
+student on the unlabeled public dataset. (iii) Stu-
+dent Model Training: The student model is trained
+on the public dataset using the guidance provided
+by the aggregated teacher models. This collabora-
+tive approach ensures that the student model learns
+from the unlabeled data while benefiting from the
+distilled knowledge of the teacher models.
+
+In the context of classification tasks, a common
+practice involves leveraging the collective wisdom
+of teachers by using their noisy majority votes as
+labels to guide the students, thereby ensuring DP.
+However, when it comes to text generation tasks,
+the straightforward application of this framework
+encounters a significant challenge. This challenge
+arises because traditional text generation models
+generate words sequentially, typically from left
+to right. Consequently, a straightforward appli-
+cation of PATE to text generation necessitates the
+
+
+iterative unveiling of all teachers, word by word,
+which comes with substantial computational and
+privacy costs. To tackle this issue, an innovative
+solution was presented by Tian et al. (2022), known
+as the SeqPATE framework. The SeqPATE frame-
+work initiates by generating pseudo-data using a
+pre-trained language model, simplifying the teach-
+ers’ role to providing token-level guidance based
+on these pseudo inputs. In dealing with the in-
+herent complexities of the expansive word output
+space and the accompanying noise, the framework
+introduces dynamic filtering of candidate words.
+This process focuses on selecting words with no-
+tably high probabilities. Additionally, the SeqPATE
+framework adopts a unique approach to aggregat-
+ing teacher outputs. Instead of relying on voting,
+it involves an interpolation of their output distribu-
+tions, offering a more refined and nuanced strategy
+for information fusion.
+
+Recently, a notable development in the applica-
+tion of PATE, as reported by Duan et al. (2023),
+extends its utility to the realm of private In-context
+learning, a domain where the primary objective
+revolves around safeguarding the privacy of down-
+stream data embedded in discrete prompts. De-
+parting from the conventional approach of training
+teacher models on distinct partitions of private data,
+this innovative method capitalizes on the private
+data to formulate distinct prompts for the Large
+Language Model (LLM). In the context of private
+knowledge transfer, the teachers take on the role of
+labeling public data sequences. Each teacher offers
+their perspective by voting on the most probable
+class labels for the private downstream task. On
+the student model front, a novel strategy is pro-
+posed, leveraging the data efficiency of the prompt-
+ing technique. This approach entails using labeled
+public sequences to create new discrete prompts
+for the student model. The chosen prompt is sub-
+sequently deployed alongside the Large Language
+Model (LLM) to serve as the student model, effec-
+tively enhancing the overall efficiency and privacy
+of the In-context learning process.
+
+5.2 Sample-and-Aggregation-based Method
+
+In contrast to the PATE-based method, the Sample-
+and-Aggregation-based approach diverges signif-
+icantly by omitting the presence of a public un-
+labeled dataset, rendering the incorporation of a
+student model unnecessary. Notably, the work by
+Wu et al. (2023) delves into the realm of private
+In-context learning and provides a comprehensive
+
+protocol. The protocol encompasses the following
+crucial steps: The initial step involves the discreet
+partitioning of the dataset, specifically the private
+demonstration exemplars, into non-overlapping
+subsets of exemplars. Each of these subsets is
+then paired with relevant queries, culminating in
+the creation of exemplar-query pairs. For every
+exemplar-query pair, the Language Model’s (LLM)
+API is invoked, eliciting a diverse set of responses.
+Subsequently, these individual responses generated
+by the LLM are aggregated in a manner compli-
+ant with differential privacy (DP) principles. The
+outcome is a privately aggregated model answer,
+which is then made available to the user. Further-
+more, the study introduces two distinctive private
+aggregation schemes, thus enhancing the repertoire
+of options for preserving privacy in the context of
+In-context learning.
+
+In a parallel exploration of private In-context
+learning, Tang et al. (2023) consider the scenarios
+involving an infinite number of queries. In lieu
+of generating private answers, their innovative ap-
+proach revolves around the creation of synthetic
+few-shot demonstrations using the private dataset.
+This method involves augmenting each private sub-
+set with the information generated thus far, collec-
+tively contributing to the likelihood of generating
+the subsequent token. To mitigate the impact of
+noise prior to the private aggregation phase, the
+approach strategically curtails the vocabulary to
+include only tokens found within the top-K indices
+of the next-token probability. This is derived solely
+from the instructional content, entirely excluding
+any input from the private data. The probabilities
+associated with the next token generation, extracted
+from each individual subset, are then subjected to
+a private aggregation process, ensuring a nuanced
+and privacy-preserving amalgamation of informa-
+tion.
+
+6 Challenges and Future Directions
+
+DP for LLMs. Dealing with large-scale text data
+and training LLMs like GPT-4 are tough tasks in
+deep learning with DP. Due to the high dimen-
+sionality of embedding vectors, even adding small
+noise can have a significant influence on the train-
+ing speed and performance of models. It is more
+severe for DP-SGD-based methods, which need
+high memory costs, and their per-example clip-
+ping procedure is time-consuming. These meth-
+ods will be inefficient when they are applied to
+
+
+large language models. Thus, how to reduce the
+memory cost and accelerate the training or fine-
+tuning of DP-SGD become core concerns in gradi-
+ent perturbation-based methods. Although there is
+some work in this direction, from Table | we can
+see most of the current studies are only for BERT,
+GPT-2, and T5, and there is still a gap in accu-
+racy between private and non-private models and
+these methods still need catastrophic cost of mem-
+ory compared with the non-private ones. Moreover,
+it is well known that we need a heavy workload
+on hyperparameter-tuning for large-scale models
+in the non-private case. From the privacy view,
+each try-on hyperparameter-tuning will cost an ad-
+ditional privacy budget, which makes our final pri-
+vate model cost a large privacy budget. Thus, how
+to efficiently and privately tune the hyperparame-
+ters in large models is challenging.
+
+Besides the central setting, from Table 1, we can
+also see that DP training and In-context learning
+in the federated learning setting is still lacking in
+studies. Moreover, even for DP fine-tuning, we
+can see the current studies only focused on small
+models such as LaMDA, and there is still no study
+on private fine-tuning for LLMs in the federated
+learning setting.
+
+Sentence-level Private Embedding As we men-
+tioned, in embedding vector perturbation-based
+methods, the core problem is how to derive a pri-
+vate embedding that can avoid information leak-
+age while also having good performance for down-
+stream tasks. These methods use variants of dis-
+tances to extract the relationship between words
+in the embedding space and use different noises
+to obfuscate sensitive tokens. Besides, some work
+focuses on how to use these private embeddings
+in specific settings like the generation of synthetic
+private data, federated learning, and fine-tuning
+models. However, these papers only focus on word-
+level privacy and do not consider sentence-level pri-
+vacy which is more practical in the NLP scenario.
+For example, even if we replace some sensitive
+words (like name) using private embedding meth-
+ods in a question-answering system, we can still
+easily infer that person from some sentences. In
+total, we should not only consider the privacy is-
+sue of each word but also consider how to hide
+sentence structures and syntax in sentences. Thus,
+designing sentence-level private embeddings is an
+important but difficult problem in private language
+models.
+
+Private Inference. It is notable that in this pa-
+per, we mainly discussed how to privately train
+and release a language model without leaking in-
+formation about training data. However, in some
+scenarios (such as Machine Learning as a Service),
+we only want to use the model for inference instead
+of releasing the model. Thus, for these scenarios,
+we only need to perform inference tasks based on
+our trained model, while we do not want to leak
+information about training data. From the DP side,
+such private inference corresponds to the DP pre-
+diction algorithm, which is proposed by (Dwork
+and Feldman, 2018). Compared with private train-
+ing, DP inference for text data is still far from
+well-understood, and there are only few studies on
+it (Ginart et al., 2022; Majmudar et al., 2022).
+
+Limitations
+
+First, in this paper, we mainly focused on the deep
+learning-based models for NLP tasks in the dif-
+ferential privacy model. Actually, there are also
+some studies on classical statistical models or ap-
+proaches for NLP in DP, such as topic modeling
+(Park et al., 2016; Zhao et al., 2021; Huang and
+Chen, 2021) and n-gram extraction (Kim et al.,
+2021). Secondly, due to the space limit, we did
+not discuss all the related work for DP-SGD, and
+we only focused on the work that uses DP-SGD to
+NLP-related tasks. Thirdly, while we tried our best
+to discuss all the existing work on deep learning-
+based methods for DP-NLP, we have to say that
+we may have missed some related work. Moreover,
+since we aim to classify all the current work into
+three categories based on their methods of adding
+randomness, there is still some work that does not
+belong to these three classes, such as (Bo et al.,
+2021; Weggenmann et al., 2022). To make our pa-
+per be consistent, we did not mention these works
+here. Fourthly, although DP can provide rigorous
+guarantees of privacy-preserving, it has also been
+shown that DP machine learning models can cause
+fairness issues. For example, they always have a
+disparate impact on model accuracy (Bagdasaryan
+et al., 2019). Finally, it is notable that in this paper,
+we did not discuss the narrow assumptions made
+by differential privacy, and the broadness of natural
+language and of privacy as a social norm. More
+details can be found in (Brown et al., 2022).
+
+
+References
+
+Martin Abadi, Andy Chu, Ian J. Goodfellow, H. Bren-
+dan McMahan, Ilya Mironov, Kunal Talwar, and
+Li Zhang. 2016. Deep learning with differential pri-
+vacy. In Proceedings of the 2016 ACM SIGSAC
+Conference on Computer and Communications Se-
+curity, Vienna, Austria, October 24-28, 2016, pages
+308-318. ACM.
+
+Naman Agarwal, Peter Kairouz, and Ziyu Liu. 2021.
+The skellam mechanism for differentially private fed-
+erated learning. Advances in Neural Information
+Processing Systems, 34:5052-5064.
+
+Walaa Alnasser, Ghazaleh Beigi, and Huan Liu. 2021.
+Privacy preserving text representation learning using
+BERT. In Social, Cultural, and Behavioral Modeling
+- 14th International Conference, SBP-BRiMS 2021,
+Virtual Event, July 6-9, 2021, Proceedings, volume
+12720 of Lecture Notes in Computer Science, pages
+91-100. Springer.
+
+Ehsan Amid, Arun Ganesh, Rajiv Mathews, Swa-
+roop Ramaswamy, Shuang Song, Thomas Steinke,
+Vinith M Suriyakumar, Om Thakkar, and Abhradeep
+Thakurta. 2022. Public data-assisted mirror descent
+for private model training. In International Confer-
+ence on Machine Learning, pages 517-535. PMLR.
+
+Galen Andrew, Om Thakkar, Brendan McMahan, and
+Swaroop Ramaswamy. 2021. Differentially private
+learning with adaptive clipping. Advances in Neural
+Information Processing Systems, 34:17455-17466.
+
+Rohan Anil, Badih Ghazi, Vineet Gupta, Ravi Kumar,
+and Pasin Manurangsi. 2021. Large-scale differen-
+tially private BERT. CoRR, abs/2108.01624.
+
+Stefan Arnold, Dilara Yesilbas, and Sven Weinzierl.
+2023a. Driving context into text-to-text privatization.
+CoRR, abs/2306.01457.
+
+Stefan Arnold, Dilara Yesilbas, and Sven Weinzierl.
+2023b. Guiding text-to-text privatization by syntax.
+CoRR, abs/2306.01471.
+
+Shahab Asoodeh, Jiachun Liao, Flavio P. Calmon,
+Oliver Kosut, and Lalitha Sankar. 2021. Three
+variants of differential privacy: Lossless conversion
+and applications. IEEE J. Sel. Areas Inf. Theory,
+2(1):208—222.
+
+Md Momin Al Aziz, Tanbir Ahmed, Tasnia Faequa,
+Xiaoqian Jiang, Yiyu Yao, and Noman Mohammed.
+2022. Differentially private medical texts genera-
+tion using generative neural networks. ACM Trans.
+Comput. Heal., 3(1):5:1-5:27.
+
+Eugene Bagdasaryan, Omid Poursaeed, and Vitaly
+Shmatikov. 2019. Differential privacy has disparate
+impact on model accuracy. In Advances in Neural
+Information Processing Systems 32: Annual Confer-
+ence on Neural Information Processing Systems 2019,
+NeurIPS 2019, December 8-14, 2019, Vancouver, BC,
+Canada, pages 15453-15462.
+
+Borja Balle, Gilles Barthe, and Marco Gaboardi. 2018.
+Privacy amplification by subsampling: Tight anal-
+yses via couplings and divergences. In Advances
+in Neural Information Processing Systems 31: An-
+nual Conference on Neural Information Processing
+Systems 2018, NeurIPS 2018, December 3-8, 2018,
+Montréal, Canada, pages 6280-6290.
+
+Borja Balle, Gilles Barthe, Marco Gaboardi, and Joseph
+Geumlek. 2019. Privacy amplification by mixing
+and diffusion mechanisms. In Advances in Neural
+Information Processing Systems 32: Annual Confer-
+ence on Neural Information Processing Systems 2019,
+NeurIPS 2019, December 8-14, 2019, Vancouver, BC,
+Canada, pages 13277-13287.
+
+Borja Balle, Peter Kairouz, Brendan McMahan, Om Di-
+pakbhai Thakkar, and Abhradeep Thakurta. 2020.
+Privacy amplification via random check-ins. In Ad-
+vances in Neural Information Processing Systems 33:
+Annual Conference on Neural Information Process-
+ing Systems 2020, NeurIPS 2020, December 6-12,
+2020, virtual.
+
+Rouzbeh Behnia, Mohammadreza Reza Ebrahim, Jason
+Pacheco, and Balaji Padmanabhan. 2022. Ew-tune:
+A framework for privately fine-tuning large language
+models with differential privacy. In 2022 IEEE In-
+ternational Conference on Data Mining Workshops
+(ICDMW), pages 560-566. IEEE.
+
+Haohan Bo, Steven H. H. Ding, Benjamin C. M. Fung,
+and Farkhund Iqbal. 2021. ER-AE: Differentially
+private text generation for authorship anonymization.
+In Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+pages 3997-4007, Online. Association for Computa-
+tional Linguistics.
+
+Danushka_ Bollegala, Shuichi Otake, Tomoya
+Machide, and Ken-ichi Kawarabayashi. 2023.
+A neighbourhood-aware differential privacy
+mechanism for static word embeddings. CoRR,
+abs/2309.10551.
+
+Hannah Brown, Katherine Lee, Fatemehsadat
+Mireshghallah, Reza Shokri, and Florian Tramer.
+2022. What does it mean for a language model to
+preserve privacy? In FAccT ’22: 2022 ACM Confer-
+ence on Fairness, Accountability, and Transparency,
+Seoul, Republic of Korea, June 21 - 24, 2022, pages
+2280-2292. ACM.
+
+Zhiqi Bu, Jinshuo Dong, Qi Long, and Weijie J. Su.
+2019. Deep learning with gaussian differential pri-
+vacy. CoRR, abs/1911.11607.
+
+Zhiqi Bu, Yu-Xiang Wang, Sheng Zha, and George
+Karypis. 2022. Differentially private bias-term only
+fine-tuning of foundation models. arXiv preprint
+arXiv:2210.00036.
+
+Zhiqi Bu, Yu-Xiang Wang, Sheng Zha, and George
+Karypis. 2023. Differentially private optimization
+
+
+on large model at small cost. In International Con-
+ference on Machine Learning, pages 3192-3218.
+PMLR.
+
+Mark Bun, Cynthia Dwork, Guy N. Rothblum, and
+Thomas Steinke. 2018. Composable and versatile
+privacy via truncated CDP. In Proceedings of the
+50th Annual ACM SIGACT Symposium on Theory of
+Computing, STOC 2018, Los Angeles, CA, USA, June
+25-29, 2018, pages 74-86. ACM.
+
+Mark Bun and Thomas Steinke. 2016. Concentrated
+differential privacy: Simplifications, extensions, and
+lower bounds. In Theory of Cryptography - 14th In-
+ternational Conference, TCC 2016-B, Beijing, China,
+October 31 - November 3, 2016, Proceedings, Part I,
+volume 9985 of Lecture Notes in Computer Science,
+pages 635-658.
+
+Nicholas Carlini, Chang Liu, Ulfar Erlingsson, Jernej
+Kos, and Dawn Song. 2019. The secret sharer: Eval-
+uating and testing unintended memorization in neu-
+ral networks. In 28th USENIX Security Symposium,
+USENIX Security 2019, Santa Clara, CA, USA, Au-
+gust 14-16, 2019, pages 267-284. USENIX Associa-
+tion.
+
+Nicholas Carlini, Florian Tramér, Eric Wallace,
+Matthew Jagielski, Ariel Herbert-Voss, Katherine
+Lee, Adam Roberts, Tom B. Brown, Dawn Song, UL
+far Erlingsson, Alina Oprea, and Colin Raffel. 2021.
+Extracting training data from large language models.
+In 30th USENIX Security Symposium, USENIX Se-
+curity 2021, August 11-13, 2021, pages 2633-2650.
+USENIX Association.
+
+Aldo Gael Carranza, Rezsa Farahani, Natalia Pono-
+mareva, Alex Kurakin, Matthew Jagielski, and Milad
+Nasr. 2023. Privacy-preserving recommender sys-
+tems with synthetic query generation using differen-
+tially private large language models. arXiv preprint
+arXiv:2305.05973.
+
+Ricardo Silva Carvalho, Theodore Vasiloudis, and
+Oluwaseyi Feyisetan. 2021a. BRR: preserving pri-
+vacy of text data efficiently on device. CoRR,
+abs/2107.07923.
+
+Ricardo Silva Carvalho, Theodore Vasiloudis, and
+Oluwaseyi Feyisetan. 2021b. TEM: high util-
+ity metric differential privacy on text. CoRR,
+abs/2107.07928.
+
+Konstantinos Chatzikokolakis, Miguel E. Andrés,
+Nicolas Emilio Bordenabe, and Catuscia Palamidessi.
+2013. Broadening the scope of differential privacy
+using metrics. In Privacy Enhancing Technologies -
+13th International Symposium, PETS 2013, Bloom-
+ington, IN, USA, July 10-12, 2013. Proceedings, vol-
+ume 7981 of Lecture Notes in Computer Science,
+pages 82-102. Springer.
+
+Sai Chen, Fengran Mo, Yanhao Wang, Cen Chen, Jian-
+Yun Nie, Chengyu Wang, and Jamie Cui. 2023. A
+customized text sanitization mechanism with dif-
+ferential privacy. In Findings of the Association
+
+for Computational Linguistics: ACL 2023, Toronto,
+Canada, July 9-14, 2023, pages 5747-5758. Associa-
+tion for Computational Linguistics.
+
+Albert Cheu, Adam D. Smith, Jonathan R. Ullman,
+David Zeber, and Maxim Zhilyaev. 2019. Distributed
+differential privacy via shuffling. In Advances in
+Cryptology - EUROCRYPT 2019 - 38th Annual Inter-
+national Conference on the Theory and Applications
+of Cryptographic Techniques, Darmstadt, Germany,
+May 19-23, 2019, Proceedings, Part I, volume 11476
+of Lecture Notes in Computer Science, pages 375—
+403. Springer.
+
+Christopher A Choquette-Choo, H Brendan McMahan,
+Keith Rush, and Abhradeep Thakurta. 2022. Multi-
+epoch matrix factorization mechanisms for private
+machine learning. arXiv preprint arXiv:2211.06530.
+
+Edwige Cyffers and Aurélien Bellet. 2022. Privacy
+amplification by decentralization. In International
+Conference on Artificial Intelligence and Statistics,
+AISTATS 2022, 28-30 March 2022, Virtual Event,
+volume 151 of Proceedings of Machine Learning
+Research, pages 5334-5353. PMLR.
+
+Fida Kamal Dankar and Khaled El] Emam. 2013. Prac-
+ticing differential privacy in health care: A review.
+Trans. Data Priv., 6(1):35—67.
+
+Sergey Denisov, H Brendan McMahan, John Rush,
+Adam Smith, and Abhradeep Guha Thakurta. 2022.
+Improved differential privacy for sgd via optimal pri-
+vate linear operators on adaptive streams. Advances
+in Neural Information Processing Systems, 35:5910-
+5924.
+
+Damien Desfontaines and Balazs Pejé. 2020. Sok: Dif-
+ferential privacies. Proceedings on Privacy Enhanc-
+ing Technologies, 2020(2):288-313.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, NAACL-HLT 2019, Minneapolis, MN, USA,
+June 2-7, 2019, Volume 1 (Long and Short Papers),
+pages 4171-4186. Association for Computational
+Linguistics.
+
+Jinshuo Dong, Aaron Roth, and Weijie J. Su. 2022.
+Gaussian differential privacy. Journal of the Royal
+Statistical Society: Series B (Statistical Methodol-
+ogy), 84(1):3-37.
+
+Jian Du and Haitao Mi. 2021. Dp-fp: Differentially
+private forward propagation for large models. arXiv
+preprint arXiv:2112.14430.
+
+Minxin Du, Xiang Yue, Sherman S. M. Chow, and Huan
+Sun. 2023a. Sanitizing sentence embeddings (and
+labels) for local differential privacy. In Proceedings
+of the ACM Web Conference 2023, WWW ’23, page
+2349-2359, New York, NY, USA. Association for
+Computing Machinery.
+
+
+Minxin Du, Xiang Yue, Sherman S. M. Chow, Tianhao
+Wang, Chenyu Huang, and Huan Sun. 2023b. Dp-
+forward: Fine-tuning and inference on language mod-
+els with differential privacy in forward pass. CoRR,
+abs/2309.06746.
+
+Haonan Duan, Adam Dziedzic, Nicolas Papernot, and
+Franziska Boenisch. 2023. Flocks of stochastic par-
+rots: Differentially private prompt learning for large
+language models. CoRR, abs/2305.15594.
+
+Christophe Dupuy, Radhika Arava, Rahul Gupta, and
+Anna Rumshisky. 2021. An efficient DP-SGD
+mechanism for large scale NLP models. CoRR,
+abs/2107.14586.
+
+Cynthia Dwork and Vitaly Feldman. 2018. Privacy-
+preserving prediction. In Conference On Learning
+Theory, COLT 2018, Stockholm, Sweden, 6-9 July
+2018, volume 75 of Proceedings of Machine Learn-
+ing Research, pages 1693-1702. PMLR.
+
+Cynthia Dwork, Frank McSherry, Kobbi Nissim, and
+Adam D. Smith. 2006. Calibrating noise to sensitiv-
+ity in private data analysis. In Theory of Cryptogra-
+phy, Third Theory of Cryptography Conference, TCC
+2006, New York, NY, USA, March 4-7, 2006, Pro-
+ceedings, volume 3876 of Lecture Notes in Computer
+Science, pages 265-284. Springer.
+
+Cynthia Dwork and Aaron Roth. 2014. The algorith-
+mic foundations of differential privacy. Founda-
+tions and Trends® in Theoretical Computer Science,
+9(3-4):211-407.
+
+Cynthia Dwork and Guy N. Rothblum. 2016. Concen-
+trated differential privacy. CoRR, abs/1603.01887.
+
+Cynthia Dwork, Guy N. Rothblum, and Salil P. Vadhan.
+2010. Boosting and differential privacy. In 5/th An-
+nual IEEE Symposium on Foundations of Computer
+Science, FOCS 2010, October 23-26, 2010, Las Ve-
+gas, Nevada, USA, pages 51-60. IEEE Computer
+Society.
+
+Oluwaseyi Feyisetan, Borja Balle, Thomas Drake, and
+Tom Diethe. 2020. Privacy- and utility-preserving
+textual analysis via calibrated multivariate perturba-
+tions. In WSDM ’20: The Thirteenth ACM Interna-
+tional Conference on Web Search and Data Mining,
+Houston, TX, USA, February 3-7, 2020, pages 178—
+186. ACM.
+
+Oluwaseyi Feyisetan, Tom Diethe, and Thomas Drake.
+2019. Leveraging hierarchical representations for
+preserving privacy and utility in text. In 2019 IEEE
+International Conference on Data Mining, ICDM
+2019, Beijing, China, November 8-11, 2019, pages
+210-219. IEEE.
+
+Oluwaseyi Feyisetan and Shiva Kasiviswanathan. 2021.
+Private release of text embedding vectors. In Pro-
+ceedings of the First Workshop on Trustworthy Natu-
+ral Language Processing, pages 15-27.
+
+Antonio Ginart, Laurens van der Maaten, James Zou,
+and Chuan Guo. 2022. Submix: Practical private
+prediction for large-scale language models. CoRR,
+abs/2201.00971.
+
+Sivakanth Gopi, Yin Tat Lee, and Lukas Wutschitz.
+2021. Numerical composition of differential privacy.
+In Advances in Neural Information Processing Sys-
+tems 34: Annual Conference on Neural Information
+Processing Systems 2021, NeurIPS 2021, December
+6-14, 2021, virtual, pages 11631-11642.
+
+Umang Gupta, Aram Galstyan, and Greg Ver Steeg.
+2023. Jointly reparametrized multi-layer adapta-
+tion for efficient and private tuning. arXiv preprint
+arXiv:2305.19264.
+
+Ivan Habernal. 2021. When differential privacy meets
+NLP: The devil is in the detail. In Proceedings of the
+2021 Conference on Empirical Methods in Natural
+Language Processing, pages 1522-1528, Online and
+Punta Cana, Dominican Republic. Association for
+Computational Linguistics.
+
+Andrew Hard, Kanishka Rao, Rajiv Mathews, Swaroop
+Ramaswamy, Frangoise Beaufays, Sean Augenstein,
+Hubert Eichner, Chloé Kiddon, and Daniel Ramage.
+2018. Federated learning for mobile keyboard pre-
+diction. arXiv preprint arXiv: 1811.03604.
+
+Shlomo Hoory, Amir Feder, Avichai Tendler, Sofia Erell,
+Alon Peled-Cohen, Itay Laish, Hootan Nakhost, Uri
+Stemmer, Ayelet Benjamini, Avinatan Hassidim, and
+Yossi Matias. 2021. Learning and evaluating a dif-
+ferentially private pre-trained language model. In
+Findings of the Association for Computational Lin-
+guistics: EMNLP 2021, pages 1178-1189, Punta
+Cana, Dominican Republic. Association for Compu-
+tational Linguistics.
+
+Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski,
+Bruna Morrone, Quentin De Laroussilhe, Andrea
+Gesmundo, Mona Attariyan, and Sylvain Gelly. 2019.
+Parameter-efficient transfer learning for nlp. In In-
+ternational Conference on Machine Learning, pages
+2790-2799. PMLR.
+
+Tao Huang and Hong Chen. 2021. Improving privacy
+guarantee and efficiency of latent dirichlet alloca-
+tion model training under differential privacy. In
+Findings of the Association for Computational Lin-
+guistics: EMNLP 2021, Virtual Event / Punta Cana,
+Dominican Republic, 16-20 November, 2021, pages
+143-152. Association for Computational Linguistics.
+
+Timour Igamberdiev, Thomas Arnold, and Ivan Haber-
+nal. 2022. Dp-rewrite: Towards reproducibility and
+transparency in differentially private text rewriting.
+In Proceedings of the 29th International Confer-
+ence on Computational Linguistics, page (to appear),
+Gyeongju, Republic of Korea. International Commit-
+tee on Computational Linguistics.
+
+Timour Igamberdiev and Ivan Habernal. 2021. Privacy-
+preserving graph convolutional networks for text clas-
+sification. CoRR, abs/2102.09604.
+
+
+Jacob Imola and Kamalika Chaudhuri. 2021.  Pri-
+vacy amplification via bernoulli sampling. CoRR,
+abs/2105.10594.
+
+Jacob Imola, Shiva Prasad Kasiviswanathan, Stephen
+White, Abhinav Aggarwal, and Nathanael Teissier.
+2022. Balancing utility and scalability in metric dif-
+ferential privacy. In Uncertainty in Artificial Intelli-
+gence, Proceedings of the Thirty-Eighth Conference
+on Uncertainty in Artificial Intelligence, UAI 2022, 1-
+5 August 2022, Eindhoven, The Netherlands, volume
+180 of Proceedings of Machine Learning Research,
+pages 885-894. PMLR.
+
+Zhanglong Ji, Zachary Chase Lipton, and Charles Elkan.
+2014. Differential privacy and machine learning: a
+survey and review. CoRR, abs/1412.7584.
+
+Peter Kairouz, Brendan McMahan, Shuang Song,
+Om Thakkar, Abhradeep Thakurta, and Zheng Xu.
+2021. Practical and private (deep) learning without
+sampling or shuffling. In International Conference
+on Machine Learning, pages 5213-5225. PMLR.
+
+Peter Kairouz, Sewoong Oh, and Pramod Viswanath.
+2015. The composition theorem for differential pri-
+vacy. In Proceedings of the 32nd International Con-
+ference on Machine Learning, ICML 2015, Lille,
+France, 6-11 July 2015, volume 37 of JMLR Work-
+shop and Conference Proceedings, pages 1376-1385.
+JMLR.org.
+
+Rabeeh Karimi Mahabadi, James Henderson, and Se-
+bastian Ruder. 2021. Compacter: Efficient low-rank
+hypercomplex adapter layers. Advances in Neural
+Information Processing Systems, 34:1022-1035.
+
+Daniel Kifer and Ashwin Machanavajjhala. 2011. No
+free lunch in data privacy. In Proceedings of the ACM
+SIGMOD International Conference on Management
+of Data, SIGMOD 2011, Athens, Greece, June 12-16,
+2011, pages 193-204. ACM.
+
+Daniel Kifer and Ashwin Machanavajjhala. 2014.
+Pufferfish: A framework for mathematical privacy
+definitions. ACM Trans. Database Syst., 39(1):3:1-
+3:36.
+
+Kunho Kim, Sivakanth Gopi, Janardhan Kulkarni, and
+Sergey Yekhanin. 2021. Differentially private n-gram
+extraction. In Advances in Neural Information Pro-
+cessing Systems 34: Annual Conference on Neural
+Information Processing Systems 2021, NeurIPS 2021,
+December 6-14, 2021, virtual, pages 5102-5111.
+
+Diederik P. Kingma and Jimmy Ba. 2015. Adam: A
+method for stochastic optimization. In 3rd Inter-
+national Conference on Learning Representations,
+ICLR 2015, San Diego, CA, USA, May 7-9, 2015,
+Conference Track Proceedings.
+
+Oleksandra Klymenko, Stephen Meisenbacher, and Flo-
+rian Matthes. 2022. Differential privacy in natural
+language processing the story so far. In Proceedings
+of the Fourth Workshop on Privacy in Natural Lan-
+guage Processing, pages 1-11, Seattle, United States.
+Association for Computational Linguistics.
+
+Anastasia Koloskova, Ryan McKenna, Zachary Charles,
+Keith Rush, and Brendan McMahan. 2023. Conver-
+gence of gradient descent with linearly correlated
+noise and applications to differentially private learn-
+ing. arXiv preprint arXiv:2302.01463.
+
+Satyapriya Krishna, Rahul Gupta, and Christophe
+Dupuy. 2021. ADePT: Auto-encoder based differ-
+entially private text transformation. In Proceedings
+of the 16th Conference of the European Chapter of
+the Association for Computational Linguistics: Main
+Volume, pages 2435-2439, Online. Association for
+Computational Linguistics.
+
+Seolhwa Lee and Anders Sggaard. 2023. Private meet-
+ing summarization without performance loss. arXiv
+preprint arXiv:2305.15894.
+
+Tian Li, Manzil Zaheer, Sashank Reddi, and Virginia
+Smith. 2022. Private adaptive optimization with side
+information. In International Conference on Ma-
+chine Learning, pages 13086-13105. PMLR.
+
+Xuechen Li, Florian Tramer, Percy Liang, and Tatsunori
+Hashimoto. 2021. Large language models can be
+strong differentially private learners. In International
+Conference on Learning Representations.
+
+Yansong Li, Zhixing Tan, and Yang Liu. 2023. Privacy-
+preserving prompt tuning for large language model
+services. CoRR, abs/2305.06212.
+
+Lingjuan Lyu, Xuanli He, and Yitong Li. 2020a. Differ-
+entially private representation for NLP: Formal guar-
+antee and an empirical study on privacy and fairness.
+In Findings of the Association for Computational Lin-
+guistics: EMNLP 2020, pages 2355-2365, Online.
+Association for Computational Linguistics.
+
+Lingjuan Lyu, Yitong Li, Xuanli He, and Tong Xiao.
+2020b. Towards differentially private text representa-
+tions. In Proceedings of the 43rd International ACM
+SIGIR conference on research and development in
+Information Retrieval, SIGIR 2020, Virtual Event,
+China, July 25-30, 2020, pages 1813-1816. ACM.
+
+Gaurav Maheshwari, Pascal Denis, Mikaela Keller, and
+Aurélien Bellet. 2022. Fair nlp models with dif-
+ferentially private text encoders. arXiv preprint
+arXiv:2205.06135.
+
+Jimit Majmudar, Christophe Dupuy, Charith Peris, Sami
+Smaili, Rahul Gupta, and Richard S. Zemel. 2022.
+Differentially private decoding in large language
+models. CoRR, abs/2205.13621.
+
+Justus Mattern, Benjamin Weggenmann, and Florian
+Kerschbaum. 2022. The limits of word level differ-
+ential privacy. arXiv preprint arXiv:2205.02130.
+
+H. Brendan McMahan, Daniel Ramage, Kunal Talwar,
+and Li Zhang. 2018. Learning differentially private
+recurrent language models. In 6th International Con-
+ference on Learning Representations, ICLR 2018,
+Vancouver, BC, Canada, April 30 - May 3, 2018,
+Conference Track Proceedings. OpenReview.net.
+
+
+Casey Meehan, Khalil Mrini, and Kamalika Chaudhuri.
+2022. Sentence-level privacy for document embed-
+dings. In Proceedings of the 60th Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 3367-3380, Dublin,
+Ireland. Association for Computational Linguistics.
+
+Sebastian Meiser and Esfandiar Mohammadi. 2018.
+Tight on budget?: Tight bounds for r-fold approxi-
+mate differential privacy. In Proceedings of the 2018
+ACM SIGSAC Conference on Computer and Commu-
+nications Security, CCS 2018, Toronto, ON, Canada,
+October 15-19, 2018, pages 247-264. ACM.
+
+Tomas Mikolov, Kai Chen, Greg Corrado, and Jeffrey
+Dean. 2013. Efficient estimation of word representa-
+tions in vector space. In /st International Conference
+on Learning Representations, ICLR 2013, Scottsdale,
+Arizona, USA, May 2-4, 2013, Workshop Track Pro-
+ceedings.
+
+Fatemehsadat Mireshghallah, Richard Shin, Yu Su, Tat-
+sunori Hashimoto, and Jason Eisner. 2022. Privacy-
+preserving domain adaptation of semantic parsers.
+arXiv preprint arXiv:2212.10520.
+
+Ilya Mironov. 2017. Rényi differential privacy. In 30th
+IEEE Computer Security Foundations Symposium,
+CSF 2017, Santa Barbara, CA, USA, August 21-25,
+2017, pages 263-275. IEEE Computer Society.
+
+Ilya Mironov, Kunal Talwar, and Li Zhang. 2019. Rényi
+differential privacy of the sampled gaussian mecha-
+nism. CoRR, abs/1908.10530.
+
+Takao Murakami and Yusuke Kawamoto. 2019. Utility-
+optimized local differential privacy mechanisms for
+distribution estimation. In 28th USENIX Security
+Symposium, USENIX Security 2019, Santa Clara,
+CA, USA, August 14-16, 2019, pages 1877-1894.
+USENIX Association.
+
+Jack Murtagh and Salil P. Vadhan. 2016. The complex-
+ity of computing the optimal composition of differen-
+tial privacy. In Theory of Cryptography - 13th Inter-
+national Conference, TCC 2016-A, Tel Aviv, Israel,
+January 10-13, 2016, Proceedings, Part I, volume
+9562 of Lecture Notes in Computer Science, pages
+157-175. Springer.
+
+Arvind Narayanan and Vitaly Shmatikov. 2008. Ro-
+bust de-anonymization of large sparse datasets. In
+2008 IEEE Symposium on Security and Privacy (S&P
+2008), 18-21 May 2008, Oakland, California, USA,
+pages 111-125. IEEE Computer Society.
+
+Nicolas Papernot, Martin Abadi, Ulfar Erlingsson,
+Ian Goodfellow, and Kunal Talwar. 2016. Semi-
+supervised knowledge transfer for deep learning from
+private training data. In International Conference on
+Learning Representations.
+
+Mijung Park, James R. Foulds, Kamalika Chaudhuri,
+and Max Welling. 2016. Private topic modeling.
+CoRR, abs/1609.04120.
+
+Manas A. Pathak, Shantanu Rane, and Bhiksha Raj.
+2010. Multiparty differential privacy via aggrega-
+tion of locally trained classifiers. In Advances in
+Neural Information Processing Systems 23: 24th An-
+nual Conference on Neural Information Processing
+Systems 2010. Proceedings of a meeting held 6-9 De-
+cember 2010, Vancouver, British Columbia, Canada,
+pages 1876-1884. Curran Associates, Inc.
+
+Matthew E. Peters, Mark Neumann, Mohit Iyyer, Matt
+Gardner, Christopher Clark, Kenton Lee, and Luke
+Zettlemoyer. 2018. Deep contextualized word repre-
+sentations. In Proceedings of the 2018 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume I (Long Papers), pages 2227-2237,
+New Orleans, Louisiana. Association for Computa-
+tional Linguistics.
+
+Ildik6 Pildn, Pierre Lison, Lilja Ovrelid, Anthi Pa-
+padopoulou, David Sanchez, and Montserrat Batet.
+2022. The text anonymization benchmark (TAB): A
+dedicated corpus and evaluation framework for text
+anonymization. CoRR, abs/2202.00443.
+
+Richard Plant, Dimitra Gkatzia, and Valerio Giuffrida.
+2021. CAPE: Context-aware private embeddings
+for private language learning. In Proceedings of the
+2021 Conference on Empirical Methods in Natural
+Language Processing, pages 7970-7978, Online and
+Punta Cana, Dominican Republic. Association for
+Computational Linguistics.
+
+Natalia Ponomareva, Jasmijn Bastings, and Sergei Vas-
+silvitskii. 2022. Training text-to-text transformers
+with privacy guarantees. In Findings of the Associa-
+tion for Computational Linguistics: ACL 2022, pages
+2182-2193.
+
+Chen Qu, Weize Kong, Liu Yang, Mingyang Zhang,
+Michael Bendersky, and Marc Najork. 2021. Natu-
+ral language understanding with privacy-preserving
+BERT. In CIKM ’21: The 30th ACM International
+Conference on Information and Knowledge Manage-
+ment, Virtual Event, Queensland, Australia, Novem-
+ber I - 5, 2021, pages 1488-1497. ACM.
+
+Colin Raffel, Noam Shazeer, Adam Roberts, Katherine
+Lee, Sharan Narang, Michael Matena, Yanqi Zhou,
+Wei Li, and Peter J Liu. 2020. Exploring the limits
+of transfer learning with a unified text-to-text trans-
+former. The Journal of Machine Learning Research,
+21(1):5485-5551.
+
+Swaroop Ramaswamy, Om Thakkar, Rajiv Mathews,
+Galen Andrew, H Brendan McMahan, and Francoise
+Beaufays. 2020. Training production language mod-
+els without memorizing user data. arXiv preprint
+arXiv:2009. 10031.
+
+David Sanchez and Montserrat Batet. 2016. C-sanitized:
+A privacy model for document redaction and saniti-
+zation. J. Assoc. Inf: Sci. Technol., 67(1):148-163.
+
+Manuel Senge, Timour Igamberdiev, and Ivan Haber-
+nal. 2022. One size does not fit all: Investigating
+
+
+strategies for differentially-private learning across
+nlp tasks. In Proceedings of the 2022 Conference on
+Empirical Methods in Natural Language Processing,
+pages 7340-7353.
+
+Weiyan Shi, Aiqi Cui, Evan Li, Ruoxi Jia, and Zhou
+Yu. 2021. Selective differential privacy for language
+modeling. CoRR, abs/2108.12944.
+
+Weiyan Shi, Ryan Shea, Si Chen, Chiyuan Zhang, Ruoxi
+Jia, and Zhou Yu. 2022. Just fine-tune twice: Selec-
+tive differential privacy for large language models.
+In Proceedings of the 2022 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+6327-6340.
+
+Reza Shokri, Marco Stronati, Congzheng Song, and Vi-
+taly Shmatikov. 2017. Membership inference attacks
+against machine learning models. In 2017 IEEE Sym-
+posium on Security and Privacy, SP 2017, San Jose,
+CA, USA, May 22-26, 2017, pages 3-18. IEEE Com-
+puter Society.
+
+Jingye Tang, Tianqing Zhu, Ping Xiong, Yu Wang, and
+Wei Ren. 2020. Privacy and utility trade-off for tex-
+tual analysis via calibrated multivariate perturbations.
+In Network and System Security - 14th International
+Conference, NSS 2020, Melbourne, VIC, Australia,
+November 25-27, 2020, Proceedings, volume 12570
+of Lecture Notes in Computer Science, pages 342-
+353. Springer.
+
+Xinyu Tang, Richard Shin, Huseyin A. Inan, Andre
+Manoel, Fatemehsadat Mireshghallah, Zinan Lin,
+Sivakanth Gopi, Janardhan Kulkarni, and Robert Sim.
+2023. Privacy-preserving in-context learning with
+differentially private few-shot generation. CoRR,
+abs/2309.11765.
+
+Zhiliang Tian, Yingxiu Zhao, Ziyue Huang, Yu-Xiang
+Wang, Nevin L. Zhang, and He He. 2022. Seqpate:
+Differentially private text generation via knowledge
+distillation. In NeurIPS.
+
+Boxin Wang, Yibo Jacky Zhang, Yuan Cao, Bo Li,
+H Brendan McMahan, Sewoong Oh, Zheng Xu, and
+Manzil Zaheer. 2023. Can public large language
+models help private cross-device federated learning?
+arXiv preprint arXiv:2305.12132.
+
+Hua Wang, Sheng Gao, Huanyu Zhang, Milan Shen,
+and Weijie J Su. 2022. Analytical composition of dif-
+ferential privacy via the edgeworth accountant. arXiv
+preprint arXiv:2206.04236.
+
+Teng Wang, Xuefeng Zhang, Jingyu Feng, and Xinyu
+Yang. 2020a. A comprehensive survey on local dif-
+ferential privacy toward data statistics and analysis.
+Sensors, 20(24).
+
+Tianhao Wang, Jeremiah Blocki, Ninghui Li, and
+Somesh Jha. 2017. Locally differentially private pro-
+tocols for frequency estimation. In 26th USENIX
+Security Symposium, USENIX Security 2017, Van-
+couver, BC, Canada, August 16-18, 2017, pages 729-
+745. USENIX Association.
+
+Yu-Xiang Wang, Borja Balle, and Shiva Prasad Ka-
+siviswanathan. 2020b. Subsampled rényi differential
+privacy and analytical moments accountant. J. Priv.
+Confidentiality, 10(2).
+
+Benjamin Weggenmann and Florian Kerschbaum. 2021.
+Differential privacy for directional data. In CCS ’2/:
+2021 ACM SIGSAC Conference on Computer and
+Communications Security, Virtual Event, Republic of
+Korea, November 15 - 19, 2021, pages 1205-1222.
+ACM.
+
+Benjamin Weggenmann, Valentin Rublack, Michael An-
+drejczuk, Justus Mattern, and Florian Kerschbaum.
+2022. DP-VAE: human-readable text anonymization
+for online reviews with differentially private varia-
+tional autoencoders. In WWW ’22: The ACM Web
+Conference 2022, Virtual Event, Lyon, France, April
+25 - 29, 2022, pages 721-731. ACM.
+
+Tong Wu, Ashwinee Panda, Jiachen T. Wang, and Pra-
+teek Mittal. 2023. Privacy-preserving in-context
+learning for large language models.
+
+Dominik Wunderlich, Daniel Bernau, Francesco Alda,
+Javier Parra-Arnau, and Thorsten Strufe. 2021. On
+the privacy-utility trade-off in differentially private hi-
+erarchical text classification. CoRR, abs/2103.02895.
+
+Tianyu Xia, Shuheng Shen, Su Yao, Xinyi Fu, Ke Xu,
+Xiaolong Xu, and Xing Fu. 2023. Differentially pri-
+vate learning with per-sample adaptive clipping. In
+Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 37, pages 10444-10452.
+
+Xingxing Xiong, Shubo Liu, Dan Li, Zhaohui Cai, and
+Xiaoguang Niu. 2020. A comprehensive survey on
+local differential privacy. Secur. Commun. Networks,
+2020:8829523:1-8829523:29.
+
+Nan Xu, Oluwaseyi Feyisetan, Abhinav Aggarwal,
+Zekun Xu, and Nathanael Teissier. 202 1a. Density-
+aware differentially private textual perturbations us-
+ing truncated gumbel noise. In Proceedings of the
+Thirty-Fourth International Florida Artificial Intel-
+ligence Research Society Conference, North Miami
+Beach, Florida, USA, May 17-19, 2021.
+
+Zekun Xu, Abhinav Aggarwal, Oluwaseyi Feyisetan,
+and Nathanael Teissier. 2020. A differentially private
+text perturbation method using a regularized maha-
+lanobis metric. CoRR, abs/2010.11947.
+
+Zekun Xu, Abhinav Aggarwal, Oluwaseyi Feyisetan,
+and Nathanael Teissier. 2021b. On a utilitarian ap-
+proach to privacy preserving text generation. CoRR,
+abs/2104.11838.
+
+Zekun Xu, Abhinav Aggarwal, Oluwaseyi Feyisetan,
+and Nathanael Teissier. 2021c. On a utilitarian ap-
+proach to privacy preserving text generation. arXiv
+preprint arXiv:2104.11838.
+
+Zheng Xu, Yanxiang Zhang, Galen Andrew, Christo-
+pher A Choquette-Choo, Peter Kairouz, H Brendan
+McMahan, Jesse Rosenstock, and Yuanbo Zhang.
+
+
+2023. Federated learning of gboard language
+models with differential privacy. arXiv preprint
+arXiv:2305. 18465.
+
+Ying Yin and Ivan Habernal. 2022. Privacy-preserving
+models for legal natural language processing. In Pro-
+ceedings of the Natural Legal Language Processing
+Workshop 2022, pages 172-183.
+
+Da Yu, Saurabh Naik, Arturs Backurs, Sivakanth Gopi,
+Huseyin A. Inan, Gautam Kamath, Janardhan Kulka-
+rni, Yin Tat Lee, Andre Manoel, Lukas Wutschitz,
+Sergey Yekhanin, and Huishuai Zhang. 2022. Differ-
+entially private fine-tuning of language models. In
+The Tenth International Conference on Learning Rep-
+resentations, ICLR 2022, Virtual Event, April 25-29,
+2022. OpenReview.net.
+
+Da Yu, Huishuai Zhang, Wei Chen, Jian Yin, and Tie-
+Yan Liu. 2021. Large scale private learning via low-
+rank reparametrization. In Proceedings of the 38th In-
+ternational Conference on Machine Learning, IC ML
+2021, 18-24 July 2021, Virtual Event, volume 139 of
+Proceedings of Machine Learning Research, pages
+12208-12218. PMLR.
+
+Lei Yu, Ling Liu, Calton Pu, Mehmet Emre Gursoy, and
+Stacey Truex. 2019. Differentially private model pub-
+lishing for deep learning. In 2019 IEEE Symposium
+on Security and Privacy, SP 2019, San Francisco,
+CA, USA, May 19-23, 2019, pages 332-349. IEEE.
+
+Xiang Yue, Minxin Du, Tianhao Wang, Yaliang Li,
+Huan Sun, and Sherman S. M. Chow. 2021. Dif-
+ferential privacy for text analytics via natural text
+sanitization. In Findings of the Association for Com-
+putational Linguistics: ACL-IJCNLP 2021, pages
+3853-3866, Online. Association for Computational
+Linguistics.
+
+Xiang Yue, Huseyin A Inan, Xuechen Li, Girish Ku-
+mar, Julia McAnallen, Huan Sun, David Levitan, and
+Robert Sim. 2022. Synthetic text generation with
+differential privacy: A simple and practical recipe.
+arXiv preprint arXiv:2210.14348.
+
+Elad Ben Zaken, Yoav Goldberg, and Shauli Ravfogel.
+2022. Bitfit: Simple parameter-efficient fine-tuning
+for transformer-based masked language-models. In
+Proceedings of the 60th Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 2:
+Short Papers), pages 1-9.
+
+Fangyuan Zhao, Xuebin Ren, Shusen Yang, Qing Han,
+Peng Zhao, and Xinyu Yang. 2021. Latent dirichlet
+allocation model training with differential privacy.
+IEEE Trans. Inf. Forensics Secur., 16:1290-1305.
+
+Qinging Zheng, Jinshuo Dong, Qi Long, and Weijie J.
+Su. 2020. Sharp composition bounds for gaussian
+differential privacy via edgeworth expansion. In Pro-
+ceedings of the 37th International Conference on
+Machine Learning, ICML 2020, 13-18 July 2020, Vir-
+tual Event, volume 119 of Proceedings of Machine
+Learning Research, pages 11420-11435. PMLR.
+
+Yuqing Zhu and Yu-Xiang Wang. 2019. Poission sub-
+sampled rényi differential privacy. In Proceedings of
+the 36th International Conference on Machine Learn-
+ing, ICML 2019, 9-15 June 2019, Long Beach, Cali-
+fornia, USA, volume 97 of Proceedings of Machine
+Learning Research, pages 7634-7642. PMLR.
+
+A_ Differential Privacy Preliminaries
+
+Differential Privacy (DP) is a data post-processing
+technique, which guarantees data privacy by con-
+fusing the attacker. To be more specific, suppose
+there is one dataset noted as S, and we can get
+another dataset S’ by changing or deleting one data
+record in this dataset. Denote the output distribu-
+tion when S is the input as P;, and the output distri-
+bution when S’ is the input as P», if P, and P2 are
+almost the same, then we cannot distinguish these
+two distributions, 1.e., we cannot infer whether the
+deleted or replaced data sample based on the out-
+put we observed. The formal details are given
+by Dwork et al. (2006). Note that in the defini-
+tion of DP, adjacency is a key notion. One of the
+commonly used adjacency definitions is that two
+datasets S and S’ are adjacent (denoted as S' ~ S’)
+if S’ can be obtained by modifying one record in
+S.
+
+Definition 2. Given a domain of dataset V. A
+randomized algorithm A : V¥ +> R is (e,6)-
+differentially private (DP) if for all adjacent
+datasets S,S’ with each sample is in XY and for
+all T’ C R, the following holds
+
+Pr(A(S) € T) < exp(e) Pr(A(S’) € T) +6.
+When 6 = 0, we call the algorithm A is ¢-DP.
+
+Illustration: For example, let V be a collection
+of labeled product reviews, each belonging to a
+single individual, and let 7? be the parameters of a
+classifier trained on ¥. If the classifier’s training
+procedure A satisfies the DP definition above, an
+attacker’s ability to find out whether a particular
+individual was present in the training data or not is
+limited by ¢ and 6.
+
+In the definition of DP, there are two parameters
+e and 6. Specifically, « measures the closeness
+between the output distribution when the input is
+S, and the output distribution when the input is
+S’, smaller € indicates the two distributions are
+more indistinguishable, i.e., the algorithm A will
+be more private. In practice, we set « = 0.1 —
+0.5 as a high privacy regime. Informally, 6 could
+be thought of as the probability ratio between the
+
+
+two distributions is not bounded by e‘. Thus, it is
+preferable to set 6 as small as possible. In practice
+we always set 6 as a value from tt to an where
+n is the number of samples in the dataset S. It is
+notable that besides € and (€,5)-DP, there are also
+other definitions DP such as Rényi DP (Mironov,
+2017), Concentrated DP (Bun and Steinke, 2016;
+Dwork and Rothblum, 2016), Gaussian DP (Dong
+et al., 2022) and Truncated CDP (Bun et al., 2018).
+However, all of them can be transformed into the
+original definition of DP. Thus, in this survey, we
+mainly focus on Definition 2.
+
+There are several important properties of DP,
+see (Dwork and Roth, 2014) for details. Here, we
+only introduce those which are commonly used in
+NLP tasks. The first one is post-processing, which
+means that any post-processing on the output of an
+(e, 6)-DP algorithm will remain (€, 6)-DP. Equiva-
+lently, if an algorithm is DP, then any side informa-
+tion available to the adversary cannot increase the
+risk of privacy leakage.
+
+Proposition 1. Let A: ¥ +> R be (e,6)-DP, and
+let f : RR’ bea (randomized) algorithm. Then
+foA:X HR’ is (€,5)-DP.
+
+Example: Continuing with our scenario of train-
+ing a review classifier under DP, let us imagine we
+take the model from the previous example, which
+was trained under (¢, 5)-DP, and perform a domain
+adaptation by fine-tuning on a different dataset,
+this time without any privacy. The resulting model
+still remains (¢, 6)-DP with respect to the original
+data, that is, privacy cannot be weakened by any
+post-processing.
+
+The second property is the composition prop-
+erty. Generally speaking, the composition prop-
+erty guarantees that the composition of several DP
+mechanisms is still DP.
+
+Proposition 2 (Basic Composition Theorem). Let
+Aj, Ao,--- , Ax be & sequence of randomized al-
+gorithms, where A, : ¥ +> R, and A; : Ri x
+-Ri1x XH R; fori = 2,--- ,k. Suppose
+that for each z € [k], A;(a1,--- , @j-1,-) is (€;, 0;)-
+DP. Then the algorithm A: V¥1> Rx +--+: x Rp
+that runs the algorithms .A; in sequence is (€, 6)-DP
+with «= S7*_, e and 5 = 7, bj.
+
+The basic composition allows us to design com-
+plex algorithms by putting together smaller pieces.
+We can view the overall privacy parameter € as a
+budget to be divided among these pieces. We will
+thus often refer to (€,0) as the “privacy budget”:
+
+each algorithm we run leaks some information, and
+consumes some of our budget. Differential privacy
+allows us to view information leakage as a resource
+to be managed. For example, if we fix the privacy
+budget (¢, 6), then making each A; be ({, 2)-DP
+is sufficient to ensure the composition is (€, 6)-DP.
+Example: In most of the NLP tasks, we need
+to train a model by using variants of optimization
+methods, such as SGD or Adam. In general, these
+optimizers include several iterations to update the
+model, which could be thought of as a composition
+algorithm, and each iteration could be thought of
+as an algorithm. Thus, it is sufficient to design a
+DP algorithm for each iteration, and we can use the
+composition theorem to calculate the budget of the
+whole process.
+
+Besides the basic composition property, there
+are also several advanced composition theorems
+for (€,0)-DP, which could provide tighter privacy
+guarantees than the basic one. For example, con-
+sider each A;,7 € [k] is (€,6)-DP. Then the ba-
+sic composition theorem implies their composi-
+tion is (ke, kd)-DP. However, this is not tight as
+we can use the advanced composition theorem
+to show their composition could be improved to
+(O(Vke, O(k6))-DP (Dwork et al., 2010). We re-
+fer to reference (Kairouz et al., 2015; Murtagh and
+Vadhan, 2016; Meiser and Mohammadi, 2018) for
+details.
+
+The third property is the privacy amplification
+via subsampling. Intuitively, every differentially
+private algorithm has a much lower privacy param-
+eter « when it is run on a secret sample than when
+it is run on a sample whose identities are known
+to the attacker. And there, a secret sample can be
+obtained by subsampling as it introduces additional
+randomness.
+
+Proposition 3. Let A be an (¢,5)-DP algorithm.
+Now we construct the algorithm B as follows: On
+input D = {x1,--- , 2}, first we construct a new
+sub-sampled dataset Dg where each x; € D, with
+probability g. Then we run algorithm A on the
+dataset Ds. Then B(D) = A(Ds) is (€,6)-DP,
+where € = In(1 + (e® — 1)q) and 6 = qo.
+
+Example: The subsampling property can be used
+for the private version of the stochastic optimiza-
+tion method. As in these methods, a common strat-
+egy is to use the subsampled gradient to estimate
+the whole gradient.
+
+It is notable that, besides subsampling, some
+
+
+other procedures could also amplify privacy, such
+as random check-in (Balle et al., 2020), mixing
+(Balle et al., 2019) and decentralization (Cyffers
+and Bellet, 2022). And for different subsampling
+methods, the privacy amplification guarantee is
+also different (Imola and Chaudhuri, 2021; Zhu
+and Wang, 2019; Balle et al., 2018).
+
+In the following, we will introduce some mech-
+anisms commonly used in NLP tasks to achieve
+DP.
+
+We first give the definition of a (numeric) query.
+The query is simply something we want to learn
+from the dataset. Formally, a query could be any
+function f applied to a dataset S and outputting
+areal valued vector, formally f : ¥% ++ R¢. For
+example, numeric queries might return the sum of
+the gradient of the loss on all samples, number of
+females in the database, or a textual summary of
+medical records of all persons in the database rep-
+resented as a dense vector. Given a dataset S,, a
+common paradigm for approximating f(S) differ-
+entially privately is via adding some randomized
+noise. Laplacian noise and Gaussian noise are the
+most commonly used ones, which correspond to
+the Laplacian and Gaussian mechanisms, respec-
+tively.
+
+Definition 3 (Laplacian Mechanism). Given a
+query f X + R4, the Laplacian Mech-
+anism is defined as: M7,(S,f,¢) = q(S) +
+(Yi, Yo,--- , Ya), where Y; is i.i.d. drawn from a
+Laplacian Distribution Lap(“2), where A;(f)
+is the ¢1-sensitivity of the function f, i.e, Ai(f) =
+supgro || f(S) — f(S")||1. For a parameter 4,
+the Laplacian distribution has the density function
+Lap(A)(x) = sy exp(—{). Laplacian Mechanism
+preserves ¢€-DP.
+
+Definition 4 (Gaussian Mechanism). Given a
+query f : X +> R%, the Gaussian mechanism
+is defined as Mpr(S, f,€,6) = q¢(S) + € where
+€E ~ N(O, 2A3(/) log(-25/8) 7), where Ao(f) is
+the /2-sensitivity of the function f, i.e, Ao(f) =
+supg~gr || f(S) — f(.S”)||2. Gaussian mechanism
+preserves (€, 6)-DP when 0 << 1.
+
+From the previous two mechanisms, we can see
+that to privately release f(S), it is sufficient to
+calculate the @;-norm or £9-norm sensitivity first
+and add random noise. Moreover, as Ao(f) <
+Ai(f), the Gaussian mechanism will have lower
+error than the Laplacian mechanism, while we relax
+the definition from ¢-DP to (e, 6)-DP.
+
+Instead of answering f (5) privately, we also al-
+ways meet the selection problem, i.e., we want to
+output the best candidate among several candidates
+based on some score of the dataset. The exponen-
+tial mechanism is the one that can output a nearly
+best candidate privately.
+
+Definition 5 (Exponential Mechanism). The Ex-
+ponential Mechanism allows differentially private
+computation over arbitrary domains and range R,
+parameterized by a score function u(S,7) which
+maps a pair of input data set S and candidate
+result r € FR to a real-valued score. With the
+score function u and privacy budget e, the mech-
+anism yields an output with exponential bias in
+favor of high-scoring outputs. Let M(S,u, R)
+denote the exponential mechanism, and A be
+the sensitivity of u in the range R, ie, A =
+max;er Maxp~ py |u(D,r) — u(D’,r)|. Then if
+M(S,u, R) selects and outputs an element r € R
+with probability proportional to exp( sul)
+serves €-DP.
+
+), it pre-
+
+In the original definition of DP, we assume that
+data are managed by a trusted centralized entity
+that is responsible for collecting them and for de-
+ciding which differentially private data analysis to
+perform and to release. A classical use case for
+this model is the one of census data. Compared
+with the above model (which is called the central
+model), there is another model, namely the local
+DP model, where each individual manages his/her
+proper data and discloses them to a server through
+some differentially private mechanisms. The server
+collects the (now private) data of each individual
+and combines them into a resulting data analysis. A
+classical use case for this model is the one aiming
+at collecting statistics from user devices like in the
+case of Google’s Chrome browser. Formally, it is
+defined as follows.
+
+Definition 6. For a data domain 1, a randomized
+algorithm A: ¥ +} R is called (¢,6)-local DP
+(LDP) if for any s,s’ € ¥ and T C R we have
+
+Pr[A(s) € T] < e€Pr[A(s’) € T] + 6.
+
+Compared with Definition 2, we can see that
+here the main difference is the inequality holds for
+all elements s,s’ € ¥ instead of all adjacent pairs
+of the dataset. In this case, each individual could
+ensure that their own disclosures are DP via the
+randomizer A. In some sense, the trust barrier is
+moved closer to the user. While this has the benefit
+
+
+of providing a stronger privacy guarantee, it also
+comes at a cost in terms of accuracy.
+
+It is notable that besides the central DP and local
+DP model, there are also other intermediate models
+such as shuffle model (Cheu et al., 2019) and multi-
+party setting (Pathak et al., 2010). However, as they
+are seldom studied in NLP, we will not cover these
+protocols in this survey.

@@ -1,0 +1,1335 @@
+arXiv:2510.11225v1 [cs.CL] 13 Oct 2025
+
+A Theorem-Proving-Based Evaluation of Neural Semantic Parsing
+
+Hayate Funakura!”~, Hyunsoo Kim’, Koji Mineshima?
+
+‘Kyoto University *Keio University *Kikagaku Inc.
+Correspondence: funakura.hayate.28p @st.kyoto-u.ac.jp
+
+Abstract
+
+Graph-matching metrics such as Smatch are
+the de facto standard for evaluating neural se-
+mantic parsers, yet they capture surface over-
+lap rather than logical equivalence. We re-
+assess evaluation by pairing graph-matching
+with automated theorem proving. We com-
+pare two approaches to building parsers: su-
+pervised fine-tuning (T5-Small/Base) and few-
+shot in-context learning (GPT-40/4.1/5), un-
+der normalized and unnormalized targets. We
+evaluate outputs using graph-matching, bidi-
+rectional entailment between source and tar-
+get formulas with a first-order logic theorem
+prover, and well-formedness. Across settings,
+we find that models performing well on graph-
+matching often fail to produce logically equiva-
+lent formulas. Normalization reduces inciden-
+tal target variability, improves well-formedness,
+and strengthens logical adequacy. Error analy-
+sis shows performance degrades with increas-
+ing formula complexity and with coordination,
+prepositional phrases, and passive voice; the
+dominant failures involve variable binding and
+indexing, and predicate naming. These find-
+ings highlight limits of graph-based metrics for
+reasoning-oriented applications and motivate
+logic-sensitive evaluation and training objec-
+tives together with simplified, normalized tar-
+get representations. All code and data for our
+experiments are publicly available.!
+
+1 Introduction
+
+Semantic parsing is the task of mapping natural lan-
+guage expressions into structured representations
+such as database queries or logical forms. These
+outputs have a wide range of applications, includ-
+ing document classification (Dong et al., 2015)
+and question answering (Yih et al., 2014). Neu-
+ral network-based approaches have become promi-
+nent in semantic parsing (Konstas et al., 2017; Bai
+et al., 2022), with Smatch (Cai and Knight, 2013)
+
+‘https ://github.com/hfunakura/text2sem
+
+widely used for evaluation. Smatch compares two
+Abstract Meaning Representations (AMRs) (Ba-
+narescu et al., 2013) by aligning their atomic propo-
+sitions and computing the F-score of the over-
+lap. We refer to Smatch and its variants as graph-
+matching-based evaluation.
+
+The aim of this paper is to reconsider evalua-
+tion methods for neural semantic parsing from the
+perspective of logical reasoning. One key use of
+the logical forms produced by semantic parsing is
+to support logically correct inference. For such
+inference, the semantic parser must generate for-
+mal representations that enable a symbolic solver
+(e.g., an automated theorem prover) to derive cor-
+rect outcomes such as entailment, contradiction,
+or consistency. Ideally, for a sentence S with a
+gold semantic representation SR,(S), the parser’s
+output SR,(S) should be logically equivalent to
+SR,(S). However, graph-matching-based evalu-
+ation focuses solely on surface overlap between
+graph components, and thus may fail to reflect
+whether the predicted and gold representations are
+truly equivalent in meaning.
+
+In this paper, we test the hypothesis that a model
+achieving high performance in graph-matching-
+based evaluation does not necessarily perform well
+in evaluation aimed at accurate natural language
+inference. We evaluate models that convert English
+sentences into first-order predicate logic represen-
+tations using both evaluation methods. We con-
+sider two model settings: supervised fine-tuning
+(SFT) of a Transformer-based pre-trained semantic
+parser, and in-context learning (ICL) with several
+pre-trained language models of different sizes, in-
+cluding the latest GPT-5, where a few parsing ex-
+amples are given before parsing unseen sentences.
+
+Our contributions are threefold:
+
+Limits of graph-based metrics Pairing graph-
+matching with theorem-prover entailment reveals
+a gap between surface overlap and logical equiv-
+
+
+alence: models with high graph-matching scores
+often fail to produce logically correct predictions.
+
+Benefit of target normalization Training on nor-
+malized formulas consistently improves perfor-
+mance by reducing incidental variability and en-
+hancing well-formedness and logical adequacy.
+
+Error patterns and next steps Performance de-
+clines with formula complexity and with coordina-
+tion, prepositional phrases, and passive voice. The
+most frequent errors involve variable binding and
+indexing and predicate naming, motivating stronger
+handling of linguistic phenomena and simpler tar-
+get representations.
+
+2 Background and Related Work
+
+2.1 Semantic Parsing
+
+The task of converting natural language expressions
+into formal semantic representations has been ex-
+tensively studied in the fields of symbolic logic and
+formal semantics (Blackburn and Bos, 2005; Lep-
+ore and Cumming, 2009). Advances in this area
+have been accelerated by the development of syn-
+tactically expressive grammar formalisms such as
+Combinatory Categorial Grammar (CCG) (Steed-
+man, 2000), the creation of linguistically rich re-
+sources like CCGbank (Hockenmaier and Steed-
+man, 2007), and the emergence of wide-coverage
+semantic parsers enabled by progress in syntactic
+parsing technologies (Bos et al., 2004).
+
+More recently, the development of semantically
+annotated corpora such as AMR (Banarescu et al.,
+2013) and Parallel Meaning Bank (PMB) (Abzian-
+idze et al., 2017) has accelerated research into neu-
+ral approaches to semantic parsing. In particular,
+sequence-to-sequence models have become widely
+adopted for learning mappings from natural lan-
+guage to logical forms. These models have been
+successfully applied to a variety of downstream
+tasks, including code generation (Ling et al., 2016),
+question answering (Dong and Lapata, 2016), and
+natural language generation (Konstas et al., 2017).
+
+Originally, semantic parsing was considered a
+promising approach for enabling and improving
+a wide range of downstream tasks requiring se-
+mantic understanding, including translation, sum-
+marization, question answering, and paraphrasing.
+Graph-matching-based evaluation methods, such
+as Smatch (Cai and Knight, 2013) and subsequent
+variants for AMR (Opitz et al., 2020; Opitz, 2023),
+as well as adaptations for Discourse Representa-
+
+tion Structure (DRS) (van Noord et al., 2018), were
+developed with this broad applicability in mind
+and provide flexible means to assess parsing perfor-
+mance across diverse use cases. However, with the
+rise of large pre-trained language models (Devlin
+et al., 2019; Brown et al., 2020), the role of formal
+semantic representations in these downstream tasks
+has lessened, and the relevance of semantic parsing
+itself has come under renewed scrutiny (van Noord
+et al., 2020).
+
+2.2 Logical Entailment
+
+One core task where formal semantic representa-
+tions play a role is recognizing logical entailment
+in natural language inference, typically formulated
+as determining whether a premise entails, contra-
+dicts, or is neutral with respect to a hypothesis.
+Traditional logical formalisms developed within
+symbolic logic (Blackburn and Bos, 2005) were
+often designed with the goal of enabling precise
+logical reasoning—such as entailment and con-
+sistency checking—by combining these represen-
+tations with Automated Theorem Proving (ATP)
+techniques (Fitting, 1996; Robinson and Voronkov,
+2001). An early attempt to directly apply this
+paradigm to natural language entailment recogni-
+tion was proposed by Bos and Markert (2005). Fur-
+ther work has extended this line of research by
+leveraging semantic parsing based on CCG in com-
+bination with theorem provers to handle a wide
+range of natural language inferences (Abzianidze,
+2015; Mineshima et al., 2015; Haruta et al., 2022).
+In contrast, the effectiveness of combining neural
+semantic parsing with automated theorem proving
+for natural language inference remains, to the best
+of our knowledge, an open question that has not
+yet been fully explored.
+
+One of the domains where precise logical rea-
+soning is essential is mathematical theorem prov-
+ing. The task of converting natural language proofs
+into formal representations that can be handled by
+automated theorem provers or interactive proof as-
+sistants such as Coq and Lean has been extensively
+studied under the name of autoformalization (Wu
+et al., 2022). Whether pre-trained language mod-
+els alone can support the kind of rigorous logical
+reasoning required for complex problem solving
+remains an open question. At present, there is
+ongoing exploration into hybrid approaches that
+integrate structured, logic-based semantic represen-
+tations, which guarantee precision and correctness,
+with statistical language models (Kautz, 2022).
+
+
+Table 1: Example sentences and their event-semantic representations. In the IDs, “p” indicates the premise and
+
+“h” indicates the hypothesis. In the semantic representations, variables of the form x1, £2, . .
+
+. are used for entities,
+
+while e1, €2,... are used for events. The hyphen “-” denotes logical (boolean) negation. “Complexity” counts
+the number of logical constants (negation, quantifier, and conjunction). “exists e1 x2 x3” is an abbeviation for
+“exists el. exists e2. exists e3”.
+ID sick_train_88_p Complexity
+(a) Sentence There is no biker jumping in the air. —
+(b) Raw -exists x5.(_biker(x5) & exists e6.(_jump(e6) & (subj (e6) 8
+= x5) & exists x7.(_air(x7) & _in(e6,x7))))
+(c) Prenex -exists el x2 x3.(biker(x2) & jump(el) & (subj(el) = x2) & 8
+air(x3) & in(el,x3))
+ID sick_train_55_p
+(a) Sentence Three boys are jumping in the leaves. —
+(b) Raw exists x4. (_boy(x4) & _three(x4) & exists e5.(_jump(e5) & 8
+(subj(e5) = x4) & exists x6.(_leaf(x6) & _in(e5,x6))))
+(c) Prenex exists e1 x2 x3. (boy(x2) & three(x2) & jump(el) & (subj(e1) 8
+
+= x2) & leaf(x3) & in(el,x3))
+
+2.3 Compositional Generalization
+
+Another domain where neural semantic parsing
+has been actively studied is compositional gener-
+alization, which examines whether a model can
+generalize to novel syntactic and semantic com-
+binations when mapping natural language expres-
+sions to logical forms. A widely used benchmark
+in this area is COGS (Kim and Linzen, 2020), fol-
+lowed by numerous extensions, most of which rely
+on exact matching of predicted and gold logical
+forms as the evaluation metric. However, exact
+matching treats logically equivalent expressions
+as different—for example, it fails to recognize the
+equivalence of conjunctive forms such as p A q
+and q A p, or of formulas that differ only in vari-
+able naming, such as 4x, (cat(x1) A run(x,)) and
+da7(cat(#7) A run(x7)).
+
+To address these shortcomings, successor bench-
+marks such as ReCOGS (Wu et al., 2023) and
+SLOG (Li et al., 2023) adopt graph-matching-
+based metrics similar to Smatch, which account
+for permutations of conjuncts and variable renam-
+ing. ReCOGS in particular generates multiple logi-
+cally equivalent variants of each target logical form,
+demonstrating that even minor surface differences
+(e.g., variable names or parentheses) can substan-
+tially affect evaluation. To our knowledge, how-
+ever, none of these studies have employed a the-
+orem prover to verify logical equivalence. A the-
+orem prover naturally subsumes permutations of
+conjuncts and variable renaming as part of logical
+equivalence, and moreover is capable of handling
+
+richer equivalences involving, for example, nega-
+tion and nested quantifiers.
+
+Building on this background, the present study
+examines the capabilities of current neural seman-
+tic parsing models through evaluation with auto-
+mated theorem proving. This line of inquiry is
+intended to lay the groundwork for developing
+models that achieve greater precision in natural
+language reasoning.
+
+3 Experimental Setup
+
+This section describes the experimental setups for
+both SFT and ICL conducted in this study.
+
+3.1 Dataset
+
+We build our dataset from SICK (Marelli et al.,
+2014), a benchmark for natural language inference.
+SICK consists of about 10,000 sentence pairs, each
+consisting of a premise (p) and a hypothesis (h), an-
+notated with graded semantic relatedness (ranging
+from 1 to 5) as well as an entailment label chosen
+from {entailment, contradiction, neutral}.
+It includes linguistic phenomena such as quantifica-
+tion and negation, making it suitable for evaluating
+logically complex semantic representations.
+
+We use its original train/test split for training
+and evaluation, strictly following the official divi-
+sion in all experiments. The training set contains
+4,500 sentence pairs (9,000 sentences in total), and
+the test set contains 4,927 sentence pairs (9,854
+sentences in total).
+
+To obtain semantic representations that faithfully
+reflect sentence meaning, we parse all SICK sen-
+
+
+tences using ccg2lambda (Mineshima et al., 2015;
+Martinez-Gémez et al., 2016). In this system, a
+CCG parser is first applied to produce a CCG
+derivation tree, which is then mapped into a log-
+ical form (semantic representation) via standard
+A-calculus—based semantic composition; in our ex-
+periments, we use depcecg (Yoshikawa et al., 2017)
+as the CCG parser. Given a premise p and a hy-
+pothesis h, the system outputs their semantic repre-
+sentations SR(p) and SR(h), and then employs a
+theorem prover, together with axioms derived from
+external knowledge bases such as WordNet (Fell-
+baum, 1998) to determine whether SR(p) entails
+SR(h), contradicts it, or neither. The output is thus
+one of three labels: entailment, contradiction,
+or neutral.
+
+For the target representation, we adopt event
+semantics (Parsons, 1990), a framework widely
+used in semantic parsing (e.g., in COGS (Kim and
+Linzen, 2020)), and employ the event-semantics
+templates for ccg2lambda developed by Martinez-
+Gémez et al. (2017). Table 1 illustrates example
+sentences from SICK together with their event-
+semantic representation, where (b) shows the raw
+representations produced by ccg2lambda.
+
+To obtain high-quality sentence-formula pairs,
+we filter SICK sentence pairs as follows. We
+retain only those with a gold SICK label in
+{entailment, contradiction} for which the
+theorem prover’s judgment over the ccg2lambda-
+derived representations matches the gold label.
+Pairs labeled neutral are excluded, since such
+outcomes may occasionally arise from pipeline er-
+rors (e.g., parsing failures or misaligned logical
+forms), making it difficult to guarantee correct se-
+mantic representations. From the retained pairs, we
+pair each sentence with its event-semantics formula
+to construct the training and evaluation instances.
+The resulting dataset comprises 2,392 training ex-
+amples and 2,580 test examples.
+
+We use two types of target representations to en-
+able comparison with simplified formulas. Table 1
+presents concrete examples of both representations,
+shown in (b) and (c), respectively.
+
+1. Raw ccg2lambda outputs: The unmodified
+output of ccg2lambda, represented as first-order
+predicate logic with event variables. In these for-
+mulas, quantifiers (particularly existential quanti-
+fiers) may appear in different positions depending
+on the sentence structure, and variable names are
+assigned arbitrarily.
+
+2. Prenex-normalized formulas (PNF): De-
+rived deterministically from the raw ccg2lambda
+outputs by (i) moving all quantifiers to the sentence
+prefix with systematic variable renaming (while
+keeping negations at the front of the sentence),
+(ii) normalizing predicate symbols (e.g., removing
+leading underscores introduced by ccg2lambda),
+and (iii) reassigning variable indices starting from 1.
+This normalization reduces incidental variation in
+quantifier placement and superficial symbol noise
+that could otherwise confound sequence models.
+
+We include both variants to assess the effect of
+target-side standardization via prenex normaliza-
+tion on model performance.
+
+3.2. Annotation
+
+We introduced additional categories to assess which
+natural language phenomena present challenges for
+neural semantic parsing. Specifically, using the
+output of the CCG parser, we annotated the SICK
+dataset with three syntactic categories:
+
+* Coordinating Conjunctions (CC): Sen-
+tences containing coordinating conjunctions
+such as “and” and “or’’, which require proper
+handling of coordination scope.
+
+Prepositional Phrases (PP): Sentences with
+prepositional phrases that introduce spatial,
+temporal, or relational information requiring
+compositional analysis.
+
+Passive Voice (PSS): Sentences exhibiting
+passive voice constructions where argument
+structure differs from canonical active voice.
+
+The annotation was conducted using automated
+extraction from CCG parse trees. We developed
+search scripts to identify these phenomena from
+syntactic categories and logical formulas patterns.
+
+Table 2 shows the distribution of these categories
+in our dataset, with CC being the most frequent
+(2,790 instances), followed by PP (2,458 instances)
+and PSS (1,519 instances). This annotation enables
+us to analyze parser performance across different
+linguistic phenomena and identify which categories
+are particularly challenging for neural approaches.
+
+3.3. Supervised Fine-tuning
+
+To construct the semantic parser via SFT, we
+adopted T5-Small and T5-Base (Raffel et al., 2020)
+as pretrained models. Training was conducted for
+50 epochs with a batch size of 16, a learning rate
+
+
+Table 2: Example sentences annotated by category. #Train indicates the number of occurrences in the SICK train
+data and #Test indicates the number of occurrences in the SICK test data.
+
+Category #Train #Test Example
+
+Conj 1846 2065 ‘There is no dog wrestling and hugging. (sick_train_13_h)
+
+PP 1500 1679 =A little girl is looking at a woman in costume. (sick_train_74_p)
+Passive 795 839 Children covered by leaves are playing with red shirts.
+
+(sick_train_61_p)
+
+Table 3: DRSs converted from the examples in Table 1:
+sick_train_88_p (left) and sick_train_55_p (right).
+
+e2 x1 x3 _ oD
+
+, oy (x
+biker (x1) three)
+jump (e2) .
+
+a ; _ jump (e2)
+sup] (e2) = x1 subj(e2) = x1
+air (x3) leaf (x3)
+in(e2, x3) in(e2, x3)
+
+of 1 x 10~°, weight decay of 0.01, and a warm-up
+of 500 steps. The maximum input and output se-
+quence lengths were set to 256 tokens each. For
+each model-—task combination, we trained and eval-
+uated with seeds 1-10.
+
+3.4 In-context Learning
+
+We conducted few-shot in-context semantic pars-
+ing with large language models. For this exper-
+iment, we selected GPT-40, GPT-4.1, and GPT-
+5, representing state-of-the-art models of different
+sizes that are widely used for reasoning-oriented
+tasks. The prompt comprised five text—-formula ex-
+emplars randomly sampled from the training set,
+together with basic conventions for the target for-
+malism (e.g., notation for existential quantification
+and negation, and predicate-naming conventions
+for compound expressions). The full prompt is
+provided in Appendix A.
+
+For all models, the temperature was set to 0.0.
+To account for variability, we ran each configura-
+tion with random seeds fixed at 1, 2, and 3. For
+GPT-5, we additionally set the API parameters
+reasoning.effort (a budget indicator for the rea-
+soning phase) and text. verbosity (the verbosity
+of the textual response) to minimal.
+
+For cost considerations related to API usage, we
+restricted ICL to prenex-normalized data and did
+not include raw ccg2lambda outputs, and we evalu-
+ated each model in a single run.
+
+3.5 Evaluation Metrics
+
+We compare the semantic parsing outputs of each
+method using two evaluation metrics: graph-
+matching and automated theorem proving.
+
+For the graph-matching evaluation, we use
+Counter (van Noord et al., 2018).7 Counter is
+a modification of Smatch for graph structures in
+which scope-taking phenomena such as negation
+and quantification matter. Because Counter sup-
+ports DRSs, we convert the parser’s predictions
+(i.e., FOL formulas in event semantics) into DRSs
+and use Counter to compute the F-score between
+the gold DRS and the predicted DRS. We refer to
+this F-score, together with its components preci-
+sion and recall, as Dmatch. The conversion from
+FOL to DRS was performed using the conversion
+script provided in ccg2lambda.° For example, the
+two formulas in Table | are converted into DRSs,
+as shown in Table 3. 4
+
+In addition, we evaluate via automated the-
+orem proving. We use Vampire (Kovacs and
+Voronkov, 2013), a state-of-the-art first-order the-
+orem prover.” To examine whether the parser’s
+prediction is logically equivalent to the gold ref-
+erence, we test whether bidirectional entailment
+holds between the gold formula and the prediction.
+
+Dmatch provides a similarity score based on
+clause overlap in DRSs, but it does not reveal the
+precise logical relation between two formulas (e.g.,
+equivalence, entailment, or contradiction). For ex-
+ample, consider the following pairs:
+
+gi = exists e.jump(e)
+p, =exists e.(jump(e) & high(e))
+
+g2 = exists e x.(eat(e) & (subj(e)=x))
+pz =exists e x.(eat(e) & (obj(e)=x))
+
+*https://github. com/RikVN/DRS_parsing
+
+https: //github. com/mynlp/ccg2lambda
+
+“The indices of the variables for entities and events are
+assigned according to the order of their occurrences in the
+Raw formula in Table 1.
+
+Shttps://github. com/vprover/vampire
+
+
+Table 4: SFT results (raw ccg2lambda outputs): mean + standard deviation (n=10)
+
+Model Exact Match Prover Acc Dmatch Precision Dmatch Recall Dmatch F1 Non-WFF Ratio
+
+T5-Small 0.101+0.003 0.189 + 0.005 0.611 40.011 0.504+0.010 0.544+0.010 0.240+0.012
+
+T5-Base 0.322+0.002 0.634+ 0.004 0.887 + 0.004 0.864 +0.004 0.87340.004 0.031 + 0.003
+Table 5: SFT results (prenex-normalized formulas): mean + standard deviation (n=10)
+
+Model Exact Match Prover Acc Dmatch Precision Dmatch Recall Dmatch F1 Non-WFF Ratio
+
+T5-Small 0.411+0.003 0.439 + 0.002 0.771 + 0.002 0.739 40.002 0.752+0.002 0.018 +0.002
+
+T5-Base 0.674+0.004 0.689 + 0.004 0.889 + 0.002 0.874 + 0.002 0.880+0.002 0.007+0.001
+
+Both (g1, p1) and (g2, p2) receive the same Dmatch
+score of 0.5, even though the first reflects one-
+way entailment (the prediction p; over-specifies
+the gold g;) while the second is a clear semantic
+role mismatch with no entailment. Similarly, the
+pair of logically unrelated formulas P(a) and Q(a),
+and the contradictory pair P(a) and -P(a), both
+receive a Dmatch score of 0 and are thus indis-
+tinguishable. Since such distinctions are essential
+for reasoning tasks, we complement graph-based
+evaluation with theorem proving, which explicitly
+identifies logical relations.
+
+4 Results
+
+We report results for SFT and few-shot ICL
+on our semantic parsing task, evaluated using
+three criteria: graph-matching (Dmatch), theorem-
+prover—based equivalence, and well-formedness.
+All metrics are reported to three decimal places
+(rounded half-up).
+
+4.1 Supervised Fine-tuning
+
+For SFT, we trained with random seeds 1-10
+on two target representations (raw formulas and
+prenex formulas) and evaluated on the test split.
+Tables 4 and 5 report the results.
+
+Across both representations, T5-Base shows
+higher values than T5-Small. The gaps in Prover
+Accuracy and Dmatch F1 are present in both set-
+tings and are larger on raw ccg2lambda outputs;
+the Non-WFF Ratio is lower for T5-Base in both
+settings, especially on raw.
+
+Within each model, prenex normalization is as-
+sociated with higher Prover Accuracy and Exact
+Match and a lower Non-WFF Ratio. This pattern
+indicates that suppressing incidental variability in
+the target-side quantificational structure is associ-
+ated with better parser performance.
+
+The results therefore point to concrete directions
+for improving semantic parsers: first, leverage natu-
+
+ral scaling with model size—performance increases
+consistently from T5-Small to T5-Base across
+both representations and metrics—indicating that
+greater capacity is a straightforward path to better
+end-to-end behavior; second, normalize the target
+representation via PNF to suppress incidental vari-
+ability, reduce the Non-WFF ratio, and improve
+alignment with theorem-proving-based evaluation.
+
+Looking across both representations and both
+models, higher Dmatch F1 does not translate into
+commensurately high Prover Accuracy. For raw
+ccg2lambda outputs, T5-Small attains Dmatch F1
+of 0.544, whereas Prover Accuracy is 0.189; even
+T5-Base shows 0.873 and 0.634, respectively. With
+prenex normalization the gap narrows but remains
+(0.752 and 0.439 for T5-Small; 0.880 and 0.689
+for T5-Base). This consistent disparity indicates
+that clause-level graph-matching captures struc-
+tural overlap rather than the logical equivalence,
+underscoring the need for evaluation that are sensi-
+tive to logical structure.
+
+4.2 In-context Learning
+
+AILICL results are obtained on prenex-normalized
+targets and averaged over three runs with random
+seeds 1, 2, and 3 (Table 6). GPT-5 achieves the
+best overall scores (Exact Match 0.318; Prover Ac-
+curacy 0.514; Dmatch F1 0.803). GPT-40 follows
+(0.328; 0.493; 0.816), and GPT-4.1 shows lower
+Dmatch F1 (0.733) and the highest Non-WFF Ra-
+tio (0.083). Both GPT-40 and GPT-5 maintain a
+very low Non-WFF Ratio (0.012 and 0.010), in-
+dicating that the prompt conventions yield mostly
+well-formed formulas.
+
+Relative to SFT on prenex targets (Table 5), even
+the strongest ICL setting (GPT-5) trails T5-Base in
+Prover Accuracy (0.514 compared with 0.689) and
+Exact Match (0.318 compared with 0.674), while
+matching well-formedness (Non-WFF Ratio 0.010
+compared with 0.007). Dmatch F1 is lower than T5-
+
+
+100%
+
+ee
+
+40%
+
+Score
+
+20%
+
+—e— Prover Accuracy
+—e— Dmatch F1
+0%
+T 2 3 4 5 6
+Formula Complexity (6 Bins)
+
+(a) T5-Base, seed=5
+
+100%
+
+dl (i
+
+60%
+
+Score
+
+o —
+20%
+—e®— Prover Accuracy
+
+—e— Dmatch F1
+0%
+
+=
+
+1 2 3 4
+Formula Complexity (6 Bins)
+
+(b) GPT-5, seed=1
+
+Figure |: Relationship between target-side formula complexity and model performance. (a) best SFT configuration
+(T5-Base, seed 5); (b) best ICL configuration (GPT-5, seed 1).
+
+Table 6: ICL results (prenex-normalized formulas): mean + standard deviation (n=3)
+
+Model Exact Match Prover Acc Dmatch Precision Dmatch Recall Dmatch F1 Non-WFF Ratio
+GPT-40 0.328+0.029 0.493 + 0.046 0.824 + 0.017 0.812+ 0.026 0.816+40.022 0.012+ 0.006
+GPT-4.1 0.278+0.046 0.474 + 0.034 0.734 + 0.027 0.737 £ 0.033 0.73340.030 0.083 + 0.025
+GPT-5 0.318 +0.037 0.514+ 0.009 0.806 + 0.013 0.803+0.010 0.803+0.011 0.010 + 0.002
+
+Base (0.803 compared with 0.880) but remains in
+a similar range; as noted in the SFT results, graph-
+matching scores tend to run higher than prover-
+based equivalence.
+
+5 Discussion and Future Perspectives
+
+In this section, we focus our analysis on the
+strongest configuration within SFI—T5-Base
+(seed 5, final checkpoint)—and, for ICL, we use
+GPT-5 with seed | as a representative setting. All
+results are restricted to prenex-normalized targets.
+We begin by examining how target-side formula
+complexity modulates performance, then analyze
+the impact of syntactic and semantic phenomena
+(coordinating conjunctions, prepositional phrases,
+passive voice), and finally investigate the sources of
+mispredictions through a category-wise breakdown
+centered on the overall best model, T5-Base.
+
+5.1 Impact of Formula Complexity
+
+We grouped test instances by the complexity of the
+target-side formula and computed Prover Accuracy
+and Dmatch for each bin. Formula complexity was
+measured by counting logical constants, specifi-
+cally negation, quantifiers, and conjunctions (see
+Table 1 for examples). Instances were sorted by
+complexity and split into six equal-sized groups.
+In our test set (n = 2,580), each group therefore
+contains 430 instances. Results in Figure 1 show
+
+a clear performance drop as complexity increases,
+with T5-Base consistently outperforming GPT-5
+across all bins. Notably, even GPT-5, despite its
+ability to handle very long outputs (up to 128k
+tokens), remains sensitive to structural complex-
+ity, suggesting that future work should focus on
+improving robustness to long and compositional
+formulas.
+
+5.2 Impact of Syntactic Features
+
+We conducted a stratified analysis by linguistic
+phenomena, comparing Prover Accuracy between
+the presence and absence of coordination, preposi-
+tional phrases, and passive voice. Figure 2 shows
+the results. Table 7 in Appendix B shows error
+examples of each category. The results show that
+coordination is a major source of difficulty in both
+settings: its presence is associated with a large re-
+duction in Prover Accuracy relative to its absence.
+Prepositional phrases also correlate with decreased
+accuracy, reflecting the burden of resolving rela-
+tional structure and attachment in a way that re-
+mains faithful to subsequent formal inference. By
+contrast, passive voice exhibits divergent behavior
+across models: one model appears less sensitive
+or even slightly advantaged by passive construc-
+tions, whereas the other shows decreased accuracy
+under passive voice. A plausible interpretation is
+that the prompt and large pretraining may induce
+
+
+100%
+mmm Present
+Absent
+
+80% 78.1%
+
+e476 70.3%
+
+60% 59.9%
+o
+49.7%
+
+40%
+
+Prover Accuracy
+
+20.2%
+- CO
+0%
+cc PP PSS
+
+Category
+
+(a) T5-Base, seed=5
+
+100%
+mmm Present
+Absent
+
+80%
+
+60% 56.8% 57.1%
+53.3%
+49.8%
+
+40%
+
+Prover Accuracy
+
+31.3%
+
+20%
+14.0%
+
+0%
+cc PP PSS
+Category
+
+(b) GPT-5, seed=1
+
+Figure 2: Prover accuracy stratified by the presence or absence of syntactic features. X-axis labels follow Section 3.2.
+(a) best SFT configuration (T5-Base, seed 5); (b) best ICL configuration (GPT-S, seed 1).
+
+2 Subformula presence L_] 56 (7.3%)
+
+Argument role order 42 (5.4%)
+Constant entity ij 15 (1.9%)
+
+Quantifier scope a 15 (1.9%)
+
+Misprediction Catego!
+
+Arity signature 9 (1.2%)
+
+Quantifier type | 2 (0.3%)
+Negation scope 1(0.1%)
+
+0 50 100 150 200 250 300 350 400
+Count
+
+Figure 3: Error type distribution of 771 prover-failed
+predictions by T5-Base.
+
+templates that better regularize argument-structure
+alternations, while fine-tuned parameters benefit
+more from canonical (active) realizations empha-
+sized during training.
+
+5.3. Breakdown of Mispredictions
+
+Among the predictions of T5-Base, the best over-
+all model, we selected 771 cases that were well-
+formed but failed the prover-based evaluation. For
+fine-grained error analysis, these cases were pre-
+sented individually to an LLM (GPT-40), which
+was instructed to assign a label corresponding to
+the most critical problem in each prediction. The
+set of labels was predefined by the authors, and
+the LLM selected one from this set. In total, we
+prepared 11 label types, including, for example,
+Predicate Symbols (predicate mismatches such as
+loud vs. loudly), Subformula Presence (missing
+subformulas), and Argument Role Order (incorrect
+variable order in subj and obj functions).
+
+The results are summarized in Figure 3. The
+two most frequent error types, quantifier-count mis-
+
+match and predicate-name error, together account
+for 81.8% of all mispredictions. The most frequent
+category, quantifier-count mismatch, accounts for
+48.9% overall. Table 8 in Appendix C shows two
+representative examples. These errors are not su-
+perficial notation issues; they reflect fundamental
+misinterpretations of the semantic structure of the
+source text. Addressing them requires strategies
+that tie natural language understanding more tightly
+to the intended semantic framework (here, event
+semantics) during prediction.
+
+5.4 Outlook Based on the Behaviors of SFT
+and ICL
+
+Based on the respective behaviors of SFT and ICL,
+a coherent picture emerges: parameter learning
+aligns outputs more tightly with theorem-prover
+criteria, whereas prompt-only conditioning of foun-
+dation models yields consistently well-formed for-
+mulas under prenex conventions yet comparatively
+weaker semantic alignment. This suggests a prac-
+tical division of labor—use ICL as a high—well-
+formedness candidate generator, paired with a com-
+ponent optimized for semantic adequacy (e.g., a
+fine-tuned parser or a prover-guided reranker/re-
+pair module). Such a hybrid pipeline can narrow
+the remaining gap without sacrificing the strengths
+of either approach.
+
+6 Conclusion
+
+We propose evaluation with an automated theorem
+prover as a precise test of whether a neural seman-
+tic parser faithfully captures a sentence’s semantic
+structure. Coupled with graph-matching, it reveals
+
+
+a persistent gap between surface overlap and logi-
+cal equivalence across supervised fine-tuning and
+in-context learning, with normalization improving
+well formedness and logical adequacy. Sentences
+with coordination, prepositional phrases, or passive
+voice are more error prone, and errors concentrate
+in variable binding and indexing and in predicate
+naming. Looking ahead, a hybrid strategy that
+pairs generation with logic-aware verification is a
+promising direction.
+
+7 Limitations
+
+Although we employ popular approaches such as
+SFT with T5 and ICL with OpenAI models, we
+have not, for example, fine-tuned billion-parameter
+variants or evaluated architectures with substan-
+tially different design principles; accordingly, the
+applicability of our conclusions is limited. Addi-
+tionally, we use OpenAI models via API access,
+which limits transparency into the models and may
+constrain long-term reproducibility.
+
+Our analysis is conducted on SICK, a natural lan-
+guage inference benchmark that is widely used for
+studying entailment relations involving composi-
+tional logical structures such as negation and quan-
+tification; we chose this dataset for precisely these
+properties, while noting that examining additional
+datasets and domains will help assess generality.
+
+Another limitation of this study is that we do not
+evaluate end-to-end natural language inference, one
+of the principal downstream tasks. Instead, we fo-
+cus on bidirectional entailment between predicted
+and gold logical forms, since this directly serves
+our objective of assessing the formulas themselves.
+
+Acknowledgements
+
+We would like to thank the anonymous reviewers
+for their helpful comments and suggestions. This
+work is partially supported by JST, CREST Grant
+Number JPMJCR2114.
+
+References
+
+Lasha Abzianidze. 2015. A tableau prover for natural
+logic and language. In Proceedings of the 2015 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 2492-2502, Lisbon, Portugal.
+
+Lasha Abzianidze, Johannes Bjerva, Kilian Evang, Hes-
+sel Haagsma, Rik van Noord, Pierre Ludmann, Duc-
+Duy Nguyen, and Johan Bos. 2017. The Parallel
+Meaning Bank: Towards a multilingual corpus of
+translations annotated with compositional meaning
+
+representations. In Proceedings of the 15th Confer-
+ence of the European Chapter of the Association for
+Computational Linguistics: Volume 2, Short Papers,
+pages 242-247.
+
+Xuefeng Bai, Yulong Chen, and Yue Zhang. 2022.
+Graph pre-training for AMR parsing and generation.
+arXiv preprint arXiv:2203.07836.
+
+Laura Banarescu, Claire Bonial, Shu Cai, Madalina
+Georgescu, Kira Griffitt, Ulf Hermjakob, Kevin
+Knight, Philipp Koehn, Martha Palmer, and Nathan
+Schneider. 2013. Abstract Meaning Representation
+for sembanking. In Proceedings of the 7th Linguis-
+tic Annotation Workshop and Interoperability with
+Discourse, pages 178-186.
+
+Patrick Blackburn and Johan Bos. 2005. Representation
+and Inference for Natural Language: A First Course
+in Computational Semantics. CSLI.
+
+Johan Bos, Stephen Clark, Mark Steedman, James R
+Curran, and Julia Hockenmaier. 2004. Wide-
+coverage semantic representations from a CCG
+parser. In Proceedings of the 20th international con-
+ference on Computational Linguistics, pages 1240-
+1246.
+
+Johan Bos and Katja Markert. 2005. Recognising tex-
+tual entailment with logical inference. In Proceed-
+ings of Human Language Technology Conference
+and Conference on Empirical Methods in Natural
+Language Processing, pages 628-635.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+Winter, and 12 others. 2020. Language models are
+few-shot learners. In Advances in Neural Information
+Processing Systems, volume 33, pages 1877-1901.
+
+Shu Cai and Kevin Knight. 2013. Smatch: an evaluation
+metric for semantic feature structures. In Proceed-
+ings of the 51st Annual Meeting of the Association for
+Computational Linguistics (Volume 2: Short Papers),
+pages 748-752.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume I (Long and Short Papers), pages
+4171-4186, Minneapolis, Minnesota. Association for
+Computational Linguistics.
+
+Li Dong and Mirella Lapata. 2016. Language to logical
+form with neural attention. In Proceedings of the
+54th Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers), pages
+33-43.
+
+
+Li Dong, Furu Wei, Shujie Liu, Ming Zhou, and Ke Xu.
+2015. A statistical parsing framework for sentiment
+classification. Computational Linguistics, 41(2):293-
+336.
+
+Christiane Fellbaum. 1998. WordNet: An electronic
+lexical database. MIT press.
+
+Melvin Fitting. 1996. First-Order Logic and Automated
+Theorem Proving. Springer.
+
+Izumi Haruta, Koji Mineshima, and Daisuke Bekki.
+2022. Implementing natural language inference
+for comparatives. Journal of Language Modelling,
+10(1):139-191.
+
+Julia Hockenmaier and Mark Steedman. 2007. CCG-
+bank: a corpus of CCG derivations and dependency
+structures extracted from the Penn Treebank. Com-
+putational Linguistics, 33(3):355-396.
+
+Henry A Kautz. 2022. The third AI summer: AAAT
+Robert S. Engelmore Memorial Lecture. AJ Maga-
+zine, 43(1).
+
+Najoung Kim and Tal Linzen. 2020. COGS: A compo-
+sitional generalization challenge based on semantic
+interpretation. In Proceedings of the 2020 Confer-
+ence on Empirical Methods in Natural Language
+Processing (EMNLP), pages 9087-9105, Online. As-
+sociation for Computational Linguistics.
+
+Ioannis Konstas, Srinivasan Iyer, Mark Yatskar, Yejin
+Choi, and Luke Zettlemoyer. 2017. Neural AMR:
+Sequence-to-sequence models for parsing and gener-
+ation. In Proceedings of the 55th Annual Meeting of
+the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 146-157.
+
+Laura Kovacs and Andrei Voronkov. 2013. First-order
+theorem proving and vampire. In International Con-
+ference on Computer Aided Verification, pages 1-35.
+Springer.
+
+Ernest Lepore and Sam Cumming. 2009. Meaning and
+Argument: An Introduction to Logic Through Lan-
+guage. Wiley-Blackwell.
+
+Bingzhi Li, Lucia Donatelli, Alexander Koller, Tal
+Linzen, Yuekun Yao, and Najoung Kim. 2023.
+SLOG: A structural generalization benchmark for
+semantic parsing. In Proceedings of the 2023 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 3213-3232, Singapore. Associa-
+tion for Computational Linguistics.
+
+Wang Ling, Phil Blunsom, Edward Grefenstette,
+Karl Moritz Hermann, Tomas Kocisky, Fumin Wang,
+and Andrew Senior. 2016. Latent predictor networks
+for code generation. In Proceedings of the 54th An-
+nual Meeting of the Association for Computational
+Linguistics (Volume I: Long Papers), pages 599-609.
+
+Marco Marelli, Stefano Menini, Marco Baroni, Luisa
+Bentivogli, Raffaella Bernardi, and Roberto Zampar-
+elli. 2014. A sick cure for the evaluation of composi-
+tional distributional semantic models. In Proceedings
+
+of the Ninth International Conference on Language
+Resources and Evaluation (LREC’14), pages 216-
+223.
+
+Pascual Martinez-Gémez, Koji Mineshima, Yusuke
+Miyao, and Daisuke Bekki. 2016. ccg2lambda: A
+compositional semantics system. In Proceedings of
+ACL-2016 System Demonstrations, pages 85-90.
+
+Pascual Martinez-Gémez, Koji Mineshima, Yusuke
+Miyao, and Daisuke Bekki. 2017. On-demand in-
+jection of lexical knowledge for recognising textual
+entailment. In Proceedings of the 15th Conference of
+the European Chapter of the Association for Compu-
+tational Linguistics: Volume 1, Long Papers, pages
+710-720, Valencia, Spain. Association for Computa-
+tional Linguistics.
+
+Koji Mineshima, Pascual Martinez-Gémez, Yusuke
+Miyao, and Daisuke Bekki. 2015. Higher-order logi-
+cal inference with compositional semantics. In Pro-
+ceedings of the 2015 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 2055—
+2061.
+
+Juri Opitz. 2023. SMATCH++: Standardized and ex-
+tended evaluation of semantic graphs. In Findings
+of the Association for Computational Linguistics:
+EACL 2023, pages 1595-1607, Dubrovnik, Croatia.
+Association for Computational Linguistics.
+
+Juri Opitz, Letitia Parcalabescu, and Anette Frank. 2020.
+AMR similarity metrics from principles. Transac-
+tions of the Association for Computational Linguis-
+tics, 8:522-538.
+
+Terence Parsons. 1990. Events in the Semantics of En-
+glish. MIT Press, Cambridge, MA.
+
+Colin Raffel, Noam Shazeer, Adam Roberts, Kather-
+ine Lee, Sharan Narang, Michael Matena, Yanqi
+Zhou, Wei Li, and Peter J. Liu. 2020. Exploring the
+limits of transfer learning with a unified text-to-text
+transformer. Journal of Machine Learning Research,
+21(140): 1-67.
+
+Alan Robinson and Andrei Voronkov. 2001. Handbook
+of Automated Reasoning, volume 1. Elsevier.
+
+Mark J. Steedman. 2000. The Syntactic Process. MIT
+Press, Cambridge.
+
+Rik van Noord, Lasha Abzianidze, Hessel Haagsma,
+and Johan Bos. 2018. Evaluating scoped meaning
+representations. In Proceedings of the Eleventh In-
+ternational Conference on Language Resources and
+Evaluation (LREC 2018). European Language Re-
+sources Association (ELRA).
+
+Rik van Noord, Antonio Toral, and Johan Bos. 2020.
+Character-level representations improve DRS-based
+semantic parsing even in the age of BERT. In
+Proceedings of the 2020 Conference on Empirical
+Methods in Natural Language Processing (EMNLP),
+pages 4587-4603.
+
+
+Yuhuai Wu, Albert Qiaochu Jiang, Wenda Li, Markus
+Rabe, Charles Staats, Mateja Jamnik, and Christian
+Szegedy. 2022. Autoformalization with large lan-
+guage models. Advances in Neural Information Pro-
+cessing Systems, 35:32353-32368.
+
+Zhengxuan Wu, Christopher D. Manning, and Christo-
+pher Potts. 2023. ReCOGS: How incidental details
+of a logical form overshadow an evaluation of seman-
+tic interpretation. Transactions of the Association for
+Computational Linguistics, 11:1719-1733.
+
+Wen-tau Yih, Xiaodong He, and Christopher Meek.
+2014. Semantic parsing for single-relation question
+answering. In Proceedings of the 52nd Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume 2: Short Papers), pages 643-648.
+
+Masashi Yoshikawa, Hiroshi Noji, and Yuji Matsumoto.
+2017. A* CCG parsing with a supertag and depen-
+dency factored model. In Proceedings of the 55th
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 277-287,
+Vancouver, Canada. Association for Computational
+Linguistics.
+
+A Prompt Template for In-context
+Learning
+
+Below is the exact prompt template used for se-
+mantic parsing with ICL (described in Section 3.4).
+Placeholders are enclosed in braces.
+
+System message:
+
+You are a precise semantic parser that maps
+natural language to a logical formula.
+Respond with only the formula, no
+explanations.
+
+User message:
+Examples:
+
+text: <exemplar_1_text>
+formula: <exemplar_1_formula>
+
+text: <exemplar_2_text>
+formula: <exemplar_2_formula>
+
+text: <exemplar_3_text>
+formula: <exemplar_3_formula>
+
+text: <exemplar_4_text>
+formula: <exemplar_4_formula>
+
+text: <exemplar_5_text>
+formula: <exemplar_5_formula>
+
+Guidelines for this task:
+Output only the logical formula, no explanations.
+
+Use plain predicate and role names (no leading
+underscores) exactly as in the examples:
+
+dog(x1), run(el), in(e1,x3), (subj(el) = x1), ¢
+obj(el1) = x2).
+
+Quantification: exists e x.(...}). Conjunction: &.
+Equality: =.
+
+Negation: use the hyphen '-'.
+
+Multiword predicates are single tokens joined
+with underscores: in_front_of(e,x).
+
+Variables: entities x1,x2,...; events el,e2,....
+Keep parentheses balanced and whitespace
+minimal.
+
+Now parse the following text to its logical
+formula.
+
+text: {<SOURCE_TEXT>}
+formula:
+
+B_ Error Examples by Syntactic Features
+
+Table 7 shows error examples from the T5-Base
+model for each syntactic feature.
+
+C Examples of Quantifier Count Errors
+
+Table 8 presents examples of Quantifier Count er-
+rors.
+
+In sick_test_230_h, two distinct event vari-
+ables should be bound, but only one is introduced;
+the playing and waiting events are collapsed into a
+single event, and the variable x3 is bound without
+appearing in the body.
+
+In  sick_test_2872_p, the __ predicate
+mechanical should take the same variable
+as bul 1, but it incorrectly takes a different variable,
+leading to a mismatch in argument linkage.
+
+
+Table 7: Examples of typical errors in neural semantic parsing categorized by syntactic features.
+
+Error Type
+
+Example (Gold vs. Predicted)
+
+Coordinating Conjunctions (CC)
+
+Sentence: A man [con; and] a woman are sitting comfortably on
+the bench. (sick_test_706_p)
+
+Gold: exists el e2 x3 x4 x5 x6.(man(x3) & sit(el)
+& (subj(el) = x3) & comfortably(el) & bench(x4) &
+on(el,x4) & woman(x5) & sit(e2) & (subj(e2) = x5) &
+comfortably(e2) & bench(x6) & on(e2,x6))
+
+Predicted: exists e1 e2 x3 x4 x5 x6.(man(x3) & sit(el)
+& (subj(el) = x3) & comfortably(el) & bench(x4) &
+on(el,x4) & woman(x5) & sit(e2) & (subj(e2) = x5) &
+comfortably(e2))
+
+Prepositional Phrases (PP)
+
+Sentence: There is no dog excitedly playing with water [pp in the
+grass.]. (Sick_test_782_h)
+
+Gold: -exists e1 x2 x3 x4.(dog(x2) & play(el) &
+(subj(el1) = x2) & water(x3) & with(el,x3) & grass(x4)
+& in(el,x4) & excitedly(el))
+
+Predicted: -exists e1 x2 x3 x4.(dog(x2) & play(el) &
+(subj(e1) = x2) & water(x3) & with(el,x3) & grass(x4)
+& in(el1,x4))
+
+Passive Voice (PSS)
+
+ID
+
+Sentence: A rock is being [pss climbed] by a person with a rope,
+which is pink. (sick_test_642_h)
+
+Gold: exists el e2 x3 x4 x5.(rock(x3) & climb(e1) &
+(obj(e1) = x3) & person(x4) & rope(x5) & pink(x5) &
+with(e2,x5) & (subj(e2) = x4) & (subj(el) = x4))
+Predicted: exists e1 x2 x3 x4.(rock(x2) & climb(el) &
+(obj(e1) = x2) & person(x3) & rope(x4) & pink (x4) &
+with(el1,x4))
+
+Table 8: Examples of Quantifier Count errors in predictions.
+
+Content
+
+sick_test_230_h
+
+Sentence: There are no children playing and waiting.
+Gold: -exists el e2 x3.(child(x3) & play(el) & (subj(el) = x3) &
+
+wait(e2) & (subj(e2) = x3))
+
+Predicted: -exists e1 x2 x3.(child(x2) & play(el) & (subj(el) =
+x2) & wait(el))
+
+sick_test_2872_p
+
+Sentence: A man is riding a mechanical bull.
+
+Gold: exists e1 x2 x3.(man(x2) & bull(x3) & mechanical(x3) &
+ride(el) & (subj(el) = x2) & (obj(el) = x3))
+
+Predicted: exists e1 x2 x3 x4. (man(x2) & bull(x3) & mechanical (x4)
+& ride(el) & (subj(el) = x2) & (obj(el) = x3))

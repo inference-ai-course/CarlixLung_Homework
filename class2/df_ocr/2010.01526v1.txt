@@ -1,0 +1,1059 @@
+arXiv:2010.01526v1 [cs.LG] 4 Oct 2020
+
+NLP Service APIs and Models for Efficient Registration of New Clients
+
+Sahil Shah’, Vihari Piratla', Soumen Chakrabarti!, Sunita Sarawagi!
+‘Department of Computer Science, Indian Institute of Technology, Bombay, India
+sahilshah00199@gmail.com, {vihari ,soumen, sunita}@cse -litb.ac.in
+
+Abstract
+
+State-of-the-art NLP inference uses enormous
+neural architectures and models trained for
+GPU-months, well beyond the reach of most
+consumers of NLP. This has led to one-size-
+fits-all public API-based NLP service models
+by major AI companies, serving large numbers
+of clients. Neither (hardware deficient) clients
+nor (heavily subscribed) servers can afford tra-
+ditional fine tuning. Many clients own little or
+no labeled data. We initiate a study of adap-
+tation of centralized NLP services to clients,
+and present one practical and lightweight ap-
+proach. Each client uses an unsupervised,
+corpus-based sketch to register to the service.
+The server uses an auxiliary network to map
+the sketch to an abstract vector representation,
+which then informs the main labeling network.
+When a new client registers with its sketch, it
+gets immediate accuracy benefits. We demon-
+strate the success of the proposed architecture
+using sentiment labeling, NER, and predictive
+language modeling.
+
+1 Introduction
+
+State-of-the-art NLP uses large neural networks
+with billions of parameters, enormous training data,
+and intensive optimization over weeks of GPU-
+time, causing more carbon emission than a car over
+its lifetime (Strubell et al., 2019). Such training
+prowess is (mercifully) out of reach for most users
+of NLP methods. Recognizing this, large AI com-
+panies have launched NLP cloud services! and also
+provided trained models for download and fine tun-
+ing. But many clients have too little data or hard-
+ware for fine tuning massive networks. Neither can
+the service be expected to fine-tune for each client.
+
+Distributional mismatch between the giant
+general-purpose corpus used to train the central ser-
+vice and the corpus from which a client’s instances
+
+‘Google NLP, Microsoft Azure, IBM Watson
+
+arise leads to lower accuracy. A common source of
+trouble is mismatch of word salience (Paik, 2013)
+between client and server corpora (Ruder, 2019).
+In this respect, our setting also presents a new op-
+portunity. Clients are numerous and form natural
+clusters, e.g., healthcare, sports, politics. We want
+the service to exploit commonalities in existing
+client clusters, without explicitly supervising this
+space, and provide some level of generalization to
+new clients without re-training or fine-tuning.
+
+In response to the above challenges and con-
+straints, we initiate an investigation of practical
+protocols for lightweight client adaptation of NLP
+services. We propose a system, KYC (“Know Your
+Client’), in which each client registers with the
+service using a simple sketch derived from its (un-
+labeled) corpus. The service network takes the
+sketch as additional input with each instance later
+submitted by the client. The service provides accu-
+racy benefits to new clients immediately.
+
+What form can a client sketch take? How should
+the service network incorporate it? While this will
+depend on the task, we initiate a study of these twin
+problems focused on predictive language modeling,
+sentiment labeling, and named entity recognition
+(NER). We show that a simple late-stage interven-
+tion in the server network gives visible accuracy
+benefits, and provide diagnostic analyses and in-
+sights. Our code and data can be found here’.
+
+Contributions In summary, we
+
+* introduce the on-the-fly client adaptation prob-
+lem motivated by networked NLP API services;
+
+* present KYC, that learns to compute client-
+specific biases from unlabeled client sketches;
+
+¢ show improved accuracy for predictive language
+modeling, NER and sentiment labeling;
+
+¢ diagnose why KYC’s simple client-specific la-
+bel biases succeed, in terms of relations between
+
+*nttps://github.com/sahil00199/KYC
+
+
+word salience, instance length and label distribu-
+tions at diverse clients.
+
+Related work Our method addresses the mis-
+match between a client’s data distribution and the
+server model. The extensive domain adaptation lit-
+erature (DaumélIII, 2007; Blitzer et al., 2006; Ben-
+David et al., 2006) is driven by the same goal but
+most of these update model parameters using la-
+beled or unlabeled data from the target domain
+(client). Unsupervised Domain Adaptation summa-
+rized in (Ramponi and Plank, 2020) relaxes the re-
+quirement of labelled client data, but still demands
+target-specific fine-tuning which inhibits scalabil-
+ity. Some recent approaches attempt to make the
+adaptation light-weight (Lin and Lu, 2018; Li et al.,
+2020; Jia et al., 2019; Cai and Wan, 2019; Liu
+et al., 2020) while others propose to use entity de-
+scription (Bapna et al., 2017; Shah et al., 2019)
+for zero-shot adaptation. Domain generalization
+is another relevant technique (Chen and Cardie,
+2018; Guo et al., 2018; Li et al., 2018a; Wang et al.,
+2019; Shankar et al., 2018; Carlucci et al., 2019;
+Dou et al., 2019; Piratla et al., 2020) where mul-
+tiple domains during training are used to train a
+model that can generalize to new domains. Of
+these, the method that seems most relevant to our
+setting is the mixture of experts network of (Guo
+et al., 2018), with which we present empirical com-
+parison. Another option is to transform the client
+data style so as to match the data distribution used
+to train the server model. Existing style transfer
+techniques (Yang et al., 2018; Shen et al., 2017;
+Prabhumoye et al., 2018; Fu et al., 2018; Lample
+et al., 2019; Li et al., 2018b; Gong et al., 2019)
+require access to server data distribution.
+
+2 Proposed service protocol
+
+We formalize the constraints on the server and
+client in the API setting. (1) The server is expected
+to scale to a large number of clients making it im-
+practical to adapt to individual clients. (2) After
+registration, the server is expected to provide la-
+beling immediately and response latency per in-
+stance must be kept low implying that the server’s
+inference network cannot be too compute-inten-
+sive. (3) Finally, the client cannot perform complex
+pre-processing of every instance before sending to
+the server, and does not have any labelled data.
+
+Server network and model These constraints
+lead us to design a server model that learns to
+
+compute client-specific model parameters from the
+client sketch, and requires no client-specific fine-
+tuning or parameter learning. The original server
+network is written as y = Yo(Mg(a)) where a is
+the input instance, and Yo is a softmax layer to get
+the predicted label y. Mg is a representation learn-
+ing layer that may take diverse forms depending on
+the task; of late, BERT (Devlin et al., 2018) is used
+to design Mg for many tasks.
+
+We augment the server network to accept, with
+each input «x, a client-specific
+sketch S, as shown in Figure 1.
+We discuss possible forms of S;, t
+in the next subsection. (The dot- Yo
+
+ted arrow represents a genera- Pr
+g
+
+tive influence of S, on x.) The
+
+Y — loss
+
+server implements an auxiliary 4
+network g = G5(S.). Here g Mo Ge
+can be regarded as a neural di- | i
+gest of the client sketch. Mod- BD doves
+
+ule B combines Mo(ax) and g;
+concatenation was found ade-
+quate on the tasks we evaluated
+but we also discuss other options in Section 3.
+When the @ module is concatenation we are com-
+puting a client-specific per-label bias, and even that
+provides significant gains, as we show in Section 3.
+
+Figure 1: KYC
+overview.
+
+Client sketch The design space of client sketch
+S-. is infinite. We initiate a study of designing S,
+from the perspective of term weighting and salience
+in Information Retrieval (Paik, 2013). S,. needs to
+be computed once by each client, and thereafter
+reused with every input instance a. Ideally, S, and
+Gg should be locality preserving, in the sense that
+clients with similar corpora and tasks should lead
+to similar gs. Suppose the set of clients already
+registered is C’.
+
+A simple client sketch is just a vector of counts
+of all words in the client corpus. Suppose word w
+OCCUFS Nc, times in a client c, with ew New = Ne.
+Before input to G4, the server normalizes these
+counts using counts of other clients as follows:
+From all of C, the server will estimate a back-
+ground unigram rate of word. Let the estimated
+rate for word w be p,,, which is calculated as:
+
+Pw = Queec New) [(Xw ce New) . (1)
+The input into Gg will encode, for each word w,
+how far the occurrence rate of w for client c devi-
+ates from the global estimate. Assuming the multi-
+nomial word event distribution, the marginal prob-
+ability of having w occur Ncw times at client c is
+
+
+OOD ID OOD ID
+OOD Clients Base MoE KYC| Base MoE KYC OOD Clients Base MoE KYC|Base MoE KYC
+BC/CCTV+Phoenix|63.8 66.9 71.8/86.0 83.8 86.7 Electronics+Games |86.9 87.4 87.7|88.6 88.7 89.0
+BN/PRI+BN/VOA |88.7 87.9 90.7/84.5 83.0 86.0 Industrial+Tools 87.6 88.3 87.7|88.4 88.8 88.9
+NW/WSJ+Xinhua |73.9 78.9 80.9)/80.8 77.2 82.5 Books+Kindle Store|83.4 84.6 84.1|88.2 88.8 88.7
+BC/CNN+TC/CH_ |78.3 75.2 78.7|85.6 82.7 87.4 CDs+Digital Music |82.4 83.0 83.2|89.0 88.9 88.9
+WB/Eng+WB/a2e |76.2 69.9 78.4/86.4 82.6 87.3 Arts+Automotive |90.2 90.6 90.4|88.4 88.6 88.6
+Average 76.2 75.8 80.1/84.7 81.9 86.0 Average 86.1 86.8 86.6/88.5 88.8 88.9
+
+Table 1: Test F1 on Ontonotes NER. OOD numbers are
+on the two listed domains whereas ID numbers are on
+test data of clients seen during training.
+
+proportional to pu?" (1 — py)Ne-"e-). We finally
+pass a vector containing the normalized negative
+log probabilities as input to the model:
+
+Se & (—Rew log Dw
+— (Ne — New) log(1 — pw) : vw). (2)
+We call this the term-saliency sketch. We discuss
+other sketches like TF-IDF and corpus-level statis-
+tics like average instance length in Sec. 3.
+
+3 Experiments
+
+We evaluate KYC on three NLP tasks as services:
+NER, sentiment classification, and auto-completion
+based on predictive language modeling. We com-
+pare KYC against the baseline model (without the
+G'g network in Figure 1) and the mixture of experts
+(MoE) model (Guo et al., 2018) (see Appendix B).
+For all three models, the Mg network is identical
+in structure. In KYC, G4 has two linear layers
+with ReLU giving a 128-dim vector g, with slight
+exceptions (see Appendix A). We choose datasets
+that are partitioned naturally across domains, used
+to simulate clients. We evaluate in two settings: in-
+distribution (ID) on test instances from clients seen
+during training, and out-of-distribution (OOD) on
+instances from unseen clients. For this, we perform
+a leave-k-client-out evaluation where given a set
+D of clients, we remove k clients as OOD test and
+use remaining D — k as the training client set C.
+
+Named Entity Recognition (NER) We use
+Ontonotes (Pradhan et al., 2007) which has 18 en-
+tity classes from 31 sources which forms our set D
+of clients. We perform leave-2-out test five times
+with 29 training clients as C’. We train a cased
+BERT-based NER model (Devlin et al., 2018) and
+report F-scores. Table 1 shows that KYC provides
+substantial gains for OOD clients. For the first two
+OOD clients (BC/CCTYV,Phoenix), the baseline Fl
+score jumps from 63.8 to 71.8. MoE performs
+worse than baseline. We conjecture this is because
+
+Table 2: Test Accuracy on Amazon Sentiment Data.
+
+separate softmax parameters over the large NER
+label space is not efficiently learnable.
+
+Sentiment Classification We use the popular
+Amazon dataset (Ni et al., 2019) with each product
+genre simulating a client. We retain genres with
+more than 1000 positive and negative reviews each
+and randomly sample 1000 positive and negative
+reviews from these 22 genres. We perform leave-
+2-out evaluation five times and Table 2 shows the
+five OOD genre pairs. We use an uncased BERT
+model for classifcation (Sun et al., 2019).
+
+Table 2 shows that average OOD client accuracy
+increases from 86.1 to 86.8 with KYC.
+Auto-complete Task We model this task as a for-
+ward language model and measure perplexity. We
+used the 20 NewsGroup dataset and treat each of
+the twenty topics as a client. Thus D is of size
+20. We use the state-of-art Mogrifier LSTM (Melis
+et al., 2020). We perform leave-1-topic-out evalua-
+tion six times and OOD topics are shown in Table 3.
+For MoE, the client-specific parameter is only the
+bias and not the full softmax parameters which
+would blow up the number of trainable parameters.
+Also it did not perform well. Table 3 shows that
+
+OOD OOD ID
+
+Clients |Base MoE KYC|Base MoE KYC
+sci.space | 29.6 30.9 29.0) 28.8 30.7 28.1
+comp.hw] 26.5 28.6 26.4] 28.1 28.7 27.6
+sci.crypt | 29.7 29.8 29.6) 27.8 28.1 27.7
+atheism | 28.3 28.1 28.1) 27.9 28.2 28.0
+autos 28.0 28.4 27.9) 27.7 28.2 27.7
+mideast | 27.4 26.7 27.3) 28.4 27.9 27.7
+Average | 28.2 28.7 27.9] 28.0 28.8 27.7
+
+Table 3: Perplexity comparison between the baseline
+and KYC on 20-NewsGroup dataset.
+
+KYC performs consistently better than the base-
+line with average perplexity drop from 28.2 to 27.9.
+This drop is particularly significant because the
+Mogrifier LSTM is a strong baseline to start with.
+MoE is worse than baseline.
+
+
+@™_ Ground Truth
+@@™ Baseline
+Mmm KYC
+
+N w ES
+
+Percentage of words
+
+ran
+
+> x YH w@SEARBZOEEEODLSE
+FY ES CY § ae
+EF ESEPFELEESESSEES
+& ve iS LSS ee
+Ss e BS LS
+Ni =
+
+Figure 2: Proportion of true and predicted entity labels
+on OOD client NW/Xinhua. Similar trends observed
+on other OOD domains (Figure 4 of Appendix).
+
+w
+&
+
+w
+N
+
+- :
+
+x
+
+x — Ground Truth
+48 ° e Baseline
+L . . x KYC
+
+Se ee ee e
+
+a
+
+Percentage positive predictions
+
+°
+40 50 60 70 80 90 100 110 120
+Average Number of Words per Sentence
+
+Figure 3: Fraction Positive Predicted versus average
+review length by baseline and KYC. Each dot/cross is
+a domain and the dotted lines indicate the best fit lines.
+
+Statistical Significance We verify the statistical
+significance of the gains obtained for the Sentiment
+Analysis and Auto-complete tasks; the gains in
+the case of NER are much larger than statistical
+variation. Shown in Tables 4 and 5 are the sam-
+ple estimate and standard deviation for three runs
+along with the p value corresponding to the null
+hypothesis of significance testing. In both cases,
+we see that the gains of KYC over the baseline are
+Statistically significant.
+
+Diagnostics We provide insights on why KYC’s
+simple method of learning per-client label biases
+from client sketches is so effective. One expla-
+nation is that the baseline had large discrepancy
+between the true and predicted class proportions
+for several OOD clients. KYC corrects this dis-
+
+OOD Clients Base KYC p-value
+Electronics+Games |86.9(0.39) 87.7(0.33) 0.05
+Industrial+Tools 87.6(0.19) 87.7(0.09) 0.14
+Books+Kindle Store|83.4(0.03) 84.1(0.14) 0.01
+CDs+Digital Music |82.4(0.24) 83.2(0.08) 0.02
+Arts+Automotive |90.2(0.21) 90.4(0.31) 0.20
+Average 86.1(0.16) 86.6(0.13) 0.02
+
+Table 4: Statistical significance of results on the OOD
+clients by KYC for Sentiment Classification. For every
+entry contains the mean with the standard deviation in
+parenthesis
+
+OOD Clients} Base KYC p-value
+sci.space 26.5(0.4) 26.4(0.2) 0.39
+comp.hw 29.6(0.4) 29.0(0.3) 0.07
+sci.crypt 29.7(0.4) 29.6(0.7) 0.46
+atheism 28.3(0.2) 28.1(0.2) 0.14
+autos 28.0(0.5) 27.9(0.4) 0.34
+mideast 27.4(0.4) 27.3(0.4) 0.37
+Average 28.2(0.2) 27.9(0.0) 0.04
+
+Table 5: Statistical significance of results on the OOD
+clients by KYC for the Auto Complete task. For every
+entry contains the mean with the standard deviation in
+parenthesis
+
+crepancy via computed per-client biases. Figure 2
+shows true, baseline, and KYC predicted class pro-
+portions for one OOD client on NER. Observe how
+labels like date, GPE, money and org are under-
+predicted by baseline and corrected by KYC. Since
+KYC only corrects label biases, instances most
+impacted are those close to the shared decision
+boundary, and exhibiting properties correlated with
+labels but diverging across clients. We uncovered
+two such properties:
+
+Ambiguous Tokens In NER the label of sev-
+eral tokens changes across clients, E.g. tokens
+like million, billion in finance clients like
+NW/Xinhua are money 92% of the times whereas
+in general only 50% of the times. Based on client
+sketches, it is easy to spot finance-related topics
+and increase the bias of money label. This helps
+KYC correct labels of borderline tokens.
+
+Instance Length For sentiment labeling, review
+length is another such property. Figure 3 is a scat-
+ter plot of the average review length of a client
+versus the fraction predicted as positive by the base-
+line. For most clients, review length is clustered
+around the mean of 61, but four clients have length
+> 90. Length of review is correlated with label: on
+average, negative reviews contain 20 words more
+than positive ones. This causes baseline to under-
+predict positives on the few clients with longer
+reviews. The topics of the four outlying clients
+(video games, CDs, Toys&Games) are related so
+that the client sketch is able to shift the decision
+boundary to correct for this bias. Using only nor-
+malized average sentence length as the client sketch
+bridges part of the improvement of KYC over the
+baseline (details in Appendix C) implying that aver-
+age instance length should be part of client sketch
+for sentiment classification tasks.
+
+
+TF Binary Sum- Architecture
+
+IDF BOW mary|Deep Decomp MoE-g
+80.0 81.0 75.4|80.9 76.0 74.9
+85.9 77.8 81.8]/85.9 85.0 79.8
+
+Salience
+Concat
+OD| 80.1
+ID | 86.0
+
+Table 6: Comparing variant client sketches (.S,) and
+network architectures (GB and Yo) of KYC in Fig 1.
+
+Ablation Studies We explored a number of alter-
+native client sketches and models for harnessing
+them. We present a summary here; details are in
+the Appendix C and D. Table 6 shows average F1
+on NER for three other sketches: TF-IDF, Binary
+bag of words, and a 768-dim pooled BERT em-
+bedding of ten summary sentences extracted from
+client corpus (Barrios et al., 2016). KYC’s de-
+fault term saliency features provides best accuracy
+with TF-IDF a close second, and embedding-based
+sketches the worst. Next, we compare three other
+architectures for harnessing g in Table 6: Deep,
+where module @ after concatenating g and M
+adds an additional non-linear layer so that now the
+whole decision boundary, and not just bias, is client-
+specific. KYC’s OOD performance increases a bit
+over plain concat. Decompose, which mixes two
+softmax matrices with a client-specific weight a
+learned from g. MoE-g, which is like MoE but
+uses the client sketch for expert gating. We observe
+that the last two options are worse than KYC.
+
+4 Conclusion
+
+We introduced the problem of lightweight client
+adaption in NLP service settings. This is a promis-
+ing area, ripe for further research on more complex
+tasks like translation. We proposed client sketches
+and KYC: an early prototype server network for
+on-the-fly adaptation. Three NLP tasks showed
+considerable benefits from simple, per-label bias
+correction. Alternative architectures and ablations
+provide additional insights.
+
+References
+
+Ankur Bapna, Gokhan Tiir, Dilek Hakkani-Tiir, and
+Larry Heck. 2017. Towards zero-shot frame seman-
+tic parsing for domain scaling.
+
+Federico Barrios, Federico Lopez, Luis Argerich, and
+Rosa Wachenchauzer. 2016. Variations of the simi-
+larity function of textrank for automated summariza-
+tion. Proc. Argentine Symposium on Artificial Intel-
+ligence, ASAI.
+
+S. Ben-David, J. Blitzer, K. Crammer, and F. Pereira.
+2006. Analysis of representations for domain adap-
+
+tation. In Proceedings of the 19th International Con-
+ference on Neural Information Processing Systems,
+
+NIPS’06.
+
+John Blitzer, Ryan McDonald, and Fernando Pereira.
+2006. Domain adaptation with structural correspon-
+dence learning. In Proceedings of the 2006 confer-
+ence on empirical methods in natural language pro-
+cessing, pages 120-128. Association for Computa-
+tional Linguistics.
+
+Yitao Cai and Xiaojun Wan. 2019. Multi-domain sen-
+timent classification based on domain-aware embed-
+ding and attention. In Proceedings of the 28th Inter-
+national Joint Conference on Artificial Intelligence,
+
+pages 4904-4910. AAAT Press.
+
+Fabio M Carlucci, Antonio D’Innocente, Silvia Bucci,
+Barbara Caputo, and Tatiana Tommasi. 2019. Do-
+main generalization by solving jigsaw puzzles. In
+Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 2229-2238.
+
+Xilun Chen and Claire Cardie. 2018. Multinomial ad-
+versarial networks for multi-domain text classifica-
+tion. In Proceedings of the 2018 Conference of the
+North American Chapter of the Association for Com-
+putational Linguistics: Human Language Technolo-
+gies, Volume I (Long Papers), pages 1226-1240.
+
+H. DauméllI. 2007. Frustratingly easy domain adapta-
+tion. pages 256-263.
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2018. Bert: Pre-training of deep
+bidirectional transformers for language understand-
+ing. arXiv preprint arXiv: 1810.04805.
+
+Qi Dou, Daniel Coelho de Castro, Konstantinos Kam-
+nitsas, and Ben Glocker. 2019. Domain general-
+ization via model-agnostic learning of semantic fea-
+tures. In Advances in Neural Information Process-
+ing Systems, pages 6447-6458.
+
+Zhenxin Fu, Xiaoye Tan, Nanyun Peng, Dongyan Zhao,
+and Rui Yan. 2018. Style transfer in text: Explo-
+ration and evaluation. In Thirty-Second AAAI Con-
+ference on Artificial Intelligence.
+
+Hongyu Gong, Suma Bhat, Lingfei Wu, Jinjun Xiong,
+and Wen-mei Hwu. 2019. Reinforcement learning
+based text style transfer without parallel training cor-
+pus. arXiv preprint arXiv: 1903.10671.
+
+Jiang Guo, Darsh J. Shah, and Regina Barzilay. 2018.
+Multi-source domain adaptation with mixture of ex-
+perts. In Proceedings of the 2018 Conference on
+Empirical Methods in Natural Language Processing,
+Brussels, Belgium, October 31 - November 4, 2018,
+pages 4694-4703.
+
+Chen Jia, Xiaobo Liang, and Yue Zhang. 2019. Cross-
+domain ner using cross-domain language modeling.
+In Proceedings of the 57th Annual Meeting of the
+Association for Computational Linguistics, pages
+2464-2474.
+
+
+Guillaume Lample, Sandeep Subramanian, Eric Smith,
+Ludovic Denoyer, Marc’Aurelio Ranzato, and Y-
+Lan Boureau. 2019. Multiple-attribute text rewrit-
+ing. In International Conference on Learning Rep-
+resentations.
+
+Haoliang Li, Sinno Jialin Pan, Shiqi Wang, and
+Alex Chichung Kot. 2018a. Domain generalization
+with adversarial feature learning. CVPR.
+
+Jing Li, Shuo Shang, and Ling Shao. 2020. Metaner:
+Named entity recognition with meta-learning. In
+Proceedings of The Web Conference 2020, pages
+429-440.
+
+Juncen Li, Robin Jia, He He, and Percy Liang. 2018b.
+Delete, retrieve, generate: A simple approach
+to sentiment and style transfer. arXiv preprint
+arXiv: 1804.06437.
+
+Bill Yuchen Lin and Wei Lu. 2018. Neural adaptation
+layers for cross-domain named entity recognition.
+In Proceedings of the 2018 Conference on Empiri-
+
+cal Methods in Natural Language Processing, pages
+2012-2022.
+
+Zihan Liu, Genta Indra Winata, and Pascale Fung.
+2020. Zero-resource cross-domain named entity
+recognition. arXiv preprint arXiv:2002.05923.
+
+Gabor Melis, Tomas Koéisky, and Phil Blunsom. 2020.
+Mogrifier Istm. In International Conference on
+Learning Representations.
+
+Jianmo Ni, Jiacheng Li, and Julian McAuley. 2019.
+Justifying recommendations using distantly-labeled
+reviews and fine-grained aspects. In Proceedings
+of the 2019 Conference on Empirical Methods in
+Natural Language Processing and the 9th Interna-
+tional Joint Conference on Natural Language Pro-
+cessing (EMNLP-IJCNLP), pages 188-197, Hong
+Kong, China. Association for Computational Lin-
+guistics.
+
+Jiaul H Paik. 2013. A novel tf-idf weighting scheme
+for effective ranking. In SIGIR Conference, pages
+343-352.
+
+Vihari Piratla, Praneeth Netrapalli, and Sunita
+Sarawagi. 2020. Efficient domain generalization via
+common-specific low-rank decomposition. arXiv
+preprint arXiv:2003.12815.
+
+Shrimai Prabhumoye, Yulia Tsvetkov, Ruslan Salakhut-
+dinov, and Alan W Black. 2018. Style trans-
+fer through back-translation. arXiv preprint
+arXiv: 1804.09000.
+
+Sameer S. Pradhan, Eduard Hovy, Mitch Mar-
+cus, Martha Palmer, Lance Ramshaw, and Ralph
+Weischedel. 2007. Ontonotes: A unified relational
+semantic representation. In Proceedings of the Inter-
+
+national Conference on Semantic Computing, ICSC
+°07, page 517-526, USA. IEEE Computer Society.
+
+Alan Ramponi and Barbara Plank. 2020. Neural unsu-
+pervised domain adaptation in nlp—a survey.
+
+Sebastian Ruder. 2019. Neural Transfer Learning for
+Natural Language Processing. Ph.D. thesis, Na-
+tional University of Ireland, Galway.
+
+Darsh J Shah, Raghav Gupta, Amir A Fayazi, and Dilek
+Hakkani-Tur. 2019. Robust zero-shot cross-domain
+slot filling with example values. arXiv preprint
+arXiv:1906.06870.
+
+Shiv Shankar, Vihari Piratla, Soumen Chakrabarti,
+Siddhartha Chaudhuri, Preethi Jyothi, and Sunita
+Sarawagi. 2018. Generalizing across domains via
+cross-gradient training. In International Conference
+on Learning Representations.
+
+Tianxiao Shen, Tao Lei, Regina Barzilay, and Tommi
+Jaakkola. 2017. Style transfer from non-parallel text
+by cross-alignment. In Advances in neural informa-
+tion processing systems, pages 6830-6841.
+
+Emma Strubell, Ananya Ganesh, and Andrew Mc-
+Callum. 2019. Energy and policy considera-
+tions for deep learning in nlp. arXiv preprint
+arXiv:1906.02243.
+
+Chi Sun, Xipeng Qiu, Yige Xu, and Xuanjing Huang.
+2019. How to fine-tune bert for text classification?
+In Chinese Computational Linguistics, pages 194—
+206, Cham. Springer International Publishing.
+
+Haohan Wang, Zexue He, Zachary C Lipton, and Eric P
+Xing. 2019. Learning robust representations by
+projecting superficial statistics out. arXiv preprint
+arXiv:1903.06256.
+
+Zichao Yang, Zhiting Hu, Chris Dyer, Eric P Xing, and
+Taylor Berg-Kirkpatrick. 2018. Unsupervised text
+style transfer using language models as discrimina-
+tors. In Advances in Neural Information Processing
+Systems, pages 7287-7298.
+
+
+NLP Service APIs and Models for Efficient Registration of New Clients
+(Appendix)
+
+A_ Reproducibility/Implementation
+Details
+
+In this section we provide details about the dataset,
+architecture and training procedures used for each
+of the three tasks. We provide the datasets used,
+code, hyperparameters for all the tasks in the code
+submitted along with the submission.
+
+A.l NER
+
+We use the standard splits provided in the
+Ontonotes dataset (Pradhan et al., 2007). Our code-
+base builds on the official PyTorch implementation
+released by (Devlin et al., 2018). We finetune a
+cased BERT base model with a maximum sequence
+length of 128 tokens for 3 epochs which takes 3
+hours on a Titan X GPU.
+
+A.2 Sentiment Classification
+
+As described previously, we use the Amazon
+dataset (Ni et al., 2019). For each review, we use
+the standard protocol to convert the rating to a bi-
+nary class label by marking reviews with 4 or 5
+stars as positive, reviews with 1 or 2 stars as neg-
+ative and leaving out reviews with 3 stars. We
+randomly sample data points from each domain
+to select 1000, 200 and 500 positive and nega-
+tive reviews each for the train, validation and test
+splits, respectively. We leave out the domains that
+have insufficient examples, leaving us with 22 do-
+mains. We use the finetuning protocol provided
+by the authors of (Sun et al., 2019) and use the un-
+cased BERT base model with a maximum sequence
+length of 256 for this task. We train for 5 epochs
+(which takes 4 hours on a Titan X GPU) and use the
+validation set accuracy after every epoch to select
+the best model.
+
+A.3 Auto Complete Task
+
+We use 20NewsGraoup dataset while regarding
+each content class label as a client. We remove
+header, footer from the content of the documents
+and truncate the size of each client to around 1MB.
+We use word based tokenizer with a vocabulary
+restricted to top 10,000 tokens and demarcate sen-
+tence after 50 tokens. The reported numbers in
+Table 3 are when using TF-IDF vector for domain
+sketch. We diln this section, we reportd not evalu-
+ate other kinds of domain sketch on this task. We
+
+train all the methods for 40 epochs with per epoch
+train time of 4 minutes on a Titan X GPU.
+
+We adopt the tuned hyperparameters correspond-
+ing to PTB dataset to configure the baseline Melis
+et al. (2020). Since the salience information from
+the client sketch can be trivially exploited in per-
+plexity reduction and thereby impede learning
+desired hypothesis beyond trivially copying the
+salience information, we project the sketch vector
+to a very small dimension of 32 before fanning it
+out to the size of vocabulary. We did not use any
+non-linearity in Gg and also employ dropout on
+the sketches.
+
+B__ Details of MoE method (Guo et al.,
+2018)
+
+MoE employs a shared encoder and a client spe-
+cific classifier. We implemented their proposal to
+work with our latest encoder networks. Our im-
+plementation of their method is to the best of our
+efforts faithful to their scheme. The only digres-
+sion we made is in the design of discriminator: we
+use a learnable discriminator module that the en-
+coder fools while they adopt MMD based metric to
+quantify and minimize divergence between clients.
+This should, in our opinion, only work towards
+their advantage since MMD is not sample efficient
+especially given the small size of our clients.
+
+OOD ID
+OOD Clients Base KYC| Base KYC
+BC/CCTV + BC/Phoenix|63.8 70.1/86.00 86.7
+BN/PRI + BN/VOA 88.7 91.6] 84.5 86.2
+NW/WSJ + NW/Xinhua |73.9 79.2| 80.8 82.2
+BC/CNN + TC/CH 78.3 80.4) 85.6 87.1
+WB/Eng + WB/a2e 76.2 78.9| 86.4 87.5
+Average 76.2 80.0) 84.7 85.9
+
+Table 7: Performance on the NER task on the
+
+Ontonotes dataset when using TF-IDF as the client
+sketch.
+
+C_ Results with Different Client Sketches
+
+In this section we provide results on every OOD
+
+split for the different client sketches described in
+
+Section 3 along with more details.
+
+¢ TF-IDF: This is a standard vectorizer used in
+Information Retrieval community for document
+similarity. We regard all the data of the client as
+
+
+@—™_ Ground Truth
+@@m Baseline
+Mmm KYC
+
+S
+£0
+
+2
+a
+
+Percentage of words
+lo} lo} oO
+Oo N oS
+(ae
+
+So & “a @ “a3 x ©
+SEFLE EF ECESSEESEES
+Es wis e Fess & eS & iS)
+& x & oS le) & <e &
+
+Y =
+
+w 1.50
+ne}
+
+2
+$1.25
+
+G
+fo)
+S
+
+0.75
+
+Percentage of
+lo}
+u
+lo}
+
+0.25
+
+Figure 4: Proportion of true and predicted entity labels for different OOD clients (left) BC/Phoenix (right)
+
+BC/CCTV.
+OOD ID
+OOD Clients Base KYC| Base KYC
+BC/CCTV + BC/Phoenix|63.8 75.3|86.0 79.3
+BN/PRI + BN/VOA 88.7 90.5|84.5 78.7
+NW/WSJ + NW/Xinhua |73.9 82.7|80.8 71.4
+BC/CNN + TC/CH 78.3 80.3|85.6 79.9
+WB/Eng + WB/a2e 76.2 76.4|86.4 79.6
+Average 76.2 81.0/84.7 77.8
+Table 8: Performance on the NER task on the
+
+Ontonotes dataset when using Binary Bag of Words as
+the client sketch.
+
+OOD ID
+OOD Clients Base KYC| Base KYC
+BC/CCTV + BC/Phoenix|63.8 61.5|86.0 83.0
+BN/PRI + BN/VOA 88.7 82.3|84.5 85.2
+NW/WSJ + NW/Xinhua |73.9 82.3|80.8 75.0
+BC/CNN + TC/CH 78.3 72.5|85.6 83.2
+WB/Eng + WB/a2e 76.2 78.3|86.4 82.5
+Average 76.2 75.4/84.7 81.8
+Table 9: Performance on the NER task on the
+
+Ontonotes dataset when using sentence embddings av-
+eraged over an extracted summary.
+
+OOD ID
+OOD Clients Base Sali- Avg |Base Sali- Avg
+
+ence Len ence Len
+ElectronicstGames | 86.4 88.1 86.9/88.5 89.0 88.6
+Industrial+Tools 87.4 87.6 88.3|88.2 88.9 88.8
+Books+Kindle Store| 83.5 84.6 84.5|88.0 88.9 89.0
+CDs+Digital Music |82.5 83.0 83.1/89.0 89.0 89.0
+Arts+Automotive 89.9 90.6 90.2|/88.2 88.6 88.5
+Average 86.0 86.8 86.6/88.4 88.8 88.8
+
+Table 10: Accuracy on the Sentiment Analysis task
+when using average review length as the client sketch.
+Columns “Saliency” and “Avg Len” refer to using KYC
+with the default saliency features and normalized re-
+view lengths as client sketches, respectively.
+
+a document when computing this vector. The cor-
+responding numbers using this sketch are shown
+in Table 7 and are only slightly worse than the
+salience features.
+
+Binary Bag of Words (BBoW): A binary vec-
+tor of the same size as vocabulary is assigned to
+each client while setting the bit corresponding to
+a word on if the word has occurred in the client’s
+data. We notice an improvement on the OOD set
+but a significant drop in ID numbers as seen in
+Table 8, 6. We attribute this to the strictly low rep-
+resentative power of BBoW sketches compared
+to the other sketches. The available train data
+for NER is laced with rogue clients which are
+not labeled and are instead assigned the default
+tag: “O”. Proportion of KYC’s improvement on
+this task comes from the ability to distinguish
+bad clients and keeping their parameters from
+not affecting other clients. This, however, is not
+possible when the representative capacity of the
+sketch is compromised. Thereby we do worse on
+ID using this sketch but not on OOD meaning
+the model does worse on the bad clients (which
+are only part of ID, and not OOD).
+Contextualized Embedding of Summary: We
+also experiment with using deep-learning based
+techniques to extract the topic and style of a
+client by using the “pooled” BERT embeddings
+averaged over sentences from the client. Since
+the large number of sentences from every client
+would lead to most useful signals being killed
+upon averaging, we first use a Summary Extrac-
+tor (Barrios et al., 2016) to extract roughly 10
+sentences per client and average the sentence em-
+beddings over these sentences only. This method
+turns out to be ineffective in comparison to the
+other client sketches, indicating that sentence em-
+beddings do not capture all the word-distribution
+
+
+information needed to extract useful correction.
+
+Average Instance Length: For the task of Senti-
+ment Analysis, we also experiment with passing
+a single scalar indicating average review length
+as the client sketch in order to better understand
+and quantify the importance of average review
+length on the performance of KYC. We linearly
+scale the average lengths so that all train clients
+have values in the range [—1, 1]. As can be seen
+in Table 10, this leads to a significant improve-
+ment over the baseline. In particular, the OOD
+splits CDs + Digital Music and Books + Kindle
+Store have reviews that are longer than the av-
+erage and consequently result in improvements
+when augmented with average length informa-
+tion. The gains from review length alone are not
+higher than our default term-saliency sketch indi-
+cating that term frequency captures other mean-
+ingful properties as well.
+
+D_ Results with Different Model
+Architectures
+
+In this section we provide results for the different
+network architecture choices described in Section 3
+¢ Deep: The architecture used is identical to that
+shown in Figure | barring @, which now con-
+sists of an additional 128-dimensional non-linear
+layer before the final softmax transform Yo.
+Decompose: The final softmax layers is decom-
+posed in to two. A scalar a is predicted from the
+client sketch using Gg similar to KYC. The final
+softmax layer then is obtained through convex
+combination of the two softmax layers using a.
+Figure 5 shows the overview of the architecture.
+MoE-g: We use the client sketch as the drop-in
+replacement for encoded instance representation
+employed in Guo et al. (2018). The architecture
+is sketched in Figure 6. As shown in Table 13,
+this method works better than the standard MoE
+model, but worse than KYC.
+
+OOD ID
+OOD Clients Base KYC| Base KYC
+BC/CCTV + BC/Phoenix]64.8 74.5/85.6 86.8
+
+BN/PRI + BN/VOA 89.5 90.0/84.1 85.6
+NW/WSJ + NW/Xinhua |74.4 80.6|/80.2 92.8
+BC/CNN + TC/CH 78.0 79.6|86.1 87.5
+WB/Eng + WB/a2e 75.6 79.9|85.8 87.1
+Average 76.5 80.9 84.4 86.0
+Table 11: Performance on the NER task on the
+
+Ontonotes dataset using KYC-Deep.
+
+yo loss SM,
+Yo
+ry ;
+q@ SMo
+Mo
+Be. 1
+
+ g
+
+Figure 5: Decompose overview: @ indicates a
+weighted linear combination. SM;, i € {1,2} repre-
+sent the softmax matrices which are combined using
+weights a.
+
+OOD ID
+OOD Clients Base KYC| Base KYC
+BC/CCTV + BC/Phoenix|64.1 56.0/85.6 86.3
+
+BN/PRI + BN/VOA 89.6 89.9|84.6 85.5
+NW/WSJ + NW/Xinhua |72.3 68.2|/81.2 80.0
+BC/CNN + TC/CH 78.5 77.5/85.9 86.6
+WB/Eng + WB/a2e 75.5 71.0)86.1 86.7
+Average 76.0 72.5)84.7 85.2
+
+Table 12: Performance on the NER task on the
+Ontonotes dataset using Decompose.
+
+Y — loss
+Pil(ylx) — pa(y|a) Prlylxz) ~@
+Y, Yp. Y,
+Meo
+Po S.
+zw <
+
+Figure 6: MoE-g overview: @ indicates a weighted
+linear combination. p;(y|x) represents the i‘” expert’s
+
+predictions and a represents weights for expert gating.
+
+OOD ID
+OOD Clients Base KYC|Base KYC
+BC/CCTV + BC/Phoenix|64.8 74.7|85.6 84.0
+
+BN/PRI + BN/VOA 89.5 88.3|84.1 83.6
+NW/WSJ + NW/Xinhua |74.4 61.6/80.2 64.8
+BC/CNN + TC/CH 78.0 73.7/86.1 82.1
+WB/Eng + WB/a2e 75.6 76.3|85.8 84.4
+Average 76.5 74.9|84.4 79.8
+Table 13: Performance on the NER task on the
+
+Ontonotes dataset using MoE-g.

@@ -1,0 +1,1469 @@
+AssoMem: Scalable Memory QA with Multi-Signal
+Associative Retrieval
+
+Kai Zhang!:2*, Xinyuan Zhang, Ejaz Ahmed!, Hongda Jiang!, Caleb Kumar!, Kai Sun', Zhaojiang Lin!,
+Sanat Sharma!, Shereen Oraby!, Aaron Colak!, Ahmed Aly!, Anuj Kumar!, Xiaozhong Liu”, Xin Luna
+Dong!
+
+‘Meta Reality Labs, ?Worcester Polytechnic Institute
+*Work done at Meta
+
+Accurate recall from large-scale memories remains a core challenge for memory-augmented AI as-
+sistants performing question answering (QA), especially in similarity-dense scenarios where existing
+methods mainly rely on semantic distance to the query for retrieval. Inspired by how humans link
+information associatively, we propose AssoMem, a novel framework constructing an associative memory
+graph that anchors dialogue utterances to automatically extracted clues. This structure provides
+a rich organizational view of the conversational context and facilitates importance-aware ranking.
+Further, AssoMem integrates multi-dimensional retrieval signals—relevance, importance, and temporal
+alignment—using an adaptive mutual information (MI)-driven fusion strategy. Extensive experiments
+across three benchmarks and a newly introduced dataset, MEETINGQA, demonstrate that AssoMem
+consistently outperforms state-of-the-art baselines, verifying its superiority in context-aware memory
+recall.
+
+Date: October 14, 2025
+Correspondence: Kai Zhang at kzhang8@wpi.edu
+Code: https://github.com/facebookresearch/AssoMem
+
+OX Meta
+
+1. Introduction
+
+The rapid advancement of large language models
+(LLMs) has opened the door to personal assistants
+that function as a “second brain’—a digital compan-
+ion capable of capturing, organizing, and retrieving
+information on behalf of the user. An essential
+
+Q1: What do | usually complain at work, Memory Base
+can you give some tips to avoid it? “Evidence User: We always start planning too late,
+
+it's like we’re just reacting.
+
+Q2: Which show did | watch first, the “Evidence User: Every time we plan, there seems no
+Crown or the Game of Throne? room for unexpected stuff.
+
+Error User: | worked late few nights this week,
+working on the new API integration.
+
+2510.10397v1 [cs.CL] 12 Oct 2025
+
+arXiv
+
+capability of such systems is the ability, with ex-
+plicit user consent, to store and recall events and
+facts from the user’s life (Jiang et al., 2025). This
+capability enables natural memory-recall interac-
+tions such as “Summarize the key points from my
+meeting with Sarah yesterday”. In this paper, we
+focus on settings where textual memories such as
+meeting notes, and conversational dialogues are
+continuously accumulated over time, and we study
+the problem of answering memory recall questions
+over large-scale memory repositories.
+
+Recent research in this area predominantly fol-
+lows the Retrieval-Augmented Generation (RAG)
+paradigm, organizing user memories to enable ef-
+ficient retrieval and accurate response generation.
+Drawing inspiration from the effectiveness of hu-
+man memory systems in recalling information from
+sequential streams, several approaches partition his-
+
+Top-1 Retrieval for Q1
+
+User: | like to work on-site in
+Error _ office, where | can chat casually
+with peers.
+
+Top-1 Retrieval for Q2
+
+User: Do you have similar show
+Error suggestions such as "the
+Crown", "the Game of Throne"?
+
+Relevance solely is
+insufficient for retrieval
+
+100
+
+User: | just finished watching the third
+
+[Eigenea] season of 'The Crown’ on Netflix. Took
+me 14 days, watching at least 2-3
+episodes every day.
+
+User: | really like the story of the crown,
+
+Error f ake
+characters in the show is alive.
+
+User: Do you have similar show
+Error suggestions such as "the Crown", "the
+Game of Throne"?
+
+[Evidence YS°r: | started watched "the Game of
+Throne" about one months ago.
+
+ME Long short-term Memory Ml. Topic-utterance retrieval
+
+ll Session level retrieval
+
+80
+
+60
+
+Recall@6 (%)
+
+40 5
+MeetingQa
+
+ll AssoMem
+
+LongMemeval_m LongMemeval_I
+
+Figure1 An example showing limitations in relevance solely
+retrieval. Our AssoMem consistently outperforms SOTA
+
+baselines on three datasets.
+
+
+
+torical dialogues into long- and short-term segments
+
+to enhance memory recall (Zhang et al., 2024; Li et al., 2025; Zhong et al., 2024; Chhikara et al., 2025).
+Other methods organize memory using hierarchical filters—such as topics or summaries—to narrow down
+the retrieval search space (Tan et al., 2025; Xu et al., 2025b; Zhou et al., 2025). Graph-based approaches
+construct an entity-relationship knowledge graph from personal memories and answer questions through graph
+algorithms (Wang et al., 2024; Chhikara et al., 2025). Despite these advances in memory structure optimization,
+a critical challenge remains: as the volume of user memory records increases, retrieval performance deteriorates
+as in Figure 1, largely because the memory pool accumulates many highly similar items, like repeated meeting
+topics and overlapping conversation snippets, making it harder to distinguish truly relevant information.
+
+We argue that humans do not perceive their memories as isolated entries or as a simple chronological stream.
+Instead, they organize them associatively, linking pieces of information through clues such as entities, locations,
+events, and topics. Likewise, pinpointing relevant memory evidence cannot rely solely on refining relevance
+comparison, as explored in reranking modules (Tan et al., 2025) or multi-granularity retrieval (Xu et al.,
+2025a). Among related items, people tend to remember important clues more clearly and revisit them more
+often; for example, answering “What do I usually complain about at work, can you give some tips?” requires
+identifying the clues that matter most to the user as depicted in Figure 1.
+
+Motivated by these observations, we propose AssoMem, a memory QA framework that leverages associative
+structures to guide memory selection. At its core is an associative memory graph that links each memory
+utterance to a set of clues, which are automatically extracted by LLMs to enable fine-grained interpretation of
+a user’s memories and to connect memories sharing similar signals. Different from existing memory graphs that
+are built entirely on abstractive concepts rather than raw historical data(Wang et al., 2024; Chhikara et al.,
+2025; Xu et al., 2025b), this graph supports associative connections from abstractive clues to exact memories,
+facilitating importance-aware ranking. Based on this graph, AssoMem further integrates multiple retrieval
+signals—relevance, importance, and temporal alignment—and employs a mutual-information (MI)-driven
+fusion strategy to dynamically balance these dimensions according to query intent, yielding more accurate
+and context-aware memory retrieval. Moreover, fine-tuning the answer generation model with a multi-task
+denoising strategy is utilized to maximize the QA performance based on retrieved memory records. To the best
+of our knowledge, AssoMem is the first memory QA system that mimics the structure of associative memory
+to enhance QA on large-scale, similarity-dense memory collections. We summarize our main contributions as
+follows:
+
+e Unified framework for memory recall QA: We propose AssoMem, a memory QA system that
+integrates relevance, importance, and temporal signals through a mutual information (MI)-driven weight
+assignment strategy, enabling adaptive and context-aware memory selection to improve answer quality.
+
+e Associative memory graph At the core of AssoMem is an associative memory graph that captures
+semantic relationships between utterances and the clues associated with them. This graph facilitates
+efficient retrieval and importance-aware ranking of memories.
+
+e New benchmark and evaluation: To foster research in large-scale memory retrieval, we introduce
+MeetingQA, a benchmark simulating real-world meeting scenarios where multi-turn dialogues form the
+memory base, paired with diverse QA examples. Extensive experiments and ablations on MeetingQA
+and other memory benchmarks show that AssoMem outperforms existing retrieval approaches by 24.93%
+on average.
+
+2 Related Work
+
+Large-scale Memory Management and Retrieval Memory has emerged as a promising solution for enhancing
+LLMs (Madaan et al., 2022; Wang et al., 2023). However, as the historical memory incrementally accumulates,
+existing methods fail to process the large-scale memory since the incremental information poses noises for
+both retrieval and generation(Yu et al., 2025; Hu et al., 2025; Maharana et al., 2024). Recent research in
+this area has advanced along two key aspects: large-scale memory management and retrieval. In terms of
+large-scale memory management, early work introduced structural organization by partitioning conversational
+history into short- and long-term memory (Zhang et al., 2024; Li et al., 2025; Zhong et al., 2024), enabling
+models to reflect both recent interactions and persistent user preferences. More recent approaches incorporate
+
+
+AssoMem Frame
+
+Response: You like complaining planning, be
+patient and communicate more with the team.
+
+lanl
+
+Importance
+
+Query: What do I usually —
+
+complain at work, can you Relevance
+
+give some tips to avoid it?
+
+Temporal
+
+Historical Dialogue Sessions
+
+Figure 2 Overview of the proposed AssoMem framework. A topic—utterance graph is constructed from historical
+dialogues, enabling the integration of relevance, importance, and temporal signals. These are adaptively fused to guide
+accurate memory retrieval for question answering.
+
+hierarchical structures—such as topics, summaries, and memory graphs—to constrain the retrieval space and
+improve recall performance (Tan et al., 2025; Xu et al., 2025b; Chhikara et al., 2025; Rezazadeh et al., 2024).
+In terms of retrieval, focus is on directly identifying relevant memories for downstream tasks. Query-centered
+methods enhance retrieval through improved query formulation (Jiang et al., 2023; Jang et al., 2024),
+while reranking-based approaches refine retrieved candidates using trainable scoring mechanisms (Wu et al.,
+2024b; Du et al., 2024; Tan et al., 2025). Complementary works have also explored granularity’s impacts,
+demonstrating the effectiveness of hybrid retrieval strategies (Xu et al., 2025a; Tan et al., 2025; Sarthi et al.,
+2024). Despite their success, these methodologies are predominantly grounded in relevance, aiming to retrieve
+the most topically similar memories while overlooking key challenges discussed in Section 1. In contrast,
+AssoMem adopts an associative memory to integrate multi-dimensional signals to address these challenges.
+
+PageRank (PR) models a random surfer over a directed graph, where node scores reflect the stationary
+distribution of the walk, yielding an importance prior that complements term-matching relevance in web
+search (Page et al., 1999; Brin and Page, 1998; Langville and Meyer, 2011). Alongside HITS (Kleinberg, 1999), it
+underpinned early large-scale retrieval by propagating hyperlink endorsements and proved effective under sparse
+or noisy lexical signals. Subsequent works improved computational scalability via power-method accelerations
+and linear-algebraic solvers (Bahmani et al., 2010). Personalized PageRank (PPR) biases teleportation toward
+user-specific needs, effectively yielding a relevance-conditioned importance signal (Bahmani et al., 2010;
+Wayama and Sugiyama, 2025). In our work, AssoMem leverages PPR to enable multi-dimensional signals for
+later retrieval.
+
+3 Methodology
+
+3.1. Problem Formulation and Solution Framework
+
+Problem formulation Consider a memory bank M = {(So,do), ($1, d1),...,(Sw,dn)}, where each session
+S; = {uo, u1,---, Un} contains n utterances and is associated with a timestamp d;. A question gq is considered
+a memory question if it specifically refers to the user’s past, as illustrated in Figure 1. The memory recall
+problem takes a memory question q and outputs an answer based on the memory bank M. Note that a
+memory question can go beyond specific memory seeking such as “can you give some tips...". Our method
+
+
+may apply to personalized conversations where the user does not explicitly refer to the past, but we focus on
+memory recall questions in this paper.
+
+Solution framework At run time, we answer memory questions in two steps as depicted in Figure 2: memory
+retrieval and answer generation. Given a question q, the Retrieval step retrieves a set of memory utterances
+to ground question answering, denoted by €*; the Answer Generation step then generates the answer to q
+based on the retrieved memories: @ = LLM” (q, €*).
+
+3.2 Memory Retrieval
+
+The retrieval step aims to select the best memory evidence to support QA. At the core of our retrieval is
+the Associative Memory Graph that anchors each piece of memory with the underlying clues, and connects
+relevant memories. We next discuss the construction of the graph and how we use it for QA.
+
+3.2.1 Associative Memory Graph Construction
+
+Memory clues A memory clue captures potential cues that help memorization; it can be an aspect phrase like
+Evening entertainment, a key entity like Lumia project, or an event like launching weekly meetings. For each
+session S$; in the memory bank, we employ an LLM agent to generate a representative clue c; for the session.
+This clue is associated with all utterances in $;, resulting in an initial clue set C = {co,c1,...,cnw}, where N
+is the number of sessions.
+
+To reduce redundancy and enhance topic coherence, we merge clues with high semantic similarity. Specifically,
+for any pair of clues (c;,c;), if their embedding similarity exceeds a threshold 6, they are merged into the
+same clue. The associated utterances from the merged clues are grouped under the new clue. This process
+yields a refined clue set C’ and updated utterance groupings.
+
+Associative Memory Graph An associative memory graph G = (V,€) associates each memory record with the
+underlying clues and other relevant memories. There are two types of nodes: each clue node represents a
+clue in the set C’ of merged clues, and each utterance node represents an utterance in U/. Each node (clue or
+utterance) is represented by its text embedding, computed using a pre-trained embedding model (e.g., BGE);
+There are also two types of edges: each ownership edge connects an utterance u € S; with its associated clue
+C,, and each similarity edge connects clues or utterances that are similar. Specifically, we create an edge for a
+pair of clues or a pair of utterances whose embedding similarity exceeds a pre-decided threshold y¥:
+
+sim(v;,0j;) >, vi,v; EC’ or v;,v; EU (1)
+
+The structure can be extended with conversational metadata (e.g., people, locations) when exists and enriched
+via external taxonomies such as ConceptNet (Speer et al., 2017).
+
+3.2.2 Candidate retrieval
+
+Inspired by how associative memory works, we perform candidate retrieval in a two-step hybrid mode. First,
+given a query q, we retrieve the relevant clues, and denote the Top-K clues related to q by Cg; we consider all
+utterances associated with C, as candidate memories, denoted by Ucana = {u | clue(u) € C,}. Next, we rank
+all candidate utterances by a score predicting their usefulness in answering the question, obtaining the final
+
+retrieval results: €* = argmax )°,,¢¢ Score(q,u). With a good scoring system, denoted by Score(q, u),
+ECUcana, |E|=K
+
+this hybrid retrieval strategy returns accurate memory evidence and ensures that €* maximizes the utility
+
+of the retrieved memories. Designing the scoring system plays a critical role to QA quality, which we will
+
+describe in detail next.
+
+3.2.3. RITRanker: Relevance, Importance, and Temporal Dynamics
+
+Unlike existing memory-based methods that rely solely on similarity, our retrieval score for each utterance u
+integrates three dimensions: relevance, importance, and temporal alignment. This fusion enables retrieval of
+memories that not only align with the recall question but also reflect central aspects of the user’s daily life
+and adhere to temporal constraints.
+
+
+Relevance Existing memory-based methods have verified that semantic relevance serves as an essential
+criteria and ensures that retrieved utterances are contextually aligned with the query. We compute relevance
+
+using cosine similarity between semantic representations of question e, and each memory utterance e,:
+
+gfe) = sim (€,,€,), where eg and e, are semantic embedding vectors obtained from an embedding model for
+
+the query and utterance, respectively.
+
+Importance Different from querying specific details, users would typically ask for recommendations where
+relevance solely for retrieval won’t return proper memories in Figure 1. To capture the importance of
+utterances within the large-scale memory records, we apply graph mining on the associative memory graph.
+Drawing inspiration from PageRank in web search (Page et al., 1999), we apply Personalized PageRank (PPR)
+(Wayama and Sugiyama, 2025) to decide the importance of each clue and memory utterance w.r.t a given
+query.
+
+r+) — dMr™ + (1—d)t (2)
+
+where M € {0,1}%*% is the adjacency matrix from graph connectivity, t € R‘*! is the personalized
+teleportation vector, r is the pagerank score vector and d is the damping factor. In our setting, the utterance
+a in t are set to the similarity between query and utterance, and the clue cells are set to 0. We initialize
+= +t. The importance score for u is si”) =r, after convergence. Notably, we apply PPR rather than
+
+vrobal pagerank (r° = {1/N}) to avoid boosting the importance of memories irrelevant to the question.
+
+Temporal match Temporal questions are common in real world yet relevance cannot effectively capture the
+temporal constraints, as illustrated in the example in Section 1. Recency decay, commonly used in temporal
+memory retrieval, does not satisfy explicitly specified temporal constraints (Li et al., 2023). We thus conduct
+explicit temporal match in three steps. First, we extract temporal tokens from the question to determine
+if the temporal reasoning is needed. Second, we apply temporal embedding (i.e., TimeLlaMa (Yuan et al.,
+2024)) on the extracted temporal tokens. Third, we compute similarity between the temporal embeddings of
+q and the utterance u. Here, the temporal embeddings of utterances are computed based on the temporal
+tokens and the timestamp associated: s{°™?) = sim (ef, eter”)
+
+Mutual Information for Score Fusion! To balance the information from each dimension with respect to the
+query type, we need a strategy that can perceive the importance of each signal. Mutual Information (MI) is
+known for its ability of representing the informativeness of two variables, providing a solution to adaptively
+assign weights for different dimensions w.r.t query types. In our scenario, we use Conditional MI (CMI) to
+indicate how well a signal from each dimension reflects the likelihood that a memory utterance is useful for
+answering a given question.
+
+Initially, the raw score (= of each memory u for dimension d is converted into three bins: low, medium, high.
+
+By doing so, we collect the score-label pairs (OO), yp), where b € (low, medium, high) denotes the score bin,
+A € A = {0,1} represents the memory usefulness label. The probabilities p(Sx gle ) yd), p(s, q), p(y, 4)
+
+can be calculated based on the collected pairs. For each query type g, we compute the conditional mutual
+information:
+
+=(4)(0)
+
+p(Su
+
+CMI4(q) = 1(8,?; | 4) = > ds ©), ym) log wa
+364) () U
+
+Ym |)
+| a)p(ym, | a) °)
+
+exp(CMIa(q)/T
+
+where A is the usefulness label. The weight for each dimension is then: w'”(q) = S exp(CMI4/(@)/T) The
+final score for each memory item uw is:
+Score(g,1u) = wl (q) se + wl) (q) aL") + wom) (q) after) (a
+
+This adaptive fusion mechanism dynamically adjusts the contribution of each dimension based on its relative
+impact on the current query. A temperature parameter T’ modulates the sharpness of both the score and
+weight distributions, enabling smoother or more selective fusion as needed.
+
+1we provide comparisons for different fusion strategies in appendix B.5.
+
+
+3.3 Model Fine-tuning
+
+Recent advances have highlighted a persistent gap between retrieval-based recall and generative performance
+in large language models (LLMs) (Yang et al., 2024; Ouyang et al., 2024). This discrepancy is often attributed
+to the presence of irrelevant or noisy content among the top-K retrieved candidates. To address this challenge
+and fully leverage retrieved contextual evidence, we adopt a novel fine-tuning approach using augmented
+datasets informed by targeted negative and positive sampling: LLM* = FineTune(LLM, Daa +Mem)-
+
+Denoising QA Dataset Doa+mMem denotes our QA dataset comprising queries, reference answers, and memory
+context. Specifically, two sampling strategies are adopted for denoising fine-tuning: (1) mixed positive and
+negative memory contexts to encourage evidence discrimination, and (2) negative-only contexts to improve
+robustness by preventing over-reliance on supporting evidence.
+
+Multi-task Fine-tuning. Answering a question involves recognizing its type to better utilize the memory context
+and generate answers. We jointly train two tasks—question type prediction and answer generation—to capture
+this process. The model receives an instruction, question, and sampled memories as input, and outputs both
+the predicted question type and the generated answer. This setup promotes effective memory utilization
+conditioned on question intent.
+
+AssoMem stands out by a novel associative memory structure and a multi-dimensional scoring system, jointly
+enhancing retrieval quality and generation robustness across diverse scenarios.
+
+4 Experimental Settings
+
+4.1 Dataset
+
+To evaluate AssoMem, the dataset must provide question-answer (QA) pairs and large-scale memory annotated
+with usefulness labels to assess both retrieval and generation quality. We adopt LongMemEval (Wu et al.,
+2024a), which meets these criteria and includes six question types covering common real-world scenarios. We
+use the original small (s) and medium (m) subsets, and additionally construct a large (1) variant to assess
+robustness under increasing memory size.
+
+To further test generalizability and promote research in memory recall, we introduce MEETINGQA, a synthetic
+dataset simulating real-world meetings with multi-speaker dialogues on specific topics. It provides QA pairs
+and historical meeting transcripts as memory, with annotated usefulness labels.
+
+All datasets follow a consistent structure: a QA pair, a base memory consisting of historical conversations
+where usefulness labels are available. More dataset details are in Appendix A.
+
+4.2 Baselines & Evaluation Metrics
+
+To assess the effectiveness of AssoMem on conversational memory recall QA, we compare it against a suite
+of representative baselines covering various retrieval granularities. At the utterance level, we include flat
+utterance retrieval and Long/Short-Term Memory (LST Memory) (Zhang et al., 2024). At the session level,
+we consider flat session retrieval. Under the multi-granularity paradigm, we compare against session retrieval
+first then utterance retrieval (session-utterance), session summary and utterance retrieval (session summary
+mem), topic grouping (Tan et al., 2025), and MemGAS (Xu et al., 2025a). More details about baselines are
+in Appendix C.
+
+We adopt standard evaluation tasks: Memory Recall and Answer Generation. For memory recall, we re-
+port Recall@k and nDCGQk; for retrieval generation, we use LLM-as-a-Judge accuracy (Acc@6, Acc@10),
+BERTScore, and Faithfulness (Zhang et al., 2024; Lattimer et al., 2023). All retrieval metrics are computed
+at the utterance level.
+
+4.3. Implementation
+
+For base models, we select a range of models from different sizes: LlaMA-3.3-3B-Instruct, LlaMA-3.3-70B-
+Instruct(Grattafiori et al., 2024), Qwen2.5-32B(Qwen et al., 2025), gpt-oss-120B(Agarwal et al., 2025). Notably,
+
+
+for large size models such 70B and 120B, we do not fine-tune while for other models we follow section 3.3 to
+perform fine-tuning via trl(von Werra et al., 2020) and transformers(Wolf et al., 2020) libraries to reduce
+the noises of generation. For retrievers, we select three state-of-the-art embedding models”: DragonPlus,
+DragonPlusRoberta(Lin et al., 2023), BGE(Chen et al., 2023). For temporal dynamics, we use TimeLlaMA
+(Yuan et al., 2024) as the embedding model. For graph construction and usage, we use networkx (Hagberg
+et al., 2008).
+
+Table1 Retrieval and QA performance on LongMemEval medium m (the top table), large | (the
+middle table), MeetingQA (the bottom table).
+
+Method R@1 R@3 R@6 R@10 nDCG@3 nDCG@6 nDCG@10 Acc@6
+Utterance-level: retrieve top-k utterances as context
+
+Utterance-flat 46.45 54.90 64.25 70.18 56.24 66.14 68.04 48.66
+LST Memory 52.91 58.03 65.91 70.69 59.82 67.34 68.68 50.96
+Session-level: retrieve top-k sessions as context
+
+Session-flat 56.91 64.81 70.86 78.93 67.19 71.68 76.37 51.93
+
+Hybrid: first retrieve sessions/topics/summaries/clues, then retrieve utterances as context
+
+Session summary mem. 50.19 59.93 62.95 72.84 61.68 64.25 68.79 49.35
+MemGAS 45.75 51.06 66.93 77.02 53.59 66.97 69.46 51.23
+Session-utterance 55.37 64.66 70.17 78.97 66.04 71.31 76.50 55.85
+Topic grouping 55.98 65.91 76.47 79.14 66.12 77.03 78.86 59.95
+AssoMem 59.73 72.96 80.87 84.96 75.36 81.30 82.93 64.01
+Method R@1 R@3 R@6 R@10 nDCG@3 nDCG@6 nDCG@10 Acc@6
+Utterance-level: retrieve top-k utterances as context
+
+Utterance-flat 37.61 41.66 49.91 54.56 42.83 49.94 53.68 41.36
+LST Memory 36.19 41.93 51.49 56.16 43.06 51.66 55.93 42.32
+Session-level: retrieve top-k sessions as context
+
+Session-flat 40.82 50.20 55.99 59.34 51.19 56.93 58.87 40.82
+
+Hybrid: first retrieve sessions/topics/summaries/clues, then retrieve utterances as context
+
+Session summary mem. 39.92 43.26 51.18 55.29 44.51 51.93 54.81 41.89
+MemGAS 37.64 44.92 54.12 57.27 46.82 54.67 56.61 43.33
+Session-utterance 40.93 49.87 55.83 59.62 51.92 56.17 58.93 45.38
+Topic grouping 40.13 50.78 58.54 62.29 52.27 59.46 61.92 48.36
+AssoMem 43.56 59.60 64.93 69.33 62.61 65.87 66.31 52.59
+Method R@1 R@3 R@6 R@10 nDCG@3 nDCG@6 nDCG@10 Acc@6
+
+Utterance-level: retrieve top-k utterances as context
+23.89 40.27 48.81
+23.93 42.77 53.62 58.83
+
+Utterance-flat
+LST Memory
+
+55.29
+
+Session-level: retrieve top-k sessions as context
+28.62 47.36 56.72 60.19
+
+Session-flat
+
+Hybrid: first retrieve sessions/topics/summaries/clues, then retrieve utterances as context
+Session summary mem. 26.56
+
+Session-utterance 33.78
+MemGAS 32.94
+Topic grouping 39.66
+AssoMem 41.63
+
+45.25
+52.19
+52.59
+61.69
+64.72
+
+52.66
+67.63
+69.34
+78.98
+85.17
+
+54.17
+CEGL
+80.67
+89.15
+92.96
+
+41.91 53.83 56.19 45.91
+43.96 55.78 59.17 48.36
+48.91 59.31 62.97 51.79
+47.83 53.19 55.93 47.87
+55.31 69.48 80.19 49.17
+55.86 71.66 82.93 61.26
+63.15 74.23 83.78 63.56
+66.06 86.93 94.17 69.41
+
+2All the retrieval results are using DPR as retriever, retriever comparisons and analysis is in Appendix B.4.
+
+
+Table 2 Generation results of different LLMs using AssoMem recall@10 retrieval as context.
+
+Accuracy BertScore Faithfulness
+Model Plain Fine-tuned Plain’ Fine-tuned Plain Fine-tuned
+
+LlaMA3.2-3B-Instruct 26.91 33.43 31.19 36.93 33.27 43.06
+Qwen2.5-32B-Instruct 64.72 73.88 67.91 77.49 55.16 75.73
+LlaMA-3.3-70B-Instruct 65.83 - 71.86 - 56.96 -
+Gpt-Oss-120B 76.49 - 81.76 - 68.73 -
+
+5 Experimental Results
+
+In this section, we will present the thorough experimental results and concrete analysis with a focus to answer
+these research question, supplementary results can be seen in Appendix B:
+
+e RQ1. Does AssoMem exhibit performance advantages over state-of-the-art solutions?
+e RQ2. How does RITRANKER contribute to performance of AssoMem?
+e RQ3. How robust is AssoMem against the memory size and question types?
+
+We will answer RQ 1. in Section 5.1, RQ 2. in Section 5.2 and RQ 3. in Section 5.3 and 5.4.
+
+5.1 Comparative Study
+
+Retrieval Results. As presented in Table 1°, on LongMemEval_m dataset, the Session-utterance retrieval
+raises R@10 to 78.97% and nDCG@10 to 76.50% over the utterance-level flat retrieval at 70.18% and 68.04%.
+Topic grouping further improves R@10 to 79.14% and nDCG@10 to 78.86%. Similar patterns detected on
+LongMemEval_1 and MeetingQA datasets. This suggests a general finding that hybrid retrieval clearly
+outperforms single-granularity retrieval. Our proposed AssoMem, on the other hand, makes an improvement
+of 5.82% over the SOTA, topic grouping. Further, AssoMem also makes improvements of 7.04% and 3.81%
+against the best baselines on LongMemEval_1 and MeetingQA, respectively. This suggests that AssoMem
+does offer advantages compared with SOTA. Why do prior memory methods fail at scale? As memory size
+grows, more similar memory records accumulate where similarity alone cannot discriminate among many
+near-duplicate or thematically close candidates, so recall collapses and downstream generation suffers. Why
+does AssoMem help? By ranking with importance and temporal priors in addition to relevance, AssoMem
+takes the question types into considerations and performs retrieval from a multi-dimensional anchor. As can
+be seen in Figure 3(a), we clearly witness the improvements made in preference and temporal reasoning type
+questions which suggests the success of our scoring system.
+
+Generation Results Retrieval quality translates directly to generation: Acc@6 climbs from 48.66 for flat retrieval
+to 55.85% for multi-granularity and to 64.01% for AssoMem, with BERTScore moving from 51.71% to 60.06%
+and then to 67.56%. This again validates that AssoMem is making improvements against SOTA. Moreover, as
+previous studies have verified that there exists a gap between the recall and generation performance Yang ect al.
+(2024); Ouyang et al. (2024) which means the top-k retrieved content may also deliver noises into the context
+for downstream question answering (We present analysis in Appendix B.3 to support this claim). The results
+presented in Table | also validate this where the recall@6 result of AssoMem is 80.87% while the answering
+accuracyQ@6 is 64.01 on m dataset, a similar pattern is also observed on | dataset. Thus, the base model’s
+ability to fully utilize the retrieved memory can be a key to improve the downstream generation performance.
+Following the fine-tuning strategy in Section 3.3, the generation accuracy@10 gains improvements of 6.52%
+and 9.16% for LlaMA3.2-3B and Qwen2.5-32B models, respectively as in Table 2. This verifies that our
+fine-tuning strategy helps the model better utilize the retrieved memory context, contributing to the AssoMem
+performance.
+
+3We adopt 6 as a reference point based on the retrieval—-generation transition analysis in Appendix B.3.
+
+
+5.2 Ablation Study
+
+Ablation on retrieval dimensions As can be seen in Figure 3 (b), the performance on temporal reasoning type
+questions drops when excluding temporal dimension information and the performance on single-user-preference
+type questions drops when excluding importance dimension information. These observations validate the
+challenge mentioned in Section 1 that different type of questions require information from different dimensions
+for retrieval, illustrating that RITRanker contributes to AssoMem’s performance by well integrating signals
+from multiple dimensions.
+
+Ablation on components In AssoMem, the Table 3 Ablation on components and dimensions. w/o denotes
+associative memory graph serves as the base without the component compared to AssoMem.
+
+for obtaining multi-dimensional information
+
+while the MI-guided weight assignment strat- w/o R@6 R@10 Acc@6 Acc@10
+
+egy serves as their connections. Thus, we
+
+. T ] . . . 1.1
+further tested how each component impacts ania 2) HEY BIBS Pal
+. Importance 75.81 79.62 59.55 61.97
+the performance. Specifically, we conduct Clue nodes 79.75 84.80 63.06 79.51
+i I Weight Assignment 76.79 81.80 60.38 58.89
+move the clue nodes within the graph; 2.
+
+| ; AssoMem 80.87 84.96 64.01 69.17
+remove the weight assignment strategy and
+
+instead, using a fixed weighted sum for com-
+
+parisons. As can be observed in Table 3, the retrieval performance drops 1.12% without clue nodes which we
+attribute to the fact that the clue level retrieval would be suboptimal when the importance information is
+missing. Moreover, using a fixed weight assignment witnesses a 4.08% performance drop compared to full
+AssoMem which further validates the necessity of each component within AssoMem.
+
+5.3 Robustness Study
+
+Results on different questiontypes. As in Figure 3 (a), we can clearly observe that the performance of AssoMem
+
+eno
+
+=== flat_retrieval(utterance level)
+ye long-short-term_memory
+‘— multi-granularity
+
+—— session-summary
+
+== topic-grouping
+
+=—= AssoMem
+
+=—— rel_imp_tem
+ya relimp
+
+— tel
+
+ee Se
+
+(a) Comparison between baselines and AssoMem (b) Ablation on retrieval dimensions
+Figure3 The radar figure showing performance on different question types.
+
+, beyond end-to-end performance in Table 1, consistently outperforms all baselines across six question types.
+Notably, AssoMem presents the largest margins on preference and temporal type questions compared with
+other baselines which we attribute to the fact that similarity-only retrieval over-emphasizes surface relevance
+and tends to return most similar memories, which is adequate for pure recall but brittle for preference,
+temporal, and cross-session questions.
+
+Results on memory size As presented in Table 1, AssoMem makes improvements of 6.39%, 7.04% for the
+R@6, R@10 against the best baseline - topic grouping, respectively. Following the retrieval performance
+improvements, the generation accuracy performance is also improved by 4.06%. Together with the advantages
+
+
+made on LongMemEval_m, the results suggest that our AssoMem present a strong robustness as the memory
+size increases since from m to 1, the dialogue sessions increase from 500 to 2,500 rounds per data point. These
+results and observations on increased memory size and the diverse question types witness the strong robustness
+of AssoMem.
+
+5.4 Error Analysis
+
+As shown in Table 4, AssoMem achieves the highest retrieval fidelity, with a Correct rate of 64.01%—ex-
+ceeding Topic Grouping by 4.06% and LST Memory by 13.05%—and the lowest Retrieval Error at 19.13%,
+reducing errors by 4.30% and 14.96% respectively. It also yields the lowest Wrong-grounding rate (2.86% vs.
+3.82% and 5.13%), indicating more accurate and intent-aligned context. However, better retrieval does not
+fully translate into generation quality:
+total generation errors remain compara-
+
+Error bucket LSTMem. _ Topic AssoMem
+ble at 16.86% for AssoMem, 16.62% for G 50.96 50.95 S101
+: : . ; orrect . . .
+Topic Grouping. Overall, AssoMem 8 RE: Incorrect retrieval 34.09 23.43 19.13
+advantage lies in reducing retrieval-side GE: Wrong grounding 5.13 3.82 2.86
+failures and confusing negatives; the GE: Misuse of positives 2.22 4.37 5.71
+remaining gap is generation-side, sug- GE: LLM-Judge error 7.60 8.43 8.29
+
+gesting the need for stronger evidence
+utilization which necessitates our fine-
+tuning strategy. These observations
+again validate the effectiveness and ro-
+bustness of proposed AssoMem.
+
+Table 4 Error analysis. RE denotes retrieval error, GE denotes generation
+error. Wrong grounding means negatives are used for generation, misuse
+of positives means the positives are misused by LLM.
+
+6 Conclusion & Future Work
+
+In this work, we addressed the critical challenge of accurate, scalable memory recall in conversational AI by
+tackling the limitations of relevance-only retrieval in large-scale memory scenarios. We proposed AssoMem,
+a novel framework that enhances retrieval quality and generation robustness across diverse query types.
+At its core, AssoMem constructs memories as an associative graph and employs the RITRanker system
+to align relevance, importance, and temporal retrieval signals. To support future research, we introduce
+MEETINGQA, a synthetic multi-speaker dataset simulating real-world meeting scenarios, with annotated QA
+pairs and memory usefulness labels. Extensive experiments across all datasets demonstrate the effectiveness
+and robustness of AssoMem.
+
+Building upon the success of AssoMem, future research will focus on the following extensions: 1. Extending
+the framework to manage memory settings that involve the accumulation of heterogeneous and evolving
+histories sourced from multiple modalities; 2. Expanding the associative memory clues by incorporating
+richer semantic concepts such as events, locations, and external knowledge bases; 3. Developing personalized
+memory compression techniques to facilitate efficient on-device deployment of the associative memory system.
+
+10
+
+
+References
+
+Sandhini Agarwal, Lama Ahmad, Jason Ai, Sam Altman, Andy Applebaum, Edwin Arbus, Rahul K Arora, Yu Bai,
+Bowen Baker, Haiming Bao, et al. gpt-oss-120b & gpt-oss-20b model card. arXiv preprint arXiv:2508.10925, 2025.
+
+Bahman Bahmani, Abdur Chowdhury, and Ashish Goel. Fast incremental and personalized pagerank. Proceedings of
+the VLDB Endowment, 4(3), 2010.
+
+Sergey Brin and Lawrence Page. The anatomy of a large-scale hypertextual web search engine. Computer networks
+and ISDN systems, 30(1-7):107—117, 1998.
+
+Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, and Zheng Liu. Bge m3-embedding: Multi-lingual,
+multi-functionality, multi-granularity text embeddings through self-knowledge distillation, 2023.
+
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. Mem0: Building production-ready
+ai agents with scalable long-term memory. arXiv preprint arXiv:2504.19413, 2025.
+
+Suchana Datta, Debasis Ganguly, Mandar Mitra, and Derek Greene. A relative information gain-based query
+performance prediction framework with generated query variants. ACM Transactions on Information Systems, 41
+(2):1-31, 2022.
+
+Yiming Du, Hongru Wang, Zhengyi Zhao, Bin Liang, Baojun Wang, Wanjun Zhong, Zezhong Wang, and Kam-Fai
+Wong. Perltqa: A personal long-term memory dataset for memory classification, retrieval, and fusion in question
+answering. In Proceedings of the 10th SIGHAN Workshop on Chinese Language Processing (SIGHAN-10), pages
+152-164, 2024.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha
+Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al. The lama 3 herd of models. arXiv preprint
+arXiv:2407.21788, 2024.
+
+Aric Hagberg, Pieter J Swart, and Daniel A Schult. Exploring network structure, dynamics, and function using
+networkx. Technical report, Los Alamos National Laboratory (LANL), Los Alamos, NM (United States), 2008.
+
+Yuanzhe Hu, Yu Wang, and Julian McAuley. Evaluating memory in Ilm agents via incremental multi-turn interactions.
+arXiv preprint arXiv:2507.05257, 2025.
+
+Yunah Jang, Kang-il Lee, Hyunkyung Bae, Hwanhee Lee, and Kyomin Jung. IterCQR: Iterative conversational query
+reformulation with retrieval guidance. In Kevin Duh, Helena Gomez, and Steven Bethard, editors, Proceedings
+of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers), pages 8121-8138, Mexico City, Mexico, June 2024. Association for
+Computational Linguistics. doi: 10.18653/v1/2024.naacl-long.449. https://aclanthology.org/2024.naacl-long.449/.
+
+Hongda Jiang, Xinyuan Zhang, Siddhant Garg, Rishab Arora, Shiun-Zu Kuo, Jiayang Xu, Christopher Brossman, Yue
+Liu, Aaron Colak, Ahmed Aly, Anuj Kumar, and Xin Luna Dong. Memory-qa: Answering recall questions based on
+multimodal memories, 2025. https://arxiv.org/abs/2509.18436.
+
+Zhengbao Jiang, Frank F Xu, Luyu Gao, Zhiqing Sun, Qian Liu, Jane Dwivedi-Yu, Yiming Yang, Jamie Callan,
+and Graham Neubig. Active retrieval augmented generation. In Proceedings of the 2023 Conference on Empirical
+Methods in Natural Language Processing, pages 7969-7992, 2023.
+
+Jon M Kleinberg. Authoritative sources in a hyperlinked environment. Journal of the ACM (JACM), 46(5):604-632,
+1999.
+
+Amy N Langville and Carl D Meyer. Google’s pagerank and beyond: The science of search engine rankings. 2011.
+
+Barrett Lattimer, Patrick H Chen, Xinyuan Zhang, and Yi Yang. Fast and accurate factual inconsistency detection
+over long documents. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing,
+pages 1691-1703, 2023.
+
+Hao Li, Chenghao Yang, An Zhang, Yang Deng, Xiang Wang, and Tat-Seng Chua. Hello again! LLM-powered
+personalized agent for long-term dialogue. In Luis Chiruzzo, Alan Ritter, and Lu Wang, editors, Proceedings of
+the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics:
+Human Language Technologies (Volume 1: Long Papers), pages 5259-5276, Albuquerque, New Mexico, April
+2025. Association for Computational Linguistics. ISBN 979-8-89176-189-6. doi: 10.18653/v1/2025.naacl-long.272.
+https://aclanthology.org/2025.naacl-long.272/.
+
+11
+
+
+Yang Li, Yangyang Yu, Haohang Li, Zhi Chen, and Khaldoun Khashanah. Tradinggpt: Multi-agent system with layered
+memory and distinct characters for enhanced financial trading performance. arXiv preprint arXiv:2809.03736, 2023.
+
+Sheng-Chieh Lin, Akari Asai, Minghan Li, Barlas Oguz, Jimmy Lin, Yashar Mehdad, Wen-tau Yih, and Xilun Chen.
+How to train your dragon: Diverse augmentation towards generalizable dense retrieval. In Findings of the Association
+for Computational Linguistics: EMNLP 2023, pages 6385-6400, 2023.
+
+Aman Madaan, Niket Tandon, Peter Clark, and Yiming Yang. Memory-assisted prompt editing to improve gpt-3 after
+deployment. arXiv preprint arXiv:2201.06009, 2022.
+
+Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang. Evaluating
+very long-term conversational memory of llm agents. arXiv preprint arXiv:2402.17758, 2024.
+
+Jie Ouyang, Yucong Luo, Mingyue Cheng, Daoyu Wang, Shuo Yu, Qi Liu, and Enhong Chen. Revisiting the
+solution of meta KDD cup 2024: CRAG. In 2024 KDD Cup Workshop for Retrieval Augmented Generation, 2024.
+https://openreview.net/forum?id=PUzLjWIgqC.
+
+Lawrence Page, Sergey Brin, Rajeev Motwani, and Terry Winograd. The pagerank citation ranking: Bringing order to
+the web. Technical report, Stanford infolab, 1999.
+
+Qwen, :, An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu,
+Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou,
+Junyang Lin, Kai Dang, Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li, Mingfeng Xue, Pei Zhang, Qin Zhu,
+Rui Men, Runji Lin, Tianhao Li, Tianyi Tang, Tingyu Xia, Xingzhang Ren, Xuancheng Ren, Yang Fan, Yang Su,
+Yichang Zhang, Yu Wan, Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and Zihan Qiu. Qwen2.5 technical report, 2025.
+https://arxiv.org/abs/2412.15115.
+
+Alireza Rezazadeh, Zichao Li, Wei Wei, and Yujia Bao. From isolated conversations to hierarchical schemas: Dynamic
+tree memory representation for llms. arXiv preprint arXiv:2410.14052, 2024.
+
+Parth Sarthi, Salman Abdullah, Aditi Tuli, Shubh Khanna, Anna Goldie, and Christopher D Manning. Raptor:
+Recursive abstractive processing for tree-organized retrieval. In The Twelfth International Conference on Learning
+Representations, 2024.
+
+Kanish Shah, Henil Patel, Devanshi Sanghvi, and Manan Shah. A comparative analysis of logistic regression, random
+forest and knn models for the text classification. Augmented Human Research, 5(1):12, 2020.
+
+Robyn Speer, Joshua Chin, and Catherine Havasi. Conceptnet 5.5: An open multilingual graph of general knowledge.
+In Proceedings of the AAAI conference on artificial intelligence, volume 31, 2017.
+
+Zhen Tan, Jun Yan, I Hsu, Rujun Han, Zifeng Wang, Long T Le, Yiwen Song, Yanfei Chen, Hamid Palangi, George
+Lee, et al. In prospect and retrospect: Reflective memory management for long-term personalized dialogue agents.
+arXiv preprint arXiv:2503.08026, 2025.
+
+Leandro von Werra, Younes Belkada, Lewis Tunstall, Edward Beeching, Tristan Thrush, Nathan Lambert, Shengyi
+Huang, Kashif Rasul, and Quentin Gallouédec. Trl: Transformer reinforcement learning. https://github.com/
+huggingface/trl, 2020.
+
+Weizhi Wang, Li Dong, Hao Cheng, Xiaodong Liu, Xifeng Yan, Jianfeng Gao, and Furu Wei. Augmenting language
+models with long-term memory. Advances in Neural Information Processing Systems, 36:74530—74543, 2023.
+
+Zheng Wang, Zhongyang Li, Zeren Jiang, Dandan Tu, and Wei Shi. Crafting personalized agents through retrieval-
+augmented generation on editable memory graphs. arXiv preprint arXiv:2409.19401, 2024.
+
+Hiroshi Wayama and Kazunari Sugiyama. Generalized personalized pagerank with graph convolutional networks in
+recommender systems. In Proceedings of the 2025 International ACM SIGIR Conference on Innovative Concepts
+and Theories in Information Retrieval (ICTIR), pages 380-389, 2025.
+
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clement Delangue, Anthony Moi, Pierric Cistac, Tim
+Rault, Rémi Louf, Morgan Funtowicz, Joe Davison, Sam Shleifer, Patrick von Platen, Clara Ma, Yacine Jernite,
+Julien Plu, Canwen Xu, Teven Le Scao, Sylvain Gugger, Mariama Drame, Quentin Lhoest, and Alexander M. Rush.
+Transformers: State-of-the-art natural language processing. In Proceedings of the 2020 Conference on Empirical
+Methods in Natural Language Processing: System Demonstrations, pages 38-45, Online, October 2020. Association
+for Computational Linguistics. https://www.aclweb.org/anthology/2020.emnlp-demos.6.
+
+Di Wu, Hongwei Wang, Wenhao Yu, Yuwei Zhang, Kai-Wei Chang, and Dong Yu. Longmemeval: Benchmarking chat
+assistants on long-term interactive memory. arXiv preprint arXiv:2410.10818, 2024a.
+
+12
+
+
+Wei Wu, Zhuoshi Pan, Chao Wang, Liyi Chen, Yunchu Bai, Tianfu Wang, Kun Fu, Zheng Wang, and Hui Xiong.
+Tokenselect: Efficient long-context inference and length extrapolation for Ilms via dynamic token-level kv cache
+selection. arXiv preprint arXiv:2411.02886, 2024b.
+
+Derong Xu, Yi Wen, Pengyue Jia, Yingyi Zhang, Yichao Wang, Huifeng Guo, Ruiming Tang, Xiangyu Zhao, Enhong
+Chen, Tong Xu, et al. Towards multi-granularity memory association and selection for long-term conversational
+agents. arXiv preprint arXiv:2505.19549, 2025a.
+
+Wujiang Xu, Kai Mei, Hang Gao, Juntao Tan, Zujie Liang, and Yongfeng Zhang. A-mem: Agentic memory for Ilm
+agents. arXiv preprint arXiv:2502.12110, 2025b.
+
+Xiao Yang, Kai Sun, Hao Xin, Yushi Sun, Nikita Bhalla, Xiangsen Chen, Sajal Choudhary, Rongze Daniel Gui,
+Ziran Will Jiang, Ziyu Jiang, Lingkun Kong, Brian Moran, Jiaqi Wang, Yifan Ethan Xu, An Yan, Chenyu Yang,
+Eting Yuan, Hanwen Zha, Nan Tang, Lei Chen, Nicolas Scheffer, Yue Liu, Nirav Shah, Rakesh Wanga, Anuj
+Kumar, Wen-tau Yih, and Xin Luna Dong. Crag - comprehensive rag benchmark. In A. Globerson, L. Mackey,
+D. Belgrave, A. Fan, U. Paquet, J. Tomczak, and C. Zhang, editors, Advances in Neural Information Processing
+Systems, volume 37, pages 10470-10490. Curran Associates, Inc., 2024. https://proceedings.neurips.cc/paper_
+files/paper/2024/file/1435d2d0fca85a84d83ddcb754f58c29- Paper- Datasets_and_Benchmarks_ Track.pdf.
+
+Hongli Yu, Tinghong Chen, Jiangtao Feng, Jiangjie Chen, Weinan Dai, Qiying Yu, Ya-Qin Zhang, Wei-Ying Ma,
+Jingjing Liu, Mingxuan Wang, et al. Memagent: Reshaping long-context Ilm with multi-conv rl-based memory
+agent. arXiv preprint arXiv:2507.02259, 2025.
+
+Chenhan Yuan, Qianqian Xie, Jimin Huang, and Sophia Ananiadou. Back to the future: Towards explainable temporal
+reasoning with large language models. In Proceedings of the ACM Web Conference 2024, pages 1963-1974, 2024.
+
+Kai Zhang, Kaisong Song, Yangyang Kang, and Xiaozhong Liu. Content- and topology-aware representation learning
+for scientific multi-literature. In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023
+Conference on Empirical Methods in Natural Language Processing, pages 7490-7502, Singapore, December 2023.
+Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.465. https://aclanthology.org/2023.
+emnlp-main.465/.
+
+Kai Zhang, Yangyang Kang, Fubang Zhao, and Xiaozhong Liu. LLM-based medical assistant personalization with
+short- and long-term memory coordination. In Kevin Duh, Helena Gomez, and Steven Bethard, editors, Proceedings
+of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers), pages 2386-2398, Mexico City, Mexico, June 2024. Association for
+Computational Linguistics. doi: 10.18653/v1/2024.naacl-long.132. https://aclanthology.org/2024.naacl-long.132/.
+
+Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang. Memorybank: Enhancing large language
+models with long-term memory. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 38, pages
+19724-19731, 2024.
+
+Zijian Zhou, Ao Qu, Zhaoxuan Wu, Sunghwan Kim, Alok Prakash, Daniela Rus, Jinhua Zhao, Bryan Kian Hsiang
+Low, and Paul Pu Liang. Mem1: Learning to synergize memory and reasoning for efficient long-horizon agents.
+arXiv preprint arXiv:2506. 15841, 2025.
+
+13
+
+
+Appendix
+
+A Appendix. Datasets Details
+
+Table 5 Corpus statistics for LongMemEval and MeetingQA.
+
+Averages Haystack Totals
+Dataset #Sessions Evid./Q Q tokens A tokens Utts./sess. Session tokens Mem Tokens (m)
+LongMemEval_s 50.2 1.9 17.3 9.9 9.83 2053 0.10
+LongMemEval_m 501.9 1.9 17.3 9.9 9.76 2016 1.01
+LongMemEval_! 2503.4 1.9 17.3 9.9 9.76 2016 5.13
+MeetingQA 50 1 10.17 2.18 72.32 1848.62 0.09
+“Evid./Q” = average number of answer evidences per question; “Utts./sess.” = average utterances per session; m stands
+
+for million.
+
+As detailed in Table 5, we evaluate all the baselines and proposed AssoMem across four datasets. Among
+them, the LongMemEval_s and LongMemEval_m are open benchmarks. We enlarge this benchmark into
+a larger scale by incorporating more dialog sessions into the memory and form the LongMemEval_1 which
+consists of 2,500 dialog sessions. Notably, the added dialog sessions are identical, ensuring the dataset quality.
+
+Further, we mimic the real-world meeting scenario where different speakers will speak during a meeting,
+yielding a meeting session with different turns, and construct a new dataset named MeetingQA. The purpose of
+this dataset is for evaluating memory recall question answering in multi-turn dialog scenario. The MeetingQA
+dataset is a collection of 50 meetings, each containing approximately 70-80 messages, with a variety of speaker
+configurations (ranging from 2 to 6 speakers per memo). The dataset was generated by a linguistic engineer
+using LLMs and is designed to support benchmarking and development of meeting recall systems. It includes
+390 QA pairs, where each answer is mapped to at least one specific message within a corresponding meeting.
+The dataset structure provides detailed fields such as message IDs, session IDs, speaker identifiers (typically
+generic unless manually annotated), and transcript messages.
+
+In tandem, the data we used in the experiments follows this structure: {question: ..., answer: ..., question_ date:
+..., sessions: { { session_id: 1, utterance: ..., date: ...}, { session_id: 2, utterance: ..., date: ...},...} }. We
+organize the dialog memories and retrieve utterances to answer the question.
+
+Table 6 Question types and required retrieval dimensions
+
+Question R P T
+Where did I have dinner yesterday? v v
+What do I usually say at work? v
+Most visited coffee shop last month? vv
+How long have been since I start my V v
+job?
+
+B Appendix. Supplementary Results
+
+B.1 Results on LongMemEval_s
+
+Table 7 corroborates the main-text trends under the small-s setting. Pure utterance retrieval remains weakest,
+while session-only retrieval improves recall but limits QA due to context dilution. Hybrid pipelines are
+consistently stronger: multi-granularity reaches 78.97 R@10 and 76.50 nDCG@10 with 55.85 Acc@6, and
+topic grouping further lifts retrieval to 79.14 R@10 and 78.86 nDCG@10 with 59.95 Acc@6. AssoMem attains
+the best results across all metrics—84.96 R@10 and 82.93 nDCG@10—translating into 64.01 Acc@6 and 67.56
+BERTScore, which improves over the utterance baseline by 14.78 R@10, 14.89 nDCG@10, 15.35 Acc@6, and
+
+14
+
+
+Table 7 Retrieval and QA performance on LongMemEval small s.
+
+15.85 BERTScore; it also surpasses topic grouping by 5.82 R@10 and 4.06 Acc@6. The persistence of these
+gains at smaller s indicates that popularity- and temporal-aware re-ranking continues to suppress stale or
+idiosyncratic items and surfaces recent, widely supported evidence, yielding both higher retrieval concentration
+and better downstream generation. The results presented in Table 7 consistently validate our findings as in
+
+Method R@1 R@ R@6 R@1O nDCG@6 nDCG@10 Acc@6 BERTScore
+Utterance-level: retrieve top-k utterances and return utterances as context
+
+Utterance-level 52.43 65.55 79.63 93.19 75.37 83.23
+
+LST Memory 49.20 63.93 82.98 93.50 79.77 83.66
+
+Embedding cat 50.13 60.90 76.25 86.17 71.93 80.21
+
+Session-level: retrieve top-k sessions and return sessions as context'
+
+Session-level 57.04 66.19 81.63 94.96 78.15 85.72
+
+Hybrid: first retrieve topic/session, then utterances within; return utterances as context
+
+Multi-granularity 59.92 76.73 83.89 94.08 82.59 85.61
+Session summary mem. 58.21 77.06 79.96 85.17 77.18 79.48
+Topic grouping mem. 61.84 81.73 90.07 96.31 88.63 91.47
+AssoMem 62.73 81.96 93.87 96.96 90.31 91.93
+
+the main text.
+
+temporal-teasoning
+
+— pr_sim (fixed_weights)
+— pr_sim (ig_guidea)
+— ppr_sim (fixed_weights)
+—— ppr_sim (ig_guided)
+
+Snole-session-preference single-session-assistant
+
+0.8
+
+\\1.0 0.7
+
+0.5
+
+0.4
+
+soso civ _ ahitecsson
+(a) PPR vs. PR on different graph structure
+soMem
+
+Figure 4 Supplementary results
+
+B.2 Why PPR?
+
+To better understand how importance impact on the performance, we further provide the result comparisons
+between personalized pagerank and pagerank. As presented in Figure 4 (a), we witnessed that the ppr
+consistently outperforms the pr in single-session-preference type question which can be attributed to the fact
+that answering preference question requires both the relevance for locating the event and the importance for
+knowing the most important memories for the located event. In this sense, ppr provides better importance
+
+59.13 68.61
+62.17 74.39
+55.96 58.06
+53.67 56.17
+63.74 73.61
+60.37 70.73
+68.11 78.91
+72.13 80.65
+
+eee Multi-granularity Accuracy
+=== Multi-granularity Retrieval
+=== Topic Grouping Mem Accuracy
+== Topic Grouping Mem Retrieval
+wre ~AssoMem Accuracy
+=== AssoMem Retrieval
+
+6 8 10 12
+Top-k
+
+(b) Recall vs. Generation of representative baselines and As-
+
+due to the fact that ppr considers relevance in both the algorithm initialization and teleportation.
+
+15
+
+
+
+Granularity Retriever LongMemEval_s LongMemEval_m LongMemEval_1 MeetingQA
+
+DP 72.54 58.31 44.62 42.94
+
+Utterance BGE 78.89 64.18 48.73 48.27
+DPR 79.63 64.25 49.91 48.81
+
+DP 77.26 64.81 50.33 50.79
+
+Session DPR 81.63 70.86 55.99 56.72
+BGE 83.79 72.17 56.43 559.92
+
+Table 8 Recall@6 performance of three retrievers: DragonPlus, DragonPlus-Roberta abd BGE (Large) across 4 datasets
+in two granularity levels.
+
+B.3. Performance gap between retrieval and generation
+
+Across top-k, retrieval monotonically improves for all methods, with AssoMem leading at every k and saturating
+near 0.85 by k=10, ahead of Topic Grouping and Multi-granularity that level off around 0.80 and 0.79. QA
+accuracy, however, plateaus much earlier: AssoMem rises quickly to about 0.66 by k=6 and then gains
+marginally; Topic Grouping continues to climb and ends highest near 0.80, while Multi-granularity trails and
+tops out near 0.60. The widening retrieval-accuracy gap beyond when k is 6 indicates diminishing returns
+from adding more context and highlights a utilization bottleneck: even with superior retrieval, the LLM
+cannot fully exploit larger evidence sets due to redundancy, distraction, or context-window limits. Practically,
+this suggests a sweet spot around k=6 and the need for post-retrieval evidence organization (summarization,
+attribution, or re-weighting) to convert AssoMem’s retrieval gains into further accuracy improvements.
+
+B.4 Retriever Comparisons
+
+Retrievers play a pivotal role in the modern memory systems, providing semantic relevance information
+for locating useful memory records. As presented in Table 8, we can witness that in general, DragonPlus
+shows sub-optimal performance compared with other two retrievers across 4 datasets in two granularities.
+Furthermore, DragonPlusRoberta consistently outperforms other two retrievers by 7.09%/0.74%, 5.94% /0.07%,
+5.29% /1.18% and 5.87% /0.54% across 4 datasets in utterance-level retrieval, respectively. This indicates a
+comparable performance between DPR and BGE (Large). Moreover, in session level retrieval, BGE (Large)
+on the opposite, consistently outperforms other two retrievers by 6.53%/2.16%, 7.36% /1.31% and 6.1% /0.44
+across three LongMemEval datasets, respectively. We attribute this to the fact that the larger context window
+of BGE (large) helps boost the retrieval performance in session level since the context is longer. However,
+in session-level retrieval on MeetingQA, the performance of BGE (large) is suboptimal compared to DPR,
+this is because the token length per session in MeetingQA is not comparable with LongMemEval and can be
+handled by DPR. In tandem, we can conclude that within the capability of DP model, DPR is better than
+BGE (Large) and since our most fine-grained granularity in this work is utterance-level retrieval we opt for
+DPR as the main retrieving embedding model.
+
+B.5 AssoMem with different fusion strategies
+
+Further, we compare 6 information strategy from two types: Information theory driven weight assignment:
+Information Gain (Datta et al., 2022), Mutual Information (Zhang et al., 2023); Learnable weight assign-
+ment (Shah et al., 2020): Logistic Regression (LR), Random Forest (RF), Support Vector Machine (SVM),
+Two-layer linear network (LN).
+
+Impact of Different Information Fusion Strategy We further present the results of comparing different weight
+assignment strategies as in Table 10. We can observe the performance of information driven weight assignment
+strategies in general outperforms the learnable weight assignment strategies which we attribute this to
+the fact in the conversational memory recall question answering scenario, the memory evidence for each
+question is sparse which poses difficulties for simply training a learnable model to do weight assignments.
+
+16
+
+
+Question Type
+
+Ground-Truth Memory Evi-
+dence
+
+Top-2 Retrieval (Relevance-
+Only)
+
+Top-2 Retrieval (AssoMem)
+
+Q1: Preference reason-
+ing
+“What do I usually com-
+plain at work, can you
+give some tips to avoid
+it?”
+
+We always start planning too
+late, it’s like we’re just react-
+ing.
+
+Every time we plan, there
+seems no room for unexpected
+stuff.
+
+(High-importance opinions re-
+peated across history.)
+
+Error: J worked late few
+nights this week, working on
+the new API integration.
+Error: The search team
+was complaining our work
+progress in the sync.
+(Semantically
+“work,” but not representa-
+
+related to
+
+tive of core opinions.)
+
+Correct: To be honest, I think
+the results on project memory
+is too good to trust.
+
+Correct: To be honest, I think
+search team can help us on
+the project launching.
+(High-importance, repeated
+memory retrieved.)
+
+Q2: Temporal reasoning
+“Which show did
+I watch first, the
+Crown or the Game of
+Throne?”
+
+I just finished watching the
+third season of ’The Crown’
+on Netflix.
+
+I started watching ‘the Game
+of Throne’ about one month
+ago.
+
+(Provides necessary temporal
+anchors. )
+
+Error; Do you have simi-
+lar show suggestions such as
+‘the Crown’, ‘the Game of
+Throne’?
+
+Error: “Game of Throne” is
+an epic show, I’m pretty sure
+you’re hooked. If you’re look-
+ing for some similar shows
+
+Correct: I started watching
+*the Game of Throne’ about
+one month ago.
+
+Correct: I just finished watch-
+ing the third season of ’The
+Crown’ on Netflix.
+(Accurately supports tempo-
+ral comparison.)
+
+to “Game of Throne”, I have
+some recommendations.
+(Topically related but lacks
+
+any temporal signal.)
+
+Table 9 Case study showing limitations of relevance-only retrieval across question types. While relevance methods
+retrieve semantically similar content, they often miss task-relevant evidence. AssoMem incorporates importance and
+temporal signals to enable more accurate memory selection.
+
+Table 10 AssoMem with different fusion strategies.
+On the other hand, information driven
+
+strategies use the information purity
+as the signal which mitigates the mem-
+ory sparsity influence. Another benefit
+
+Fusion strategy Recall@6 Recall@10 Acc@6
+
+Learnable weight assignment
+
+Boy I : i ‘ Logistic Regression 72.92 78.55 58.43
+for using information driven strategy is
+training-free, we see a great potential Random Borest i BOGS 6101
+C1] bl st tegies to hand| icht Linear Network 77.29 80.63 61.74
+° eamna . s tthe tn i. fr, c heal Support Vector Machine 78.81 81.66 62.11
+hea facta m hi i. co also Information driven weight assignment
+: oF : actor t lat Inders its application Information gain 80.94 86.33 63.84
+in this scenario. Mutual information 82.64 88.91 64.20
+
+B.6 Case Study
+
+Table 9 presents a case study of retrieval
+
+behavior across two question types—preference reasoning and temporal reasoning—highlighting the limitations
+of relevance-only retrieval and the improvements achieved by AssoMem. In Q1 (Preference reasoning), the
+user asks: “What do I usually say at work?” This question requires retrieval of high-importance utterances
+that reflect consistent patterns in user opinions. However, the relevance-only method retrieves memories
+that are superficially related to “work” but do not reflect the user’s repeated viewpoints. In contrast,
+AssoMem successfully identifies two high-importance memory entries expressing critical opinions about project
+memory—these are not only topically relevant but also semantically central to the user’s past behavior. This
+demonstrates AssoMem’s ability to incorporate an importance signal, which is essential for preference-centric
+questions. In Q2 (Temporal reasoning), the user asks: “Which show did I watch first, the Crown or the Game
+of Throne?” This question necessitates precise temporal comparison, which relevance-only methods fail to
+address. The retrieved responses are thematically related to the queried shows but offer no chronological cues.
+In contrast, AssoMem correctly surfaces two time-anchored memory entries indicating both the start time of
+The Game of Throne and the completion of The Crown, enabling accurate temporal reasoning. In tandem,
+
+17
+
+
+Table 11 Overview of baseline methods by granularity
+
+Granularity Method
+
+Description
+
+Long- and short-term mem.
+
+Pbterange evel (Zhang et al., 2024)
+
+Flat Retrieval
+
+Partitions user memory into long- and short-term
+components to enable better coordination during
+memory recall QA.
+
+Retrieves utterances directly based on relevance
+scores.
+
+Session level Flat Retrieval
+
+Retrieves entire sessions based on overall relevance
+to the query.
+
+Session-utterance
+Multi-granularity
+
+Session summary-utterance
+
+Topic-utterance grouping
+
+(Tan et al., 2025)
+
+MemGAS (Xu et al,
+2025a)
+
+First retrieves relevant sessions (based on full session
+content), then retrieves relevant utterances within
+those sessions.
+
+First retrieves sessions based on session summaries,
+followed by utterance-level retrieval within those
+sessions.
+
+Groups utterances by topic, retrieves relevant topics,
+then selects utterances within those retrieved topic
+groups.
+
+Uses four granularities (utterance, session, keyword,
+summary) with entropy-guided weighting for re-
+trieval across these levels.
+
+the case study confirms that relevance alone is insufficient for diverse real-world queries. By incorporating
+importance and temporal dynamics, AssoMem delivers more contextually accurate retrieval, leading to better
+
+generation.
+
+B.7 Latency Analysis
+
+We report the average latency (in seconds) of each core compo-
+nent in the AssoMempipeline to assess its efficiency. The most
+time-consuming operation is memory construction, taking ap-
+proximately 1948.99 seconds on average, which occurs as a
+one-time offline process to build the structured memory graph.
+In contrast, incremental operations during inference are sig-
+nificantly faster. Node addition and edge addition require
+only 0.01 and 13.96 seconds respectively, enabling dynamic up-
+dates with low overhead. RIT scoring and weight assignment,
+which compute information-theoretic relevance and balance
+multi-dimensional signals, incur negligible latency of 0.39 and
+
+Table 12 AssoMem latency statistics.
+
+Operation Avg. Latency (s)
+
+Graph Construction 1948.99
+Node Addition 0.01
+Edge Adding 13.96
+RIT Scoring 0.39
+Weight Assignment 0.26
+Answer Generation 0.74
+
+0.26 seconds. The final inference stage, which utilizes retrieved and weighted memory as context for LLM
+generation, completes within 0.74 seconds on average. These results demonstrate that although initial memory
+graph construction is computationally expensive, the online inference and memory augmentation steps remain
+efficient, ensuring the system is practical for real-time applications with dynamic memory updates.
+
+C Baselines
+
+The detailed descriptions are presented in Table 11.
+
+D Appendix. Prompts
+
+Generation Prompt:
+
+| ### TASK DESCRIPTION
+
+18
+
+
+You are a helpful assistant that answers user’s question. In this sense, you
+
+will have access to user’s memory records which contain user’s historical information.
+
+Please note you will need to identify if the memories are useful or not for you to respond to the query.
+
+If the memories are useful then answer the question based on the memories, otherwise answer the question
+based on your knowledge or answer "IDK".
+
+HHH INPUT
+User memory: {memory}
+User query: {question}
+
+### OUTPUT REQUIREMENT
+Output the answer to the question only. Not matter you use the memory or not, please only output the
+answer and nothing else.
+
+Topic Generation Prompt:
+
+### TASK DESCRIPTION
+
+You are a helpful assistant that helps users to organize their memory records. Next, you’ll help me in
+organzing a user’s memory records.
+
+Given a user historical dialogue session, please summarize the session into a concise topic summary without
+key information lost.
+
+Output the topic summary sentence.
+
+HHH INPUT
+Dialogue session: {session}
+
+##H# OUTPUT REQUIREMENT
+Generate a topic summary for the given session.
+Please only output the topic summary and nothing else.
+
+LLM-as-a-Judge Prompt:
+
+### TASK DESCRIPTION
+
+You are a helpful judge to evaluate the quality of the response to a user question.
+
+You will be given a user question and two responses: one is the golden response, one is the generated
+response.
+
+Please evaluate the quality of the generated response based on the following criteria:
+
+a) If the response is relevant to the user question.
+
+b) If the response answers the question or not.
+
+c) If the response is consistent and coherent.
+
+If you think the generated response meet these criterias or semantically responds user as the golden response
+does, you should output "Win", otherwise "Lose".
+
+HHH INPUT
+
+User query: {question}
+
+Golden Response: {response_1}
+Generated Response: {response_2}
+
+### OUTPUT REQUIREMENT
+Output "Win" or "Lose" only. Do not output anything else.
+
+Fine-tuning Sample:
+
+<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+Cutting Knowledge Date: December 2023
+Today Date: 26 Aug 2025
+
+### TASK DESCRIPTION
+
+19
+
+
+
+You are a helpful assistant that answers user’s questions. In this sense, you will have access to user’s memory
+records which contain user’s historical information.
+
+Please note you will need to identify if the memories are useful or not for you to answer the query.
+
+If the memories are useful then answer the question based on the memories, otherwise answer the question
+based on your knowledge or answer "IDK".
+
+##H OUTPUT REQUIREMENT
+Output the answer to the question only. No matter you use the memory or not, please only output the
+answer and nothing else.<l|eot_id|><|start__header_id|>user<|end_header_id|>
+
+### The user query is:
+
+What is the order of the three events: "I signed up for the rewards program at ShopRite’, ’I used a Buy One
+Get One Free coupon on Luvs diapers at Walmart’, and ’I redeemed $12 cashback for a $10 Amazon gift
+card from Ibotta’?
+
+### The memory is:
+
+I’m planning a trip to Walmart this weekend and I’m looking for some deals on baby essentials. Do you have
+any info on their current sales or promotions on diapers? By the way, I used a Buy One Get One Free
+coupon on Luvs diapers at Walmart today, which was a great deal!;I’m planning a shopping trip to
+Target this weekend and I’m wondering if you have any info on their current sales and promotions. By
+the way, I just redeemed $12 cashback for a $10 Amazon gift card from Ibotta today, so I’m feeling
+pretty good about my savings so far!;I’m trying to plan my grocery shopping trip for this week. Can you
+help me find any good deals or sales on diapers and formula at ShopRite? By the way, I signed up for
+their rewards program today, so I’m hoping to maximize my points and savings.<leot_id|><|
+start_header_id|>assistant<lend_header_id|>
+
+### The answer is:First, I used a Buy One Get One Free coupon on Luvs diapers at Walmart. Then, I
+redeemed $12 cashback for a $10 Amazon gift card from Ibotta. Finally, I signed up for the rewards
+program at ShopRite.<leot_id|>
+
+E UseofLLM
+
+In paper writing, we use LLMs solely for checking typos and grammar errors; they are not used for any other
+purposes beyond this.
+
+20
+

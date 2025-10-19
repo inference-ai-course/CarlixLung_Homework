@@ -1,0 +1,2680 @@
+arXiv:2510.11210v1 [cs.CL] 13 Oct 2025
+
+Discursive Circuits: How Do Language Models Understand Discourse
+Relations?
+
+Yisong Miao
+
+Min-Yen Kan
+
+Web IR / NLP Group (WING), National University of Singapore
+{yisong, kanmy}@comp.nus.edu.sg
+
+Abstract
+
+Which components in transformer language
+models are responsible for discourse under-
+standing? We hypothesize that sparse compu-
+tational graphs, termed as discursive circuits,
+control how models process discourse relations.
+Unlike simpler tasks, discourse relations in-
+volve longer spans and complex reasoning. To
+make circuit discovery feasible, we introduce
+a task called Completion under Discourse Re-
+lation (CUDR), where a model completes a
+discourse given a specified relation. To sup-
+port this task, we construct a corpus of minimal
+contrastive pairs tailored for activation patch-
+ing in circuit discovery. Experiments show that
+sparse circuits (+ 0.2% of a full GPT-2 model)
+recover discourse understanding in the English
+PDTB-based CUDR task.
+
+These circuits generalize well to unseen dis-
+course frameworks such as RST and SDRT.
+Further analysis shows lower layers capture
+linguistic features such as lexical semantics
+and coreference, while upper layers encode
+discourse-level abstractions. Feature utility is
+consistent across frameworks (e.g., coreference
+supports Expansion-like relations).
+
+1 Introduction
+
+Discourse structure is essential for ensuring lan-
+guage models (LMs) to behave safely and ethically
+(Kim et al., 2025; Nakshatri et al., 2025). Yet, little
+is known about how discourse is internally pro-
+cessed by LMs, limiting our ability to guarantee
+that they are reliable and free from harmful out-
+puts. Transformer circuit discovery (Zhang and
+Nanda, 2024) is a promising method that identifies
+sparse computational subgraphs causally responsi-
+ble for specific behaviors. Unlike attention visual-
+ization (Jain and Wallace, 2019) or rationale gen-
+eration (Wiegreffe and Marasovic, 2021), circuits
+provide mechanistic, intervention-based explana-
+tions that reveal which components causally drive
+
+Please finish the discourse by choosing one of the two options:
+
+Arg 2
+
+Original run: Conn
+
+“he”) - P(“the”) = +0.
+Bob is hungry, so" B¢Mhe?) + P@the”) oe
+
+Counterfactual run: Conn’
+P(“he”) - P(“‘the”) =— 0.8
+
+Bob is hungry, but«
+
+Patching original to
+
+counterfactual: :
+P(“he”) - P(“the”) =— 0.7
+
+db db sp
+
+Bob is hungry, but
+
+Figure 1: Task Overview: The CUDR task enables dis-
+covery of discursive circuits by contrasting model pre-
+dictions under minimal changes to the discourse connec-
+tives. Activation patching reveals components causally
+responsible for shifting the model’s prediction.
+
+the model’s output. Existing circuit discovery meth-
+ods focus on simple tasks, like numeric comparison
+(Hanna et al., 2023) which is well-suited for next-
+word prediction (e.g. “The year after 1731 is >”).
+In contrast, discourse relations involve longer con-
+texts and more complex reasoning, making direct
+adaptation of existing methods infeasible.
+
+We contribute a key insight: by bridging the
+linguistic structure of discourse and the require-
+ments of circuit discovery, we open a new path for
+mechanistic understanding of complex language
+tasks. On the discourse side, we hold the initial
+argument Arg; (e.g. “Bob is hungry”, Figure 1)
+unchanged and introduce a counterfactual connec-
+tive Conn’ (e.g., “but’”’) that prompts the model
+to select an alternative continuation Arg’, (“the
+canteen is closed”’), which is only coherent under
+the counterfactual discourse relation. On the cir-
+cuit discovery side, the method relies on minimal
+contrastive pairs, where inputs differ slightly but
+yield significantly different outputs. To identify
+influential model components, we patch activations
+(Nanda, 2023) from the original run into the coun-
+terfactual run and observe changes in prediction.
+The resulting discursive circuits are composed of
+
+
+connections with significant causal influence.
+
+To support this task, we construct a dataset
+spanning major discourse frameworks, includ-
+ing Penn Discourse Treebank (PDTB; Webber
+et al.,2019), Rhetorical Structure Theory (RST;
+Mann and Thompson, 1987), and Segmented Dis-
+course Representation Theory (SDRT; Asher and
+Lascarides,2003). Each instance contains an origi-
+nal annotation from the source corpus, along with
+a set of counterfactual connectives and their alter-
+native completions. The three frameworks have 10
+to 17 distinct discourse relations each, and together
+contribute a total of 27,754 instances.
+
+Using our datasets, we discover discursive cir-
+cuits in the GPT-2 medium model. For most dis-
+course relations, the identified circuits achieve
+around 90% faithfulness while involving only 0.2%
+of model connections. We show that circuits de-
+rived from PDTB generalize well to unseen dis-
+course frameworks such as RST and SDRT, sug-
+gesting that language models may encode a shared
+representation of discourse relations. We also
+construct a novel circuit hierarchy adapted from
+PDTB’s three-level taxonomy. To our knowledge,
+this is the first discourse hierarchy grounded in neu-
+ral circuit components. Together, our circuits and
+hierarchy provide a new form of discourse repre-
+sentation, enabling direct cross-framework compar-
+ison and fine-grained decomposition into linguistic
+features. We discover similar utilities across differ-
+ent frameworks (e.g., coreference is prominent in
+all Expansion-like relations) !.
+
+2 Circuit Discovery with CUDR
+
+We propose a generic workflow to dissect a lan-
+guage model’s discourse understanding via circuit
+discovery, which is compatible with any discourse
+framework. We introduce the Completion under
+Discourse Relation task (CUDR, pronounced “koo-
+der”), where Arg remains fixed, while the connec-
+tive is swapped (Conn — Conn’), requiring the
+model to shift its prediction from Argz to Arg’.
+
+2.1 Completion under Discourse Relation
+
+CUDR creates a controlled environment to test
+a model’s discursive behavior. By simply alter-
+ing the discourse connective (from original (ori)
+to counterfactual (CF); Table 1), the model’s con-
+tinuation shifts sharply in response. For example,
+
+'The software and data are publicly available at: https:
+//github.com/YisongMiao/Discursive-Circuits.
+
+Input:
+
+dori = (Argi, Arge, R, Conn)
+
+det = (Argi, Arg), R’, Conn’)
+
+CUDR Task (Original):
+
+Please finish the discourse by choosing one of
+the two options: Arge or Arg),
+
+To complete: Argi, Conn
+
+Correct answer: Arg2, Incorrect answer: Arq’,
+Example: Please finish the discourse by
+choosing one of the two options: “he goes to the
+canteen” or “the canteen is closed”
+
+To complete: [Bob is hungry] 4g, [Solconn => [he goes
+to the canteen] Arg,
+
+CUDR Task (Counterfactual):
+
+Please finish the discourse by choosing one of
+the two options: Arge or Arg)
+
+To complete: Argi, Conn’
+
+Correct answer: A775, Incorrect answer: Argo
+Example: Please finish the discourse by
+choosing one of the two options: “he goes to the
+canteen” or “‘the canteen is closed”
+
+To complete: [Bob is hungry] Arg, [bUt| conn’ = [the
+canteen is closed] 4,91
+
+Table 1: Formalization of the CUDR task: the model
+must complete the discourse by either Argz or the coun-
+terfactual Avy5, based on which best fits as a continua-
+tion of Arg, following Conn or Conn’ (best in color).
+
+in the original discourse, a Contingency relation is
+expressed with the connective “so”, leading to a
+completion that “he goes to the canteen”. However,
+when the discourse relation is shifted to a coun-
+terfactual Comparison relation (signaled by “‘but’”),
+the model should sharply change its prediction to
+an argument that negates the expectation of eat-
+ing (i.e., “the canteen is closed’). Note that while
+circuit discovery has been applied under various
+settings (Zhang and Nanda, 2024), we adopt such
+a setup to steer the model, because it captures the
+dynamic nature of discourse understanding.
+
+Concretely, the original discourse consists of two
+arguments, Arg; and Argo, linked by a discourse
+relation R and connective Conn, formally denoted
+as doi = (Argi, Arge,R,Conn). The counter-
+factual instance, deg = (Arg, Arg), R’, Conn’),
+preserves Arg; but substitutes the continuation and
+relation (R’ # R), forming a minimal contrastive
+pair required by activation patching.
+
+2.2 Circuit Discovery
+
+Activation Patching. Transformer circuits are
+computational graphs that model the information
+flow from an input token, through residual flow
+among intermediate nodes (i.e., MLP layers and
+attention heads) to the output probability of the next
+token. To identify influential connections inside
+
+
+the circuits, we intervene in the model by replacing
+the activation of a counterfactual (corrupted) run
+by the activation of an original (clean) run.
+
+gle) = L(ep|do(E = €ori)) — L(ep) I)
+
+Concretely, we define the impact of introducing
+an intervening edge e (denoted by g(e)) as the dif-
+ference in a metric L when patching the activation
+of edge e from the original run (do(F = €o,;)).
+Formally, g(e) is computed as the difference be-
+tween L(x-¢|do( EH = €o,;)) where e is restored to
+its clean value, and L(x,,), the metric value under
+the corrupted run.
+
+Accelerate by Attribution Patching. To over-
+come the low speed and inference costs for acti-
+vation patching (Conmy et al., 2023), we adopt a
+first order Taylor approximation to Equation | and
+use the Edge Attribution Patching (EAP) method
+(Nanda, 2023; Syed et al., 2024). For an edge
+e = (u,v), the change of metric g(e) is:
+
+gle) © (au — 2)" VoL(xep), — @)
+
+where 2°” and z¢F denote the activation at node
+
+u in the original or counterfactual runs, and
+VvL(acf) is the gradient of metric L at node v.
+With the approximation, we can now calculate g(e)
+for all edges by two forward passes and one back-
+ward pass, greatly enhancing efficiency (by a factor
+of 10? in our practice), while preserving the perfor-
+mance of circuits (Syed et al., 2024).
+
+Attribution Patching Using CUDR. We first in-
+put the model with the counterfactual (CF) input,
+and the model produces a CF output. Using the
+same CF input, we then perform activation patch-
+ing from the original (Ori) to restore the model’s
+prediction to the Ori output. In the CF run, the
+model receives 7.7, constructed from Arg, anda
+counterfactual discourse connective (C‘onn’). The
+correct prediction is the counterfactual completion
+(Arg). In the ori run, the model receives xo, as in-
+put, which consists of (Arg:, Conn). The correct
+output is the original Arg. Attribution patching
+(Figure 2) works by replacing activations from the
+CF run with those from the Ori run. For example,
+to measure the importance of the edge between
+MLP 20 and Attention Head 21.9 (Attn. 21.9), we
+replace the activation flowing from MLP 20 into
+Attn. 21.9 with the corresponding activation from
+the Ori run and observe g(e), which is the change
+in the model’s output.
+
+: Original run
+
+? vet
+
+1. he goes to the:
+canteen :
+
+Bob is hungry, so
+Counterfactual run
+
+> i
+—> Bar :
+
+the canteen is :
+closed
+
+Bob is hungry, but.
+
+Figure 2: Illustration of attribution patching with
+CUDR: We steer the model’s prediction from the coun-
+terfactual toward the original outcome. Activations from
+the original run are patched into the counterfactual run
+to influence the model’s prediction.
+
+Construct Discursive Circuits. The discursive
+circuit for a given discourse relation is constructed
+by applying attribution patching to the CUDR task
+over a set of samples for that relation. We compute
+the average g(e) for each edge and select those
+with the highest absolute g(e) values as the most
+important. In practice, the top 1000 such edges are
+sufficient to steer the model faithfully, similar to
+prior work (Hanna et al., 2024).
+
+2.3 The CUDR Dataset
+
+We construct an augmented dataset by prompting
+a large language model (LLM) with the original
+Arg, and a counterfactual Conn’, along with de-
+tailed instructions and discourse relation definitions
+(Appendix A.3). We employ GPT-40-mini for its
+good instruction-following ability and lower cost.
+Building on the taxonomy of counterfactual dis-
+course relations proposed by Miao et al. (2024),
+our CUDR dataset adopts a PDTB3-based design
+(Table 2). For each discourse relation alongside
+its original connective, we construct five coun-
+terfactual discourse connectives. For example,
+the Comparison.Concession.Arg2-as-denier rela-
+tion (e.g., “however”, Row 1 in Table 2) is consid-
+
+
+Discourse Relation CF Connective
+because
+
+or example
+specifically
+
+in other words
+so
+
+jowever
+
+Ori Connective
+
+Comparison.Concession.Arg2-as-denier however
+
+Comparison.Contrast by comparison
+
+Contingency.Reason because
+
+because
+by comparison
+jowever
+
+so
+
+jowever
+
+or example
+because
+
+Contingency.Result so
+
+Expansion.Conjunction and
+
+Expansion.Equivalence in other words
+
+Expansion. Instantiation.Arg2-as-instance — for example
+jowever
+Expansion.Level-of-detail.Arg1-as-detail in short however
+Expansion.Level-of-detail.Arg2-as-detail specifically nstead .
+yy comparison
+Expansion.Substitution.Arg2-as-subst instead Decause
+in other words
+Temporal.Asynchronous.Precedence then however
+previously
+Temporal.Asynchronous.Succession previously i
+Temporal.Synchronous while so
+
+then
+
+Table 2: CUDR Dataset: PDTB’s discourse relations
+with corresponding original (Ori) connectives and coun-
+terfactual (CF) connectives (subset displayed for CF).
+
+ered counterfactual to both a Contingency relation
+(signaled by “‘because’’) and an Instantiation rela-
+tion (“for example”). We provide a complete list of
+connectives and their mappings in Appendix A.1.
+
+Discourse framework #ofDR_ #of CuDR data
+
+PDTB 13 11,843
+GDTB 12 5,253
+GUM-RST 17 6,805
+SDRT 10 3,853
+Total 27,754
+
+Table 3: CuDR Dataset Statistics: Number of unique
+discourse relations and CuDR data across frameworks.
+
+We extend our dataset construction beyond
+PDTB to include additional corpora: the GUM Dis-
+course Treebank (GDTB; Liu et al. 2024b), a more
+up-to-date PDTB-style corpus, as well as GUM-
+RST (Zeldes, 2017) and SDRT (Asher and Las-
+carides, 2003). To enable the generation of counter-
+factual instances from non-PDTB corpora, we con-
+struct relation mappings from RST to PDTB (Table
+7) and from SDRT to PDTB (Table 8 in Appendix
+A). For example, SDRT’s Explanation relation
+is mapped to PDTB’s Contingency.Cause.Reason,
+then its corresponding counterfactual relations Re-
+sult (“so”) and Contrast (“however”) are found in
+the PDTB-based taxonomy.
+
+Table 3 summarizes the metadata per discourse
+framework. Each original and counterfactual dis-
+course pair, (dori, def), is treated as a single data
+instance in the CUDR dataset. For each discourse
+relation in each corpus, we sample up to 50 origi-
+nal instances for circuit discovery and evaluation.
+
+With five counterfactual connectives per relation,
+this yields up to 250 CUDR instances. We discard
+minority relations with fewer than 20 instances,
+as well as low-quality instances where Argg and
+Arg}, are overly similar. We consider our sample
+size sufficient, as Yao et al. (2024) use a median of
+only 52. To validate the automated constructions,
+one author manually verified 40 CUDR samples
+and found them all valid as an indicative evalua-
+tion, with Arg), coherent with Arg; and Conn’.
+The language in Avy, tends to be straightforward,
+but it is desired because we want salient relations.
+We also construct a small set of counterfactual
+Arg}, instances, written by the first author, for
+indicative comparison (Appendix B.4). Prelimi-
+nary trials with open-source Llama-3.1-8B-Instruct
+(Grattafiori et al., 2024) to generate CUDR data
+were unsuccessful as the model did not follow our
+task instruction.
+
+3 Evaluate Discursive Circuits
+
+We conduct our evaluation to answer the following
+research questions (RQs):
+
+RQI1: Do discursive circuits faithfully recover the
+full model’s performance?
+
+RQz2: Do discursive circuits generalize across dif-
+ferent discourse frameworks and relation types?
+RQ3: Are discursive circuits composed of compo-
+nents associated with specific linguistic features?
+
+Implementation Details. Following Hanna et al.
+(2024); Mondorf et al. (2025), we focus on a single
+model for in-depth analysis and adopt their choice
+of GPT-2 medium (Radford et al., 2019) for its man-
+ageable memory requirements. To identify circuits
+for specific discourse relations, we use a sample
+size of 32 for both circuit discovery and validation,
+and apply the standard practice of using the batch
+mean for node value patching (Miller et al., 2024).
+We repeat each experiment five times with different
+data samples and average the outcomes for stability.
+Before circuit discovery, we fine-tune the model
+on held-out CUDR data (half of the PDTB subset)
+to align it with our task setting and ensure it fol-
+lows the intended instructions (Appendix B.1). Our
+fine-tuned model is not perfect, achieving around
+80% accuracy in our CUDR task. However, we use
+the entire dataset (including incorrectly predicted
+instances) for both circuit discovery and evalua-
+tion to fully capture the distribution of the task.
+Aside from GPT-2 medium, we also scale our ex-
+periments to GPT-2 large and find that the larger
+
+
+model has similar performance (Appendix B.3).
+Baseline Circuits: (1) Following Hsu et al. (2025);
+Basu et al. (2025), we benchmark random circuits
+on our CUDR task, where circuit edges are sam-
+pled randomly from the transformer without any
+learned importance. This comparison evaluates
+whether our learned circuits provide advantages
+beyond random selection. (2) We also replicate
+the Indirect Object Identification (IOI) circuit
+(Wang et al., 2023) in our own model as a baseline
+circuit. In the IOI task, the model is given a prompt
+like “John and Mary went to a bar. Mary gave a
+beer to”, and should predict “John”. This circuit
+represents the model’s general next-word predic-
+tion ability, without discourse-specific reasoning.
+Comparing against IOI allows us to test whether
+discursive circuits capture discourse-specific com-
+putation beyond standard language modeling.
+
+Evaluation Metric. Our metric follows Miller
+et al. (2024) to calculate the logit difference be-
+tween the correct and incorrect answers. Specif-
+ically, we treat the original discourse’s Arg2 as
+correct and the counterfactual Ary’, as incorrect,
+and compute AL = L(Arg2) — L(Arg), where
+L(-) denotes the logit of the corresponding answer.
+Normalized faithfulness: Since different dis-
+course relations yield different raw scores, we re-
+port normalized faithfulness scores (Miller et al.,
+2024), which quantify the percentage of the full
+model’s performance that a sparse circuit restores.
+Concretely, we compute = a where AL patch
+is the logit difference obtained by patching clean
+activations into a corrupted input, and ADguy is
+the logit-difference of the full model on clean in-
+put. In our CUDR task, faithfulness begins at a
+large negative value (since the unpatched model
+selects Ar'g’,), increases as clean edges are patched,
+and reaches 100% when the full model is restored
+(which predicts Arg).
+
+Hierarchical Discursive Circuits. With the
+learned circuits, we construct a new PDTB-style
+circuit hierarchy. To the best of our knowledge, this
+is the first discourse hierarchy derived from neu-
+ral components. We first learn circuits for all 13
+Level-3 (L3) relations and use the top 1,000 edges
+to merge them to form higher-level circuits. That is,
+L3 3 1.2 53 L1 3 LO (Table 4). Note that our circuit
+hierarchy differs from the PDTB taxonomy in two
+ways: (1) All “leaf node” relations are treated as
+L3 since they have no children to merge (e.g., Tem-
+
+L1 L2 L3
+
+' Concession X Arg2-as-denier
+Comparison (568) j Contrast
+Contingency (564) Beas
+
+/ Result
+/ Conjunction
+/ Equivalence
+Expansion (200) Instantiation X Ap ?rassinstance
+Level-of-detail (565) ¢ —wBi-as-detail
+Arg2-as-detail
+Substitution X Arg2-as-subst
+Precedence
+Temporal (405) Asynchronous (575) “ Succession
+/ Synchronous
+
+Table 4: Discursive Circuits Hierarchy (L1-L3): All
+“leaf node” relations are classified as L3. Only two
+circuits appear at the |.2 level, each merging more than
+one L3 circuit. (Numbers) indicate edge counts. L3
+circuit has 1,000 edges, and LO circuit has 137 edges.
+
+Overall Performance
+
+-100%
+
+-150%
+
+—e
+—# Ll
+——
+
+-200%
+
+Figure 3: RQ1: Overall Faithfulness of Discursive
+Circuits: We report average faithfulness across 13
+PDTB relations for circuits L3, L1, LO, the base-
+line, and the IO] baseline. The Y-axis shows faithfulness
+(%), and the X-axis shows the number of patched edges
+(log scale). Shaded areas indicate standard deviation.
+L3 and LI reach strong faithfulness at ~ 200 edges
+(vertical dashed line).
+
+poral.Synchronous) and circuit discovery operates
+on the finest-grain level; (2) Some |? relations are
+removed (e.g., Concession X) as they contain only
+one valid L3 relation due to data scarcity, so merg-
+ing would be meaningless. In the end, |.2 circuits
+contain over 500 edges, L1 circuits have 200-500+
+edges, and the meta LO circuit contains 137 edges.
+
+3.1 Discursive Circuits are Faithful (RQ1)
+
+We first validate the faithfulness of discursive cir-
+cuits on the PDTB dataset. The average perfor-
+mance across 13 discourse relations (Figure 3)
+shows strong overall effectiveness. We omit 1.2
+as it covers only a subset of relations. For both
+L3 and LI circuits, strong faithfulness (~ 90%) is
+achieved with only + 200 edges. L3 outperforms
+
+
+(1) Comparison.Conc.Arg2-as-denier
+
+(2) Comparison.Contrast
+
+Figure 4: RQ1 Faithfulness of Discursive Circuits by
+Discourse Relation (see indices 1—13).
+
+LI in the 10-200 edge range, likely due to its abil-
+ity to capture more fine-grained information. Both
+L3 and LI surpass LO, IOI, and after 100
+edges. This gap is likely due to LO’s small size
+(137 edges) which concentrates only on the most
+dominant skill. The baseline shows almost
+no capacity to solve the CUDR task with fewer
+than 200 edges, and only begins to improve after
+1,000 edges, indicating that the task requires non-
+trivial circuit structure to succeed. Even though [OI
+reasons over next objects, it still lacks discourse
+skills, as it plateaus quickly around = 50% faith-
+fulness, showing the unique skills needed for dis-
+course competence.
+
+We then analyze the performance breakdown by
+relation types (Figure 4) and make the following
+observations: (1) Finer-grained circuits are more
+
+effective than coarser ones. There is a consistent
+trend across relation types: L3 > L2 = L1 > LO
+> [OI. However, fine-grained circuits also show
+greater variance (large red shades). L1 is more
+stable and has a lower variance. In practice, we
+recommend L] as a balanced choice: while slightly
+less effective in early stages, it matches L3 after
+= 300 edges and works for all lower-level relations.
+(2) 2 does not necessarily outperform L1. This
+is evident in the four relations that have |? circuits,
+including Expansion.Details (8th and 9th subfig-
+ures in Figure 4, compared with Expansion L1’s cir-
+cuit) and Temporal.Asynchronous (12th and 13th,
+compared with Temporal L1 circuit). This sug-
+gests that |.2 and L1 operate at a similar level of
+abstraction, with comparable degrees of informa-
+tion loss. (3) Discursive circuits reflect task dif-
+ficulty. Two Contingency relations (3rd and 4th)
+are exceptions where L1 matches or outperforms
+L3. Further inspection shows that these relations
+have lower absolute faithfulness scores, suggest-
+ing the model struggles with them. In such cases,
+L3 may overfit, while L1 retains core patterns and
+generalizes better. [OI generally underperforms
+due to its lack of discourse specificity. However,
+in Conjunction (Sth) and Equivalence (6th), it per-
+forms comparably or better than discursive circuits,
+suggesting these relations are easier to model. In
+contrast, larger gaps in Comparison (1st—2nd) and
+Contingency (3rd—4th) indicate greater complexity.
+
+3.2 Discursive Circuits Generalize to New
+Datasets and New Relations (RQ2)
+
+Do discursive circuits generalize across different
+discourse frameworks ? We extend the CUDR task
+to other frameworks by applying circuits obtained
+from PDTB to GDTB (same framework, differ-
+ent genre), as well as to RST and SDRT (differ-
+ent frameworks). We follow the same mapping
+(Appendix A.2) for cross-framework transfer; for
+example, Explanation (SDRT) is mapped to Contin-
+gency.Cause.Reason (PDTB). Figure 5 shows the
+generalization performance, with each line repre-
+senting the average performance across all relations
+in the dataset. PDTB circuits generalize well to
+other datasets. We set an “upper bound” using the
+Own circuits (learned via CUDR task in-dataset,
+e.g. SDRT’s Explanation). PDTB’s L3 circuits
+close the gap with Own using only = 200 edges,
+despite initially lagging due to dataset-specific fea-
+tures. Across the three generalization targets, we
+observe Own > L3 > LI = LO > IOI > ;
+
+
+Faithfulness Score (%)
+
+Random
+== 101 1]
+LO
+
+Faithfulness Score (%)
+
+-100%
+
+-150% 7
+
+100%
+
+0%
+
+-100%
+
+-200%
+
+-300%
+
+Faithfulness Score (%)
+
+-400%
+
+-500%
+
+10° 107 10? 10° 10* 105
+Number of edges patched (log scale)
+
+Figure 5: RQ2 Cross-dataset generalization: Perfor-
+mance by applying PDTB’s circuits to other datasets.
+
+which is a consistent trend. L1 and LO are weaker in
+the first 100 edges, likely because both abstractions
+lose fine-grained information (12 is skipped due to
+limited coverage). SDRT is the most challenging
+to generalize to, with only 50% faithfulness after
+100 patched edges, highlighting the gap between
+the datasets.
+
+Do circuits learned for one discourse relation
+generalize to others? We study all 13 PDTB L3 re-
+lations by applying each circuit to the other 12, us-
+ing the top 200 edges per circuit (enough for strong
+faithfulness): (1) Figure 6a shows the edge over-
+lap among these circuits. While the diagonals are
+darker, indicating greater overlap between similar
+relations, the overall overlap remains consistently
+high (80-120 out of 200 edges). (2) Figure 6b
+shows no correlation between overlap and faith-
+fulness (r = —0.007). This is counterintuitive, as
+one might expect higher overlap to imply better
+generalization. The narrow overlap range (80-120)
+likely limits the variation. Recently, Hanna et al.
+(2024) also reports faithfulness does not necessarily
+require high overlap. (3) Cross-framework results
+(Figure 6c) reveal a positive correlation between
+overlap and performance, e.g., PDTB — GDTB
+yields r = 0.44. In summary, higher circuit overlap
+does not imply better intra-framework faithfulness,
+but does support inter-framework transfer.
+
+(a) Circuits Overlap
+
+Comparison.Concession.Arg2-as-denier 200
+
+‘Comparison.Contrast
+
+Contingency.Cause.Reason - 180
+
+Contingency.Cause.Result
+
+Expansion.Conjunction- 111 1
+Expansion Equivalence -
+Expansion instantiation.Arg2-as-instance- 79
+
+Expansion Level-of-detail Argl-as-detail- 88
+
+Edge Overlap Count
+
+Expansion Level-of-detail Arg2-as-detail -
+
+Expansion.Substitution,Arg2-as-subst
+
+‘Temporal. Asynchronous. Precedence
+
+-80
+
+‘Temporal. Asynchronous. Succession
+
+Temporal.Synchronous +
+
+(b) Faithfulness VS Circuit Overlap
+(Cross relation, Intra-Framework)
+
+e  Discursive circuits
+Trend (r=-0.007)
+
+Faithfulness Scores (%)
+
+80 90 100 110 120 130
+Number of Overlapping Edges
+
+(c) Faithfulness VS Circuit Overlap (Inter-framework)
+
+Faithfulness Score (%)
+
+/ Ll m GDTB
+
+a ee | — =<- GDTB trend (r=0.44)
+: rae *. @ RST
+
+Positive 4 =-- RST trend (r=0.15)
+= A SDRT
+
+‘correlation
+
+90 101
+
+--- SDRT trend (r=0.25)
+—— Overall trend (r=0.27)
+
+0 ilo 120 130 140
+Number of Overlapping Edges
+
+Figure 6: RQ2 Cross-relation Generalization: (a)
+The overlap among PDTB’s relation circuits; (b) Intra-
+framework generalization in PDTB; (c) Inter-framework
+generalization from PDTB.
+
+3.3 Discursive Circuits Overlap with
+Linguistic Features’ Circuits (RQ3)
+
+Are discursive circuits composed of sub-circuits
+linked to linguistic features? Inspired by the eRST
+and RST Signaling Corpus (Zeldes et al., 2025;
+Das and Taboada, 2018), we discover circuits for
+five key features, () antonymy, (2) synonymy, @G)
+negation, (4) modality, and (6) coreference, as a pre-
+liminary and non-exhaustive study, using similar
+activation prompts (Appendix B.5). We find that
+the utilities of linguistic features are broadly con-
+sistent across frameworks (Figure 7a). Utility is
+measured as the overlap between circuits associated
+with a given linguistic feature and the discovered
+discursive circuits, averaged over all discourse re-
+
+
+PDTB
+
+RST
+
+&
+
+55 55
+
+50 50
+
+45 45
+
+40 ee 0
+
+35 35
+a
+
+ee oe
+ao oe cot
+
+65646 6568%6
+
+‘s Rs ee
+oo re oo
+
+566646 6654%
+
+(a) Average overlap between discursive circuits and circuits for linguistic features (averaged over all discourse relations within a
+framework). A consistent trend shares across frameworks: 4.modality is most heavily utilized, while 5.coreference is the least.
+
+_RST
+=)
+
+PDTB
+
+Comp.Contrast
+Cont.Reason
+
+Comp. j,
+Cont. §
+
+pieecsesssesaeens
+
+*,, Cont Result
+queseeeeeees
+
+Exp. Ciuincien
+
+Exp-Equivalence
+: Exp. Equivalence
+= Exp.Arg2-as-instance.
+Ex : Exp.Arg2-as-instance
+© 5 Exp.Argl-as-detail ‘
+: Exp.Arg2-as-detail
+Exp.Arg2-as-detail
+
+%,_Exp.Arg2-as-subst xi Reaniencpuaaed
+
+- _
+Te m p : Temp.Precedence Temp.Precedence
+
+Temp.Succession Temp.Succession
+
+‘Temp.Synchronous |
+
+mn wy
+ctor mee 0% 08 eco
+
+DO@O@OO
+
+Pe saltty once
+mo oe 97 osaere™
+
+OQOOO
+
+SDRT
+
+cs 0 2
+ator a0 938 08 os ene
+
+OOO@™O
+
+SHOP galt once
+os cor 208 008 el cere
+
+DOOOO
+
+(b) Normalized overlap (column-wise), where each column is scaled such that its maximum value equals 1 (values in heatmaps
+range from 0.6 to 1). Similar cross-framework patterns are observed, for example, modality is strongly utilized across all
+frameworks, while coreference signals appear prominently in most Expansion relations.
+
+Figure 7: RQ3 Overlap of discursive circuits with circuits for linguistic features: antonymy, synonymy, negation,
+
+modality, and coreference.
+
+lations within a framework. Among these features,
+(4) modality is the most extensively utilized, while
+(5) coreference is the least. Interestingly, the (2)
+synonymy feature is consistently more prominent
+than (1) antonymy across all frameworks, suggest-
+ing that synonymy serves as a more common co-
+hesive device. We also find that irrelevant circuits
+overlap only weakly with discursive circuits (e.g.,
+IOI overlaps with PDTB circuits on only about 20
+edges). To enable a fair, fine-grained comparison
+across linguistic features, we present column-wise
+normalized overlaps (Figure 7b). Normalization
+ensures that each feature is scaled relative to its
+own maximum, allowing comparison across frame-
+works without one feature dominating due to raw
+magnitude. We find a consistent utility at the level
+of individual discourse relations. From a broad
+perspective, PDTB, GDTB, and RST display sim-
+ilar heatmap structures, while SDRT diverges sig-
+nificantly. Across the three similar frameworks,
+@) synonymy, 3) negation, and (4) modality are
+heavily used across most relations. In contrast, )
+antonymy is relatively weak in Contingency and
+Temporal relations (lighter-colored cells). Notably,
+(5) coreference is most active in Expansion rela-
+tions (highlighted by the darkest () cells within
+
+the green boxes), reflecting the role of entity con-
+tinuity. SDRT, however, shows less reliance on
+coreference, likely due to shorter texts.
+
+DC / Linguistic Features
+
+efonmeesetece!
+e eoae
+
+?
+o
+
+he
+° <
+°
+
+multiple + Dc
+[= antonyms + DC
+synonyms + DC
+
+modality + DC
+coreference + Di
+
+12 12
+Source Layer Source Layer
+
+Figure 8: RQ3 Layer-wise Edge Analysis: Source (X-
+axis) and target (Y-axis) layers of edges in discursive
+and linguistic circuits. DC-only edges emerge in higher
+layers and are absent in lower layers.
+
+Figure 8 shows the layer-wise distribution of
+discursive circuits (DC) and linguistic circuits by
+source and target node layers (Top 200 edges). DC-
+only edges are absent in lower layers (noted as
+“empty”). A distinct region (source: 8-16, tar-
+get: 10—20) contains DC-only edges, with very
+limited overlap with linguistic features. This sug-
+gests lower layers in discursive circuits capture
+shared linguistic features, while discursive abstrac-
+tion emerges in higher layers.
+
+
+wins now] Args
+
+Error case 2: [I'll give clay in return] 4,,,, (because)
+[think clay is in abundance this game] arg.
+
+PDTB’s_ missing edges: Resid Start—MLPO,
+A19.9-4A21.1, MLP3—>MLP7, MLP7->MLP11
+
+Table 5: Case Study: PDTB circuit X; SDRT circuit V
+
+We further examine the cases where SDRT’s
+Own circuits succeed but PDTB’s L3 circuits fail
+(both using the first 30 edges). Table 5 shows a
+subset of representative errors. Case | involves an
+interjection (“yay!”), and Case 2 features an ellipsis
+of the subject “T’ in Argg, both are rare phenomena
+in PDTB. Our method pinpoints missing elements
+in PDTB that SDRT captures, such as early edges
+(Resid Start MLP 0, aiding connective reasoning)
+and late edges (e.g., 19.9-+21.1, shared only with
+the coreference feature among the five features).
+
+4 Related Works
+
+Discourse Modeling and Evaluation. Discourse
+modeling has been studied under three major frame-
+works: PDTB (Webber et al., 2019; Prasad et al.,
+2008), RST (Mann and Thompson, 1987; Zeldes,
+2017; Zeldes et al., 2025), and SDRT (Asher and
+Lascarides, 2003). Recent studies seek to unify
+these frameworks, with advances in discourse re-
+lation prediction (Zhao et al., 2023; Wu et al.,
+2023a; Anuranjana, 2023; Chan et al., 2023; Liu
+and Strube, 2023; Rong and Mo, 2024; Li et al.,
+2024a; Liu and Strube, 2025; Long et al., 2024;
+Aktas and Roth, 2025), discourse structure parsing
+(Li et al., 2023, 2024b; Thompson et al., 2024; Liu
+et al., 2025; Zhang et al., 2025; Namuduri et al.,
+2025), and annotation (Pyatkin et al., 2023; Yung
+et al., 2024; Ruby et al., 2025; Saeed et al., 2025).
+Fu (2022) outlines early plans for unification, and
+the DISRPT benchmark (Braud et al., 2024) en-
+ables cross-framework evaluation with data anno-
+tated under all three schemes. Liu et al. (2024b)
+propose automatic RST-to-PDTB transformation
+via sense mapping. Liu and Zeldes (2023); Eichin
+et al. (2025) examine generalization across do-
+mains and languages. While linguistically insight-
+ful, existing approaches overlook interpretability.
+Question answering has also been explored as
+a bridge across frameworks. Fu (2025) links
+Questions Under Discussion (QUD) (Wu et al.,
+2023b; Ko et al., 2023) to PDTB, RST, and SDRT.
+Miao et al. (2024) propose a QA-based evalua-
+tion, though their prompts offer limited insight into
+
+model internals. LLMs have been used to synthe-
+size discourse data (Yung et al., 2025; Cai, 2025),
+mainly to augment low-resource relations (Omura
+et al., 2024). In contrast, our CUDR dataset targets
+interpretability rather than data expansion.
+
+Mechanistic Interpretability. Unlike visualiza-
+tions (Jain and Wallace, 2019; Wiegreffe and Pin-
+ter, 2019) or textual explanations (Lyu et al., 2024;
+Zhu et al., 2024), mechanistic interpretability iden-
+tifies components in a model that drive predic-
+tions. Circuits, as global computation graphs, can
+be identified through activation patching (Conmy
+et al., 2023; Miller et al., 2024; Syed et al., 2024;
+Bakalova et al., 2025). We do not adopt sparse
+autoencoders (SAEs) (Huben et al., 2024; Makelov
+et al., 2024) or neuron-level analysis (Dai et al.,
+2022; Ai et al., 2025), as our goal is to understand
+discourse processing at a global model rather than
+isolate local activity. Circuit discovery has mostly
+been applied to simplistic tasks, such as indirect
+object identification (IOI) (Wang et al., 2023), nu-
+merical comparison (Hanna et al., 2023), subject-
+verb agreement (SVA) (Ferrando and Costa-jussa,
+2024), MCQ (Lieberum et al., 2023), knowledge
+acquisition (Yao et al., 2024; Ou et al., 2025; Hanna
+et al., 2024), colored objects (Merullo et al., 2024),
+extractive QA (Basu et al., 2025), and context-free
+grammars (Mondorf et al., 2025). No existing work
+addresses complex discourse phenomena.
+
+5 Conclusion and Future Work
+
+In this work, we introduce discursive circuits, the
+first mechanistic interpretation of how discourse un-
+derstanding is realized within language models. To
+make circuit discovery feasible, we propose a novel
+CUDR task that enables activation patching, along
+with acollection of CUDR datasets for PDTB, RST,
+and SDRT discourse frameworks. Our identified
+discursive circuits are shown to be faithful in restor-
+ing the full model’s performance and exhibit strong
+cross-framework generalization. Discursive cir-
+cuits provide a new lens for mechanistically repre-
+senting discourse, enabling the construction of a
+circuit hierarchy that supports direct comparison of
+discourse relations both within and across frame-
+works. Based on that, we observe shared linguistic
+feature utility across frameworks. In future work,
+we plan to extend CUDR to diverse discourse styles
+and languages, and adapt it to broader tasks such
+as steering models in biased contexts and guiding
+future discourse taxonomy development.
+
+
+Limitations
+
+Our work also has the following limitations: (1)
+We only study English-based corpora. It would be
+promising to extend circuit discovery to multiple
+languages and explore whether a unified circuit
+space exists across different languages, similar to
+the universal discourse label set explored by Eichin
+et al. (2025). This is feasible, as we can construct
+the CUDR dataset for other languages as well. (2)
+We follow Hanna et al. (2023, 2024); Mondorf et al.
+(2025) in focusing on a single transformer-based
+language model to enable more in-depth analysis.
+While it would be interesting to extend our method
+to other model architectures such as multi-layer
+perceptrons (MLPs) (Fusco et al., 2023) or LSTMs
+(Sundermeyer et al., 2012), we limit our scope to
+transformers due to their predominant use today
+and because activation patching is not directly com-
+patible with MLPs or LSTMs. (3) We do not com-
+pare discourse processing in language models with
+that in the human brain (Case and Oetama-Paul,
+2015; Perfetti and Frishkoff, 2008). For example,
+Eviatar and Just (2006) report that discourse pro-
+cessing triggers specific brain activations observ-
+able via fMRI. While intriguing, this is beyond the
+scope of our study.
+
+Ethical Statement and Potential Risks
+
+Our research on discourse relations does not pose
+direct ethical risks. However, as with all mech-
+anistic interpretability studies, the identified cir-
+cuits could be used to influence model behavior in
+specific capacities, such as modifying numerical
+reasoning (Hanna et al., 2023) or, in our case, dis-
+course processing and generation. By making the
+model’s reasoning about discourse relations more
+transparent, our work has the potential to aid in
+detecting and mitigating biases in scenarios where
+discourse structure plays a role.
+
+The risk of data contamination in GPT-2 is low.
+Trained on the “WebText” corpus (Reddit-linked
+contents), GPT-2 explicitly excludes paywalled
+sources such as the Wall Street Journal, making
+inclusion of the PDTB corpus unlikely. The GUM
+corpus (GDTB, RST) comprises small, academi-
+cally curated texts unlikely to appear in WebText,
+while the SDRT (STAC corpus) consists of anno-
+tated Catan dialogue logs, also absent from typical
+pretraining data.
+
+Declaration of AI Tool Usage
+
+We used AI tools at the following stages of this re-
+search: (1) GPT-40-mini (via API) was used to gen-
+erate the counterfactual instances for our CUDR
+dataset; prompt details are provided in Appendix A;
+(2) Cursor AI was used during coding, primarily for
+debugging assistance; (3) ChatGPT-40 (via web in-
+terface) was employed only for grammar checking
+of the manuscript. All research ideas, analyses, and
+findings were developed and written independently
+by the authors.
+
+Acknowledgements
+
+We thank our anonymous reviewers for their time
+spent on reviewing our paper and their detailed
+feedback, which greatly helped us refine our work.
+We also thank several colleagues at National Uni-
+versity of Singapore (NUS) for research discus-
+sions and proofreading of our drafts, especially
+Barid Xi Ai, Shumin Deng, Yajing Yang, Tongyao
+Zhu, Mahardika Krisna Ihsani, Xuan Long Do,
+and Xinyuan Lu. We appreciate Joseph Miller,
+Bilal Chughtai, and William Saunders for open
+sourcing their software * and Neel Nanda’s blog
+3 that guided the first author into mechanistic in-
+terpretability. We would also like to acknowledge
+a grant from National Research Foundation, Sin-
+gapore under its AI Singapore Programme (AISG
+Award No: AISG2-GC-2022-005).
+
+References
+
+Xi Ai, Mahardika Krisna Ihsani, and Min-Yen Kan.
+2025. Are knowledge and reference in multilingual
+language models cross-lingually consistent? In Find-
+ings of the Association for Computational Linguis-
+tics: EMNLP 2025, Suzhou, China. Association for
+Computational Linguistics.
+
+Berfin Aktas and Michael Roth. 2025. Clarifying under-
+specified discourse relations in instructional texts. In
+Findings of the Association for Computational Lin-
+guistics: ACL 2025, pages 12237-12256, Vienna,
+Austria. Association for Computational Linguistics.
+
+Kaveri Anuranjana. 2023. DiscoFlan: Instruction fine-
+tuning and refined text generation for discourse re-
+lation label classification. In Proceedings of the
+3rd Shared Task on Discourse Relation Parsing and
+Treebanking (DISRPT 2023), pages 22—28, Toronto,
+Canada. The Association for Computational Linguis-
+tics.
+
+*https://ufo-101.github. io/auto-circuit/
+3https: //www. alignmentforum. org/users/
+neel-nanda-1
+
+
+Nicholas Asher and Alex Lascarides. 2003. Logics of
+conversation. Cambridge University Press.
+
+Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang,
+Xiaodong Deng, Yang Fan, Wenbin Ge, Yu Han, Fei
+Huang, and | others. 2023. Qwen technical report.
+arXiv preprint arXiv:2309.16609.
+
+Aleksandra Bakalova, Yana Veitsman, Xinting Huang,
+and Michael Hahn. 2025. Contextualize-then-
+aggregate: Circuits for in-context learning in gemma-
+2 2b. In Second Conference on Language Modeling.
+
+Samyadeep Basu, Vlad I Morariu, Ryan A. Rossi, Nanx-
+uan Zhao, Zichao Wang, Soheil Feizi, and Varun
+Manjunatha. 2025. On mechanistic circuits for ex-
+tractive question-answering. In Second Conference
+on Language Modeling.
+
+Chloé Braud, Amir Zeldes, Laura Riviere, Yang Janet
+Liu, Philippe Muller, Damien Sileo, and Tatsuya
+Aoyama. 2024. DISRPT: A multilingual, multi-
+domain, cross-framework benchmark for discourse
+processing. In Proceedings of the 2024 Joint In-
+ternational Conference on Computational Linguis-
+tics, Language Resources and Evaluation (LREC-
+COLING 2024), pages 4990-5005, Torino, Italia.
+ELRA and ICCL.
+
+Xinyi Cai. 2025. Fine-grained evaluation for im-
+plicit discourse relation recognition. Preprint,
+arXiv:2503.05326.
+
+Susan S Case and Angela J Oetama-Paul. 2015. Brain
+biology and gendered discourse. Applied Psychology,
+64(2):338-378.
+
+Chunkit Chan, Xin Liu, Jiayang Cheng, Zihan Li,
+Yangqiu Song, Ginny Wong, and Simon See. 2023.
+DiscoPrompt: Path prediction prompt tuning for im-
+plicit discourse relation recognition. In Findings of
+the Association for Computational Linguistics: ACL
+2023, pages 35-57, Toronto, Canada. Association for
+Computational Linguistics.
+
+Arthur Conmy, Augustine N. Mavor-Parker, Aengus
+Lynch, Stefan Heimersheim, and Adria Garriga-
+Alonso. 2023. Towards automated circuit discovery
+for mechanistic interpretability. In Thirty-seventh
+Conference on Neural Information Processing Sys-
+tems.
+
+Damai Dai, Li Dong, Yaru Hao, Zhifang Sui, Baobao
+Chang, and Furu Wei. 2022. Knowledge neurons in
+pretrained transformers. In Proceedings of the 60th
+Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 8493—
+8502, Dublin, Ireland. Association for Computational
+Linguistics.
+
+Debopam Das and Maite Taboada. 2018. Rst signalling
+corpus: A corpus of signals of coherence relations.
+Language Resources and Evaluation, 52(1):149-184.
+
+Florian Eichin, Yang Janet Liu, Barbara Plank, and
+Michael A. Hedderich. 2025. Probing LLMs for mul-
+tilingual discourse generalization through a unified
+label set. In Proceedings of the 63rd Annual Meeting
+of the Association for Computational Linguistics (Vol-
+ume 1: Long Papers), pages 18665-18684, Vienna,
+Austria. Association for Computational Linguistics.
+
+Zohar Eviatar and Marcel Adam Just. 2006. Brain cor-
+relates of discourse processing: An fmri investigation
+of irony and conventional metaphor comprehension.
+Neuropsychologia, 44(12):2348-2359.
+
+Javier Ferrando and Marta R. Costa-jussa. 2024. On
+the similarity of circuits across languages: a case
+study on the subject-verb agreement task. In Find-
+ings of the Association for Computational Linguistics:
+EMNLP 2024, pages 10115-10125, Miami, Florida,
+USA. Association for Computational Linguistics.
+
+Yingxue Fu. 2022. Towards unification of discourse
+annotation frameworks. In Proceedings of the 60th
+Annual Meeting of the Association for Computational
+Linguistics: Student Research Workshop, pages 132-
+142, Dublin, Ireland. Association for Computational
+Linguistics.
+
+Yingxue Fu. 2025. A survey of QUD models for dis-
+course processing. In Proceedings of the 2025 Con-
+ference of the Nations of the Americas Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers),
+pages 1722-1732, Albuquerque, New Mexico. Asso-
+ciation for Computational Linguistics.
+
+Francesco Fusco, Damian Pascual, Peter Staar, and
+Diego Antognini. 2023. pNLP-mixer: an efficient
+all-MLP architecture for language. In Proceedings of
+the 61st Annual Meeting of the Association for Com-
+putational Linguistics (Volume 5: Industry Track),
+pages 53-60, Toronto, Canada. Association for Com-
+putational Linguistics.
+
+Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri,
+Abhinav Pandey, Abhishek Kadian, Ahmad Al-
+Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten,
+Alex Vaughan, and | others. 2024. The llama 3 herd
+of models. arXiv preprint arXiv:2407.21783.
+
+Michael Hanna, Ollie Liu, and Alexandre Variengien.
+2023. How does GPT-2 compute greater-than?: In-
+terpreting mathematical abilities in a pre-trained lan-
+guage model. In Thirty-seventh Conference on Neu-
+ral Information Processing Systems.
+
+Michael Hanna, Sandro Pezzelle, and Yonatan Belinkov.
+2024. Have faith in faithfulness: Going beyond cir-
+cuit overlap when finding model mechanisms. In
+First Conference on Language Modeling.
+
+Aliyah R. Hsu, Georgia Zhou, Yeshwanth Cherapanam-
+jeri, Yaxuan Huang, Anobel Odisho, Peter R. Carroll,
+and Bin Yu. 2025. Efficient automated circuit discov-
+ery in transformers using contextual decomposition.
+In The Thirteenth International Conference on Learn-
+ing Representations.
+
+
+Robert Huben, Hoagy Cunningham, Logan Riggs Smith,
+Aidan Ewart, and Lee Sharkey. 2024. Sparse autoen-
+coders find highly interpretable features in language
+models. In The Twelfth International Conference on
+Learning Representations.
+
+Sarthak Jain and Byron C. Wallace. 2019. Attention is
+not Explanation. In Proceedings of the 2019 Con-
+ference of the North American Chapter of the Asso-
+ciation for Computational Linguistics: Human Lan-
+guage Technologies, Volume 1 (Long and Short Pa-
+pers), pages 3543-3556, Minneapolis, Minnesota.
+Association for Computational Linguistics.
+
+Zae Myung Kim, Anand Ramachandran, Farideh
+Tavazoee, Joo-Kyung Kim, Oleg Rokhlenko, and
+Dongyeop Kang. 2025. Align to structure: Aligning
+large language models with structural information.
+Preprint, arXiv:2504.03622.
+
+Wei-Jen Ko, Yating Wu, Cutter Dalton, Dananjay Srini-
+vas, Greg Durrett, and Junyi Jessy Li. 2023. Dis-
+course analysis via questions and answers: Parsing
+dependency structures of questions under discussion.
+In Findings of the Association for Computational Lin-
+guistics: ACL 2023, pages 11181-11195, Toronto,
+Canada. Association for Computational Linguistics.
+
+Chuyuan Li, Chloé Braud, Maxime Amblard, and
+Giuseppe Carenini. 2024a. Discourse relation predic-
+tion and discourse parsing in dialogues with minimal
+supervision. In Proceedings of the 5th Workshop
+on Computational Approaches to Discourse (CODI
+2024), pages 161-176, St. Julians, Malta. Association
+for Computational Linguistics.
+
+Chuyuan Li, Patrick Huber, Wen Xiao, Maxime Am-
+blard, Chloe Braud, and Giuseppe Carenini. 2023.
+Discourse structure extraction from pre-trained and
+fine-tuned language models in dialogues. In Find-
+ings of the Association for Computational Linguistics:
+EACL 2023, pages 2562-2579, Dubrovnik, Croatia.
+Association for Computational Linguistics.
+
+Chuyuan Li, Raymond Li, Thalia S. Field, and Giuseppe
+Carenini. 2025. Delta-KNN: Improving demonstra-
+tion selection in in-context learning for Alzheimer’s
+disease detection. In Proceedings of the 63rd An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 25807—
+25826, Vienna, Austria. Association for Computa-
+tional Linguistics.
+
+Chuyuan Li, Yuwei Yin, and Giuseppe Carenini.
+2024b. Dialogue discourse parsing as generation: A
+sequence-to-sequence LLM-based approach. In Pro-
+ceedings of the 25th Annual Meeting of the Special
+Interest Group on Discourse and Dialogue, pages
+1-14, Kyoto, Japan. Association for Computational
+Linguistics.
+
+Tom Lieberum, Matthew Rahtz, Janos Kramar, Neel
+Nanda, Geoffrey Irving, Rohin Shah, and Vladimir
+Mikulik. 2023. Does circuit analysis interpretability
+scale? evidence from multiple choice capabilities in
+chinchilla. Preprint, arXiv:2307.09458.
+
+Hongfu Liu and Ye Wang. 2023. Towards informative
+few-shot prompt with maximum information gain for
+in-context learning. In Findings of the Association
+for Computational Linguistics: EMNLP 2023, pages
+15825-15838, Singapore. Association for Computa-
+tional Linguistics.
+
+Shannan Liu, Peifeng Li, Yaxin Fan, and Qiaoming Zhu.
+2025. Enhancing multi-party dialogue discourse pars-
+ing with explanation generation. In Proceedings of
+the 31st International Conference on Computational
+Linguistics, pages 1531-1544, Abu Dhabi, UAE. As-
+sociation for Computational Linguistics.
+
+Wei Liu and Michael Strube. 2023. Annotation-inspired
+implicit discourse relation classification with auxil-
+iary discourse connective generation. In Proceedings
+of the 61st Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 15696-15712, Toronto, Canada. Association
+for Computational Linguistics.
+
+Wei Liu and Michael Strube. 2025. Joint modeling of
+entities and discourse relations for coherence assess-
+ment. In The 2025 Conference on Empirical Methods
+in Natural Language Processing.
+
+Yan Liu, Yu Liu, Xiaokang Chen, Pin-Yu Chen,
+Daoguang Zan, Min-Yen Kan, and Tsung-Yi Ho.
+2024a. The devil is in the neurons: Interpreting
+and mitigating social biases in language models. In
+The Twelfth International Conference on Learning
+Representations.
+
+Yang Janet Liu, Tatsuya Aoyama, Wesley Scivetti, Yilun
+Zhu, Shabnam Behzad, Lauren Elizabeth Levine, Jes-
+sica Lin, Devika Tiwari, and Amir Zeldes. 2024b.
+GDTB: Genre diverse data for English shallow dis-
+course parsing across modalities, text types, and do-
+mains. In Proceedings of the 2024 Conference on
+Empirical Methods in Natural Language Processing,
+pages 12287-12303, Miami, Florida, USA. Associa-
+tion for Computational Linguistics.
+
+Yang Janet Liu and Amir Zeldes. 2023. Why can‘t dis-
+course parsing generalize? a thorough investigation
+of the impact of data diversity. In Proceedings of the
+17th Conference of the European Chapter of the As-
+sociation for Computational Linguistics, pages 3112-
+3130, Dubrovnik, Croatia. Association for Computa-
+tional Linguistics.
+
+Do Xuan Long, Duong Ngoc Yen, Do Xuan Trong,
+Anh Tuan Luu, Kenji Kawaguchi, Shafiq Joty, Min-
+Yen Kan, and Nancy F. Chen. 2025. Beyond in-
+context learning: Aligning long-form generation of
+large language models via task-inherent attribute
+guidelines. In Findings of the Association for Com-
+putational Linguistics: ACL 2025, pages 3377-3411,
+Vienna, Austria. Association for Computational Lin-
+guistics.
+
+Wanqiu Long, Siddharth N, and Bonnie Webber. 2024.
+Multi-label classification for implicit discourse rela-
+tion recognition. In Findings of the Association for
+
+
+Computational Linguistics: ACL 2024, pages 8437-
+8451, Bangkok, Thailand. Association for Computa-
+tional Linguistics.
+
+Qing Lyu, Marianna Apidianaki, and Chris Callison-
+Burch. 2024. Towards faithful model explanation
+in NLP: A survey. Computational Linguistics,
+50(2):657-723.
+
+Aleksandar Makelov, Georg Lange, and Neel Nanda.
+2024. Towards principled evaluations of sparse au-
+toencoders for interpretability and control. In JCLR
+2024 Workshop on Secure and Trustworthy Large
+Language Models.
+
+William C Mann and Sandra A Thompson. 1987.
+Rhetorical structure theory: A theory of text organiza-
+tion. University of Southern California, Information
+Sciences Institute Los Angeles.
+
+Jack Merullo, Carsten Eickhoff, and Ellie Pavlick. 2024.
+Circuit component reuse across tasks in transformer
+language models. In The Twelfth International Con-
+ference on Learning Representations.
+
+Yisong Miao, Hongfu Liu, Wenqiang Lei, Nancy Chen,
+and Min-Yen Kan. 2024. Discursive socratic ques-
+tioning: Evaluating the faithfulness of language mod-
+els’ understanding of discourse relations. In Proceed-
+ings of the 62nd Annual Meeting of the Association
+for Computational Linguistics (Volume 1: Long Pa-
+pers), pages 6277-6295, Bangkok, Thailand. Associ-
+ation for Computational Linguistics.
+
+Joseph Miller, Bilal Chughtai, and William Saunders.
+2024. Transformer circuit evaluation metrics are not
+robust. In First Conference on Language Modeling.
+
+Philipp Mondorf, Sondre Wold, and Barbara Plank.
+2025. Circuit compositions: Exploring modular
+structures in transformer-based language models. In
+Proceedings of the 63rd Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 14934-14955, Vienna, Austria.
+Association for Computational Linguistics.
+
+Nishanth Sridhar Nakshatri, Nikhil Mehta, Siyi Liu,
+Sihao Chen, Daniel Hopkins, Dan Roth, and Dan
+Goldwasser. 2025. Talking point based ideological
+discourse analysis in news events. In Findings of
+the Association for Computational Linguistics: ACL
+2025, pages 575-594, Vienna, Austria. Association
+for Computational Linguistics.
+
+Ramya Namuduri, Yating Wu, Anshun Asher Zheng,
+Manya Wadhwa, Greg Durrett, and Junyi Jessy Li.
+2025. QUDsim: Quantifying discourse similarities
+in LLM-generated text. In Second Conference on
+Language Modeling.
+
+Neel Nanda. 2023. Attribution patching: Activation
+patching at industrial scale. Accessed: 2025-04-12.
+
+Kazumasa Omura, Fei Cheng, and Sadao Kurohashi.
+2024. An empirical study of synthetic data genera-
+tion for implicit discourse relation recognition. In
+
+Proceedings of the 2024 Joint International Con-
+ference on Computational Linguistics, Language
+Resources and Evaluation (LREC-COLING 2024),
+pages 1073-1085, Torino, Italia. ELRA and ICCL.
+
+Yixin Ou, Yunzhi Yao, Ningyu Zhang, Hui Jin, Ji-
+acheng Sun, Shumin Deng, Zhenguo Li, and Huajun
+Chen. 2025. How do LLMs acquire new knowledge?
+a knowledge circuits perspective on continual pre-
+training. In Findings of the Association for Computa-
+tional Linguistics: ACL 2025, pages 19889-19913,
+Vienna, Austria. Association for Computational Lin-
+guistics.
+
+Charles A Perfetti and Gwen A Frishkoff. 2008. The
+neural bases of text and discourse processing. Hand-
+book of the neuroscience of language, 2:165—174.
+
+Emily Pitler, Annie Louis, and Ani Nenkova. 2009. Au-
+tomatic sense prediction for implicit discourse rela-
+tions in text. In Proceedings of the Joint Conference
+of the 47th Annual Meeting of the ACL and the 4th
+International Joint Conference on Natural Language
+Processing of the AFNLP, pages 683-691, Suntec,
+Singapore. Association for Computational Linguis-
+tics.
+
+Rashmi Prasad, Nikhil Dinesh, Alan Lee, Eleni Milt-
+sakaki, Livio Robaldo, Aravind Joshi, and Bonnie
+Webber. 2008. The Penn Discourse TreeBank 2.0.
+In Proceedings of the Sixth International Conference
+on Language Resources and Evaluation (LREC’08),
+Marrakech, Morocco. European Language Resources
+Association (ELRA).
+
+Valentina Pyatkin, Frances Yung, Merel C. J. Schol-
+man, Reut Tsarfaty, Ido Dagan, and Vera Demberg.
+2023. Design choices for crowdsourcing implicit
+discourse relations: Revealing the biases introduced
+by task design. Transactions of the Association for
+Computational Linguistics, 11:1014—1032.
+
+Alec Radford, Jeff Wu, Rewon Child, David Luan,
+Dario Amodei, and Ilya Sutskever. 2019. Language
+models are unsupervised multitask learners.
+
+Yuetong Rong and Yijun Mo. 2024. NCPrompt: NSP-
+based prompt learning and contrastive learning for
+implicit discourse relation recognition. In Findings
+of the Association for Computational Linguistics:
+EMNLP 2024, pages 1159-1169, Miami, Florida,
+USA. Association for Computational Linguistics.
+
+Ahmed Ruby, Christian Hardmeier, and Sara Stymne.
+2025. Multimodal extraction and recognition of Ara-
+bic implicit discourse relations. In Proceedings of
+the 31st International Conference on Computational
+Linguistics, pages 5415-5429, Abu Dhabi, UAE. As-
+sociation for Computational Linguistics.
+
+Muhammed Saeed, Peter Bourgonje, and Vera Demberg.
+2025. Implicit discourse relation classification for
+Nigerian Pidgin. In Proceedings of the 31st Inter-
+national Conference on Computational Linguistics,
+pages 2561-2574, Abu Dhabi, UAE. Association for
+Computational Linguistics.
+
+
+Martin Sundermeyer, Ralf Schliiter, and Hermann Ney.
+2012. Lstm neural networks for language modeling.
+In Interspeech, volume 2012, pages 194-197.
+
+Aaquib Syed, Can Rager, and Arthur Conmy. 2024.
+Attribution patching outperforms automated circuit
+discovery. In Proceedings of the 7th BlackboxNLP
+Workshop: Analyzing and Interpreting Neural Net-
+works for NLP, pages 407-416, Miami, Florida, US.
+Association for Computational Linguistics.
+
+Kate Thompson, Akshay Chaturvedi, Julie Hunter, and
+Nicholas Asher. 2024. Llamipa: An incremental
+discourse parser. In Findings of the Association
+for Computational Linguistics: EMNLP 2024, pages
+6418-6430, Miami, Florida, USA. Association for
+Computational Linguistics.
+
+Kevin Ro Wang, Alexandre Variengien, Arthur Conmy,
+Buck Shlegeris, and Jacob Steinhardt. 2023. Inter-
+pretability in the wild: a circuit for indirect object
+identification in GPT-2 small. In The Eleventh Inter-
+national Conference on Learning Representations.
+
+Bonnie Webber, Rashmi Prasad, Alan Lee, and Aravind
+Joshi. 2019. The penn discourse treebank 3.0 annota-
+tion manual. Philadelphia, University of Pennsylva-
+nia, 35:108.
+
+Sarah Wiegreffe and Ana Marasovic. 2021. Teach me to
+explain: A review of datasets for explainable natural
+language processing. In Thirty-fifth Conference on
+Neural Information Processing Systems Datasets and
+Benchmarks Track (Round 1).
+
+Sarah Wiegreffe and Yuval Pinter. 2019. Attention is not
+not explanation. In Proceedings of the 2019 Confer-
+ence on Empirical Methods in Natural Language Pro-
+cessing and the 9th International Joint Conference
+on Natural Language Processing (EMNLP-IJCNLP),
+pages 11-20, Hong Kong, China. Association for
+Computational Linguistics.
+
+Hongyi Wu, Hao Zhou, Man Lan, Yuanbin Wu, and
+Yadong Zhang. 2023a. Connective prediction for im-
+plicit discourse relation recognition via knowledge
+distillation. In Proceedings of the 61st Annual Meet-
+ing of the Association for Computational Linguistics
+(Volume I: Long Papers), pages 5908-5923, Toronto,
+Canada. Association for Computational Linguistics.
+
+Yating Wu, Ritika Mangla, Greg Durrett, and
+Junyi Jessy Li. 2023b. QUDeval: The evaluation of
+questions under discussion discourse parsing. In Pro-
+ceedings of the 2023 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 5344—
+5363, Singapore. Association for Computational Lin-
+guistics.
+
+Yunzhi Yao, Ningyu Zhang, Zekun Xi, Mengru Wang,
+Ziwen Xu, Shumin Deng, and Huajun Chen. 2024.
+Knowledge circuits in pretrained transformers. In
+The Thirty-eighth Annual Conference on Neural In-
+formation Processing Systems.
+
+Frances Yung, Mansoor Ahmad, Merel Scholman, and
+Vera Demberg. 2024. Prompting implicit discourse
+relation annotation. In Proceedings of the 18th Lin-
+guistic Annotation Workshop (LAW-XVIII), pages
+150-165, St. Julians, Malta. Association for Com-
+putational Linguistics.
+
+Frances Yung, Varsha Suresh, Zaynab Reza, Mansoor
+Ahmad, and Vera Demberg. 2025. Synthetic data
+augmentation for cross-domain implicit discourse
+relation recognition. Preprint, arXiv:2503.20588.
+
+Amir Zeldes. 2017. The gum corpus: Creating mul-
+tilayer resources in the classroom. Language Re-
+sources and Evaluation, 51(3):581-612.
+
+Amir Zeldes, Tatsuya Aoyama, Yang Janet Liu, Siyao
+Peng, Debopam Das, and Luke Gessler. 2025. eRST:
+A signaled graph theory of discourse relations and
+organization. Computational Linguistics, 51(1):23-
+72.
+
+Fred Zhang and Neel Nanda. 2024. Towards best prac-
+tices of activation patching in language models: Met-
+rics and methods. In The Twelfth International Con-
+ference on Learning Representations.
+
+Kun Zhang, Oana Balalau, and Ioana Manolescu. 2025.
+Structured discourse representation for factual consis-
+tency verification. In Findings of the Association for
+Computational Linguistics: ACL 2025, pages 820-
+838, Vienna, Austria. Association for Computational
+Linguistics.
+
+Haodong Zhao, Ruifang He, Mengnan Xiao, and Jing
+Xu. 2023. Infusing hierarchical guidance into prompt
+tuning: A parameter-efficient framework for multi-
+level implicit discourse relation recognition. In Pro-
+ceedings of the 61st Annual Meeting of the Associa-
+tion for Computational Linguistics (Volume 1: Long
+Papers), pages 6477-6492, Toronto, Canada. Associ-
+ation for Computational Linguistics.
+
+Zining Zhu, Hanjie Chen, Xi Ye, Qing Lyu, Chenhao
+Tan, Ana Marasovic, and Sarah Wiegreffe. 2024. Ex-
+planation in the era of large language models. In
+Proceedings of the 2024 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies
+(Volume 5: Tutorial Abstracts), pages 19-25, Mexico
+City, Mexico. Association for Computational Lin-
+guistics.
+
+
+A  CUDR Dataset Details
+
+A.1 Counterfactual Connectives
+
+To create counterfactual instances in the CUDR
+
+dataset, we rely on the taxonomy by Miao et al.
+
+(2024), which defines each discourse relation along
+with five irrelevant counterfactual relations. Due
+to space constraints, Table 2 in Section 2 lists only
+a subset of the counterfactual connectives. The
+complete set of five counterfactual connectives is
+provided in Table 6.
+
+CF Connectives
+because
+
+for example
+specifically
+so
+in other words
+specifically
+in other words
+because
+or example
+so
+
+so
+however
+by comparison
+‘or example
+
+in other words
+because
+by comparison
+‘or example
+however
+
+in other words
+however
+
+so
+
+because
+
+by comparison
+instead
+however
+
+or example
+because
+
+so
+
+by comparison
+because
+however
+
+by comparison
+so
+
+in other words
+however
+
+so
+
+by comparison
+in other words
+instead
+
+instead
+
+by comparison
+however
+
+so
+
+in other words
+because
+
+in other words
+instead so
+
+‘or example
+specifically
+however
+previously
+
+by comparison
+or example
+because
+
+so
+
+then
+
+by comparison
+however
+
+‘or example
+
+so
+
+then
+
+by comparison
+however
+
+or example
+
+Discourse Relation Ori Connective
+
+Comparison.Concession.Arg2-as-denier however
+
+Comparison.Contrast by comparison
+
+Contingency.Reason because
+
+Contingency.Result so
+
+Expansion.Conjunction and
+
+Expansion.Equivalence in other words
+
+Expansion.Instantiation.Arg2-as-instance —_ for example
+
+Expansion.Level-of-detail.Arg1-as-detail in short
+
+Expansion.Level-of-detail.Arg2-as-detail specifically
+
+Expansion.Substitution.Arg2-as-subst
+
+Temporal.Asynchronous.Precedence then
+
+Temporal.Asynchronous.Succession previously
+
+Temporal.Synchronous while
+
+Table 6: CUDR Dataset Details (Full Counterfactual
+Connectives): PDTB discourse relations with their orig-
+inal (Ori) connective and the corresponding set of five
+counterfactual (CF) connectives.
+
+A.2 Aligning Discourse Frameworks
+
+We refer to cross-framework relation mapping both
+to prepare counterfactual CUDR data for frame-
+works beyond PDTB (Section 2.3) and to perform
+cross-framework transfer (Section 3.2). The map-
+ping between PDTB and the GUM Discourse Tree-
+bank (GDTB) (Liu et al., 2024b) is straightforward,
+as GDTB adopts the PDTB relation taxonomy. For
+the GUM Rhetorical Structure Theory (GUM-RST)
+dataset (Zeldes, 2017), we closely examine the an-
+notation guidelines and the mapping approach used
+by Liu et al. (2024b). Based on this, we define
+a mapping shown in Table 7, which includes 17
+RST relations, excluding those with insufficient
+data. This mapping offers broad coverage, aligning
+the 17 RST relations with 9 distinct PDTB rela-
+tions. For the Segmented Discourse Representa-
+tion Theory (SDRT) dataset (Asher and Lascarides,
+2003), we also examine the relation definitions and
+construct the mapping presented in Table 8. This
+results in 10 distinct SDRT relations mapped to 8
+PDTB relations.
+
+RST Label
+
+joint-list_m
+joint-sequence_m
+elaboration-additional_r
+
+Mapped PDTB Label
+Expansion.Conjunction
+
+Temporal.Asynchronous.Precedence
+Expansion.Level-of-detail. Arg2-as-detail
+context-circumstance_r Temporal.Synchronous
+adversative-concession_r | Comparison.Concession.Arg2-as-denier
+causal-cause_r
+causal-result_r
+adversative-contrast_m
+explanation-justify_r
+context-background_r
+joint-other_m
+adversative-antithesis_r
+explanation-evidence_r
+evaluation-comment_r
+explanation-motivation_r
+restatement-repetition_m
+joint-sequence_r
+
+Contingency.Cause.Reason
+Contingency.Cause.Result
+Comparison.Contrast
+Contingency.Cause.Reason
+Expansion.Conjunction
+Expansion.Conjunction
+Comparison.Contrast
+Contingency.Cause.Reason
+Contingency.Cause.Reason
+Contingency.Cause.Reason
+Expansion.Equivalence
+Temporal.Asynchronous.Precedence
+
+Table 7: RST to PDTB Mapping: Mapping of RST
+discourse labels to PDTB labels for the CUDR dataset.
+
+SDRT Label Mapped PDTB Label
+Acknowledgement —Expansion.Equivalence
+
+Comment Expansion.Conjunction
+
+Continuation Expansion.Conjunction
+
+Contrast Comparison.Contrast
+
+Correction Comparison.Concession.Arg2-as-denier
+Elaboration Expansion.Level-of-detail. Arg2-as-detail
+Explanation Contingency.Cause.Reason
+
+Narration Temporal.Asynchronous.Precedence
+Parallel Expansion.Conjunction
+
+Result Contingency.Cause.Result
+
+Table 8: SDRT to PDTB Mapping: Mapping of SDRT
+discourse labels to PDTB labels for the CUDR dataset.
+
+
+A.3 Details for CUDR Dataset Construction
+
+To construct the counterfactual argument Ar’, we
+ensure it is coherent with both the original argu-
+ment Arg, and the counterfactual discourse rela-
+tion, along with its connective Conn’. Input: We
+generate the dataset by prompting the GPT-40-mini
+model via API, chosen for its balance of instruction-
+following ability and efficiency. Each prompt in-
+cludes Arg,, Conn’, and a CF_dr_description
+field defining the discourse relation. For exam-
+ple, Contingency.Cause.Reason is described as
+“Argo is the reason for Arg: when Arg; gives the
+effect, and Arg provides the reason, explanation,
+or justification”, adapted from the PDTB annota-
+tion guidelines (Webber et al., 2019). Require-
+ments: We ask the model to complete a structured
+JSON template. To maintain quality and discour-
+age shallow completions, we explicitly instruct the
+model not to repeat Conn’ verbatim, and instead
+to use relation-specific language patterns. We also
+request that Arg’, match the length of Arg , im-
+proving stylistic and structural consistency. Out-
+put and Postprocessing: The model is prompted
+independently for each CUDR data instance, and
+its output is saved as a plain text file. These files
+are subsequently parsed into usable JSON format
+using a custom loader. The final prompt template,
+with inserted variables such as Arg, and Conn’, is
+shown below:
+
+You are an expert in discourse semantics. In discourse
+
+theory, argl and arg2 are two arguments connected by a
+relation (a connective word).
+
+I am going to give you an original discourse argument (*
+original_arg1*) and a counterfactual relation (*CF_dr
+*). Your task is to generate a new counterfactual
+argument (*counterfactual_arg2*) that aligns with *
+original_arg1* while reflecting the given
+counterfactual relation.
+
+*xxRequirements:**
+
+1. *counterfactual_arg2* must be **coherent** with *
+original_arg1* and appropriately reflect the given
+counterfactual relation (by writing after
+counterfactual_connective) .
+
+2. The length of *counterfactual_arg2* should be around {
+original_arg2_length} words.
+
+3. Make the relation between *counterfactual_arg2* and *
+original_arg1* easy to understand and as salient as
+possible.
+
+4. Do not repeat the connective word in your *
+counterfactual_arg2*. Instead, try to use negation or
+contrastive signal (for comparison counterfactuals),
+specific causal events of result or reason (for
+contingency counterfactual), specific examples like
+entities and concrete details (for expansion
+counterfactuals).
+
+Complete the following dictionary and only return the
+dictionary as your output:
+
+{
+"original_arg1”: "{original_arg1}",
+"counterfactual_relation”: "{CF_dr}", which means {
+CF_dr_description},
+"counterfactual_connective”: "{conn_CF}",
+"counterfactual_arg2”: TO BE COMPLETED
+3
+
+Manual Verification One author manually veri-
+fied the quality of our CUDR data samples. We ran-
+domly sampled 10 instances from each discourse
+framework and present subsets of CUDR exam-
+ples from the PDTB (Table 9), GDTB (Table 10),
+RST (Table 11), and SDRT (Table 12) datasets.
+Although each framework uses different terminol-
+ogy, we adopt a unified notation of Arg, and Arge
+throughout. Across the 40 samples, we find all
+to be valid: the generated Arg’, is coherent with
+the original Arg, and aligns well with the intended
+counterfactual connective Conn’. For example,
+in the first PDTB sample, the original Arg, is
+“Robert S. Ehrlich resigned as chairman, president
+and chief executive”, which is linked by a denying
+relation (signaled by “however’’) to “Mr. Ehrlich
+will continue as a director and a consultant’. Un-
+der the counterfactual connective Conn’ “so”, our
+generated Avy, becomes “the company faced sig-
+nificant leadership challenges afterward”, directly
+expressing the consequence of Mr. Ehrlich’s res-
+ignation and appropriately realizing the intended
+relation. Beyond PDTB, our CUDR construction
+performs well across other frameworks. For in-
+stance, although SDRT often contains shorter text
+spans, the generated Ar’, still effectively reflects
+the intended Conn’. In Sample 2 from Table 12,
+“others settle for less” clearly presents a contrasting
+scenario, demonstrating that the model can express
+discourse relations concisely.
+
+However, we do find our generated data to
+be straightforward in their expression. In all
+samples we examined, rare words are seldom used,
+and the model tends to prefer simple sentence struc-
+tures. For example, Sample 3 in SDRT (Table 12)
+has an original Arg; as “yep saturday’s looking
+promising”, and continues with an Arg’, expres-
+sion “the weather forecast predicts sunshine’, us-
+ing the counterfactual connective “because”. This
+is a valid instance, but discussing the weather is
+relatively expected and less surprising. Sample
+3 in PDTB (Table 9) has an Arg, as “Much is
+being done in Colombia to fight the drug cartel
+mafia’, and it assigns Arg’, as “the government rec-
+ognizes that drug trafficking severely undermines
+national security and social stability”. While this is
+a valid continuation aligning with the counterfac-
+tual connective “because”, it lacks specific knowl-
+edge about the drug situation in Colombia. In con-
+trast, the original Argz is “luxurious homes and
+ranches have been raided by the military authori-
+ties, and sophisticated and powerful communica-
+
+
+tions equipment have been seized”, which offers
+more phrase variation and concrete detail.
+
+This straightforward style is expected, since we
+explicitly prompt the model: “Make the relation
+between counterfactual Arg’ and original Arg,
+easy to understand and as salient as possible.’ We
+design the CUDR task this way to maximize its
+steering effect. Future work could extend CUDR
+to more complex texts and ambiguous scenarios,
+and explore controlling the attributes and style of
+Arg, through in-context learning (ICL) (Liu and
+Wang, 2023; Long et al., 2025; Li et al., 2025).
+
+CuDR data samples for PDTB framework:
+
+Sample 1:
+
+Argi: Robert S. Ehrlich resigned as chairman, president
+and chief executive
+
+Arg2: Mr. Ehrlich will continue as a director and a con-
+sultant
+
+Original relation: Comparison.Concession.Arg2-as-denier
+(however)
+
+Conn’: so
+
+ArgS: the company faced significant leadership chal-
+lenges afterward.
+
+Sample 2:
+
+Argi: Shortly after Texas Air took control of Eastern,
+some Machinists union supervisors received a 20% pay
+raise
+
+Argo: the pilots argued that this triggered a pay raise for
+them
+
+Original relation: Contingency.Cause.Result (so)
+
+Conn’: but
+
+Arg: most other employees were not granted any wage
+increase.
+
+Sample 3:
+
+Argi: Much is being done in Colombia to fight the drug
+cartel mafia
+
+Argz: luxurious homes and ranches have been raided by
+the military authorities, and sophisticated and powerful
+communications equipment have been seized
+
+Original relation: Expansion. Instantiation.Arg2-as-
+instance (for example)
+
+Conn’: because
+
+Arg): the government recognizes that drug trafficking
+severely undermines national security and social stability.
+
+Table 9: CUDR data samples for PDTB framework:
+counterfactual Avg/, being coherent with original Arg
+and counterfactual Conn’.
+
+B_ Implementation Details
+
+B.1 Model fine-tuning
+
+The CUDR task imposes two key requirements:
+(1) Instruction following: the model must adhere
+to the task format by choosing between Arg2 and
+Arg}; and (2) Discourse comprehension: it must
+interpret the discourse relation to select the contin-
+uation that matches the given connective. These re-
+quirements challenge the widely used GPT-2 model
+
+CuDR data samples for GDTB framework:
+
+Sample 1:
+
+Arg: Due to its remarkable biodiversity, with over a third
+of the local plant species found nowhere else, Socotra has
+been designated a UNESCO World Heritage Site
+
+Arg2: With over 40,000 inhabitants, though, it’s not just
+a nature reserve
+
+Original relation: Comparison.Concession.Arg2-as-denier
+(however)
+
+Conn’: so
+
+Arg: many conservation efforts are now focused on pre-
+serving its unique ecosystems.
+
+Sample 2:
+
+Argi: So this place was so cool we could have spent
+hours in here
+
+Arg2: The best thing that I thought about this bookstore
+was that they mixed in new copies of books with used
+copies
+
+Original relation: Contingency.Cause.Result (so)
+Conn’: but
+
+Arg): the uncomfortable seating made it difficult to stay
+for long, despite the incredible atmosphere surrounding
+us.
+
+Sample 3:
+
+Arg: There are flights from Sana’a via Al Mukalla
+Argz: Yemenia Airlines offers one flight per week on
+Thursday morning
+Original relation:
+instance (for example)
+Conn’: because
+Arg}: the airport reopened after extensive renovations
+
+Expansion. Instantiation.Arg2-as-
+
+Table 10: CUDR data samples for GDTB framework:
+counterfactual Arg), being coherent with original Arg
+and counterfactual Conn’.
+
+CuDR data samples for RST framework:
+
+Sample 1:
+
+Argi: that cultural behaviors are not genetically inherited
+from generation to generation
+
+Argz: must be passed down from older members of a
+society to younger members
+
+Original relation: adversative-antithesis (however)
+Conn’: specifically
+
+Arg’: they are learned through social interactions and
+environmental influences
+
+Sample 2:
+
+Argi: I came up with an individual story called Thad ’s
+World Destruction and , she wanted to illustrate it
+
+Arge: that ’s the way we ended up doing it
+
+Original relation: causal-result (so)
+
+Conn’: but
+
+Arg): she thought it was too dark for children
+
+Sample 3:
+
+Argi: fisherman first noticed the people
+
+Arg2: a warship was deployed to retrieve them
+
+Original relation: joint-sequence (then)
+
+Conn’: because
+
+Arg): he heard their laughter nearby
+
+Table 11: CUDR data samples for RST framework:
+counterfactual Av g/, being coherent with original Arg
+and counterfactual Conn’.
+
+(Conmy et al., 2023; Yao et al., 2024). To address
+(1), we fine-tune GPT-2 medium on a next sentence
+
+
+CuDR data samples for SDRT framework:
+Sample 1:
+
+Argi: the deal mechanism ’s a bit clunky
+Arg2: the key is to make sure you’ve checked the right
+colour box :D
+
+Original relation: Contrast (by comparison)
+Conn’: specifically
+
+Arg’: it often requires multiple steps and lengthy ap-
+provals to finalize transactions
+
+Sample 2:
+
+Arg: you drive a hard bargain
+
+Argo: that price is too good
+
+Original relation: Explanation (because)
+Conn’: by comparison
+
+Arg: others settle for less
+
+Sample 3:
+
+Argi: yep saturday ’s looking promising
+Arg2: saturday evening good for me too
+Original relation: Parallel (and)
+
+Conn’: because
+
+Arg): the weather forecast predicts sunshine
+
+Table 12: CUDR data samples for SDRT framework:
+counterfactual Arg, being coherent with original Arg
+and counterfactual Conn’, while the arguments are
+shorter than PDTB.
+
+Accuracy Logit Diff
+Ori CF Ori CF
+Random Model 0.50 (0.50 0.00 0.00
+Ideal Model 1.00 1.00 + +
+GPTysp 0.46 0.58 —0.61 2.01
+GPT cupr 0.80 0.80 7.07 6.59
+
+Table 13: Performance on the CUDR task: Accuracy
+and logit difference are reported for each model under
+both original (Ori) and counterfactual (CF) scenarios.
+
+prediction (NSP) task formatted as CUDR: select-
+ing the correct Args over a mismatched Arg’, from
+PDTB. Without this, the model often generates ir-
+relevant outputs. Despite this training, GPT sp per-
+forms poorly on the actual CUDR task, with near-
+random accuracy (0.46 and 0.58; see Table 13). To
+address (2), we further fine-tune it on strictly held-
+out set of PDTB data, resulting in GPTcupr, which
+achieves 0.80 accuracy and a significantly larger
+logit margin. This ensures the model is sensitive to
+discourse relations, making it suitable for activation
+patching with CUDR. These results also reflect the
+quality of our dataset. GPTNsp performs better on
+counterfactual instances than original ones (0.58
+vs. 0.46 accuracy), suggesting that the counterfac-
+tual data is not only valid but also easier to inter-
+pret. The final GPTcupr achieves balanced per-
+formance across both Ori and CF directions. Most
+discourse relations perform around 0.80 accuracy,
+with Expansion.Conjunction notably higher than
+
+“00% as ees ee ae
+=== ee ee
+ee 5
+G
+f
+
+0%
+
+Faithfulness Score (%)
+
+Pal -*- GPT-2 Medium
+—&— GPT-2 Large
+
+“100% +9
+
+10° 10? 10? 10? 10°
+
+104
+Number of edges patched (log scale)
+
+Figure 9: Comparison of GPT-2 large and GPT-2
+medium models on the CUDR task.
+
+0.90. This is expected, as Expansion.Conjunction
+is a “default” continuation relation that is easier
+to model (also observed in pre-LLM studies). Our
+faithfulness metric helps normalize these raw differ-
+ences by comparing activation patching outcomes
+to those of the (imperfect) full model, reducing the
+impact of absolute accuracy.
+
+B.2 Computation Resources
+
+Our experiments on the GPT-2 medium model are
+conducted on a server with four NVIDIA L40
+GPUs (48GB RAM each). To accelerate circuit
+discovery, we use the implementation by Miller
+et al. (2024) * for the Edge Attribution Patching
+(EAP) method (Syed et al., 2024; Nanda, 2023),
+which completes discovery for a single discourse
+relation in about one minute using a sample size of
+32 on a single GPU. This is substantially faster
+than the Automatic Circuit DisCovery (ACDC)
+method (Conmy et al., 2023)°. For our indica-
+tive evaluation on GPT-2-large, experiments were
+run on NVIDIA A100 GPUs (80 GB RAM). For
+both models, we used a batch size of 1 and ag-
+gregated results over 32 samples, as activation
+patching is highly memory-intensive. Exploring
+lower-precision computation could further reduce
+memory demands. Ultimately, memory-efficient
+approaches will be crucial for scaling CUDR and
+circuit discovery to larger (vision-)language mod-
+els such as Llama (Grattafiori et al., 2024) and
+Qwen (Bai et al., 2023).
+
+B.3 Scaling to Larger Models
+
+We replicate our experiments on the GPT-2 large
+model as an indicative evaluation across model
+“https: //github.com/UFO-101/auto-circuit
+
+Shttps ://github.com/ArthurConmy/
+Automatic-Circuit-Discovery
+
+
+be in nn LT Lente
+100% pa Se, = =
+
+Faithfulness Score (%)
+
+4 --- LLM-Generated
+ad —&— Human-Written
+
+-100%
+
+10° 10? 10? 10? 10°
+
+104
+Number of edges patched (log scale)
+
+Figure 10: Comparison of circuit performance on LLM-
+generated and human-written CUDR data.
+
+sizes. Following the same recipe, we first fine-tune
+GPT-2 large on our CUDR task and then apply acti-
+vation patching to identify circuits. Figure 9 shows
+the performance of L3-level circuits in both mod-
+els (primary evaluation; other edges exhibit similar
+trends). Our findings indicate that (1) discursive
+circuits remain effective in the larger model, and (2)
+both models display similar trends, though GPT-
+2 large achieves strong performance with fewer
+edges. This is likely because larger models pos-
+sess greater capacity for discursive understanding,
+with a small number of edges carrying important
+functions for discourse processing.
+
+B.4. Human-written Counterfactual
+
+The counterfactual Arg’2 instances in the CUDR
+datasets are generated by an LLM. To assess their
+quality, we additionally create a small set of human-
+written counterfactual Arg’2 for indicative com-
+parison. Specifically, the first author wrote five in-
+stances for each of the 13 PDTB discourse relations,
+yielding a total of 65 counterfactual Arg’2. We
+then evaluated model performance on the CUDR
+task using both LLM-generated and human-written
+counterfactuals. Figure 10 shows that the two data
+series follow similar trends: both initially move in
+the opposite direction (predicting the counterfac-
+tual Arg’2) and then, after patching around 100
+edges from the clean input, recover the perfor-
+mance of the full model. In this indicative eval-
+uation, the LLM-generated data aligns well with
+the human-written data.
+
+B.5__ Details for Circuits Analysis Experiments
+
+To identify circuits responsible for linguistic fea-
+tures (Zeldes et al., 2025; Das and Taboada, 2018),
+we adopt a simplified next-word prediction setting,
+where the model predicts a word tied to a spe-
+
+Antonymy
+
+Input: The sky was bright, far from, Output: dark
+Input: His explanation was clear, unlike, Output: con-
+fusing
+
+Coreference
+
+Input: John went to the store because, Output: He
+Input: Lisa loves painting, and Output: She
+
+Negation
+
+Input: The answer was expected, though arrival was
+Output: delayed
+
+Input: He expected an easy task, but it was Output: not
+Synonymy
+
+Input: The road was narrow, and the alley even, Output:
+slim
+
+Input: The musician composed a tune, a catchy, Output:
+melody
+
+Modality
+
+Input: With enough practice and support, they eventually
+Output: could
+
+Input: To stay healthy and fit, you Output: should
+
+Table 14: Data samples for discovering circuits for lin-
+guistic features, including antonymy, coreference, nega-
+tion, synonymy, and modality. If an anchor word exists
+(e.g. “John’’), it was in italic form.
+
+cific linguistic feature. This setup follows tasks
+like subject—verb agreement (S VA) (Ferrando and
+Costa-jussa, 2024) and world knowledge (Yao et al.,
+2024). Following standard practice, we apply acti-
+vation patching. The clean input is a context-target
+pair, while the corrupted input has the same con-
+text but a different (incorrect) target word. Acti-
+vation patching identifies key edges that steer the
+model from the incorrect to the correct prediction.
+For example, for coreference, a clean input like
+“Lisa loves painting” should yield “she”; similarly,
+“John went to the store because” should produce
+he” (Table 14). We patch activations from the clean
+input into the corrupted one to restore the correct
+output and identify important edges to compose
+the corresponding circuits. We select synonymy,
+antonymy, negation, coreference, and modality fea-
+tures. These features are identified as important and
+high-coverage discourse signals. According to the
+eRST taxonomy (Zeldes et al., 2025), synonymy
+(typically signaling equivalence and continuation)
+and antonymy (often signaling contrast) fall un-
+der the semantic category. Negation (e.g., “not’),
+which frequently signals comparison relations, is
+also classified as a semantic signal. Coreference
+belongs to the reference category and is a key mech-
+anism for maintaining discourse coherence. Pitler
+et al. (2009) find that modality features, such as
+modal verbs (can, should), are often associated
+with conditional statements that typically signal
+contingency relations. These categories have been
+
+
+0 iM = Comparison.Concession.Arg2-as-denier
+
+Average —e— Comparison.Contrast
+Expansion.Conjunction
+
+Expansion.Equivalence
+
+Shift in Logit Gap
+1
+
+10! 10? 103 104 108
+Number of Patched Edges
+Gender
+
+Economic Geographical
+
+VY
+
+Figure 11: Impact of discursive circuits on biased
+completions. A sharper decrease in answer logit gap
+(Y-axis) w.r.t. patched edges (X-axis) indicates stronger
+circuit influence. The upper plot shows average effects.
+
+shown to be prevalent across diverse genres and to
+support a wide range of discourse relations.
+
+B.6_ _Discursive Circuits Help Uncover
+Underspecified Bias
+
+The main body of the paper focuses on the CUDR
+task itself. To illustrate the utility of the identi-
+fied discursive circuits, we present one possible
+use case where these circuits help reveal potential
+ethical biases in LLMs. We consider scenarios
+where the model predicts a next sentence given an
+underspecified discourse relation (i.e., without an
+explicit connective). For instance, “Girls like math”
+is followed by “Boys like sports”. It is unclear
+whether the model interprets the two as equivalent
+or contrasting. Discursive circuits can uncover if
+the models generates the prediction for the cor-
+rect reason. To test whether the model relies on
+a given discursive circuit (e.g., Contrast), we de-
+stroy the activation in that circuit by patching in
+values from an unrelated sentence, and observe
+whether the output shifts toward completing that
+unrelated context. Thus, a stronger reliance results
+in a sharper shift. We select four representative
+social biases (Liu et al., 2024a) and create 100 dis-
+course instances with underspecified discourse re-
+lations. Using GPT-40-mini, we prompt the model
+to generate short and simple cases that are coherent
+but intentionally underspecified in their discourse
+relation. For example, “[A young artist painted
+bold lines across the canvas] 4;g,, [A senior man
+updated the date in his weather journal] 4;-g,” is a
+case for age bias. Figure 11 shows output shifts
+under four possible biases. We find that compari-
+son circuits produce the steepest drops (50 edges to
+reach bottom), indicating stronger influence. Equiv-
+alence circuits follow but require more edges (100
+
+(1) PDTB: Contingency.Cause.Result
+
+(2) GDTB: Contingency.Cause.Result
+
+(3) RST: Cause-Result
+
+tn meee ase mem
+
+(4) SDRT: Result
+
+minnonmnn toms —mpr mmm Se fe
+
+(5) PDTB: Expansion.Conjunction
+
+Figure 12: Examples of discursive circuits. Residual
+flows begin at the left (residual start), traverse 24 layers,
+and end at the right (residual end).
+
+edges to reach bottom), while Conjunction circuits
+show minimal impact. This provides mechanistic
+evidence that the model may exhibit a bias toward
+contrastive interpretations.
+
+B.7 Samples of Discursive Circuits
+Visualization
+
+We present representative samples of discursive cir-
+cuits across different frameworks in Figure 12. We
+appreciate the visualization tool created by Miller
+et al. (2024). The left side marks the start of the
+residual flow from the embedding layer, continuing
+through 24 layers to the residual end. Each edge
+represents a connection between modular blocks
+(either MLPs or attention heads) in the transformer.
+The Ist to 4th samples (highlighted by the blue dot-
+ted lines) correspond to contingency-like relations
+across the PDTB, GDTB, RST, and SDRT datasets.
+These circuits show a consistent pattern: a narrow,
+focused flow at the start that begins to build special-
+ized representations from Layer 14 onward, dispers-
+ing toward the residual end. This aligns with our
+findings in Section 3.3, where discourse-specific
+information emerges in higher layers. In con-
+trast, PDTB’s Expansion.Conjunction and Expan-
+sion.Equivalence (5th and 6th) are more straightfor-
+ward relations (Section 3.1). Their circuits resem-
+ble an “H” shape, with dense processing at both the
+beginning and end. Together, these visualizations
+highlight both the commonalities and divergences
+in circuit structure across discourse relations.

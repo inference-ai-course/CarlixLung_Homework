@@ -1,0 +1,1846 @@
+arXiv:2510.11693v1 [cs.CL] 13 Oct 2025
+
+Scaling Language-Centric Omnimodal
+Representation Learning
+
+Chenghao Xiao, Hou Pong Chan! Hao Zhang! Weiwen Xu, Mahani Aljunied, Yu Rong?
+DAMO Academy, Alibaba Group
+
+Abstract
+
+Recent multimodal embedding approaches leveraging multimodal large language
+models (MLLMs) fine-tuned with contrastive learning (CL) have shown promising
+results, yet the underlying reasons behind their superiority remain underexplored.
+This work argues that a crucial advantage of MLLM-based approaches stems from
+implicit cross-modal alignment achieved during generative pretraining, where the
+language decoder learns to exploit multimodal signals within a shared representa-
+tion space for generating unimodal outputs. Through analysis of anisotropy and ker-
+nel similarity structure, we empirically confirm that latent alignment emerges within
+MLLM representations, allowing CL to serve as a lightweight refinement stage.
+Leveraging this insight, we propose a Language-Centric Omnimodal Embedding
+framework, termed LCO-EMB. Extensive experiments across diverse backbones
+and benchmarks demonstrate its effectiveness, achieving state-of-the-art perfor-
+mance across modalities. Furthermore, we identify a Generation-Representation
+Scaling Law (GRSL), showing that the representational capabilities gained through
+contrastive refinement scales positively with the MLLM’s generative capabilities.
+This suggests that improving generative abilities evolves as an effective paradigm
+for enhancing representation quality. We provide a theoretical explanation of
+GRSL, which formally links the MLLM’s generative quality to the upper bound
+on its representation performance, and validate it on a challenging, low-resource
+visual-document retrieval task, showing that continual generative pretraining before
+CL can further enhance the potential of a model’s embedding capabilites,
+
+1 Introduction
+
+Cross-modal representation alignment, such as vision-language alignment, has traditionally relied
+on massive-scale contrastive learning (CL) over paired cross-modal data, as seen in CLIP-style
+models (37) {50} [83]. Prior work primarily focuses on scaling model size, dataset volume, and batch
+size during training [[9}(25]{50){58}[83]. While these strategies demonstrate benefits in tasks like linear
+probing [(9} [25] [50] and zero-shot classification [50){83], performance tends to plateau on complex
+tasks requiring deeper cross-modal comprehension, e.g., multilingual image retrieval [57||60}, visual
+text representations [11] [19] [74], and tasks involving interleaved multimodal encodings [69].
+
+Recent approaches utilize autoregressive multimodal large language models (MLLMs) as the back-
+bone models, followed by CL fine-tuning, to enhance representational capabilities, leading to im-
+proved performance on these complicated tasks [8] (39][85]. However, the underlying reasons for the
+performance advantages of MLLM-based embedding approaches over traditional CLIP-based ones
+remain underexplored. This represents a critical research gap in understanding the limitations of
+CLIP-style models and the specific strengths MLLMs bring to these challenging scenarios.
+
+‘Corresponding authors, kenchanhp@gmail.com, hzhang26@outlook.com.
+*Project head.
+
+'Codes, models, and resources are available at\https : //github. com/LCO-Embedding/LCO- Embedding
+
+39th Conference on Neural Information Processing Systems (NeurIPS 2025).
+
+
+To address this research gap, we conduct a systematic study of MLLM-based embedding models
+across modalities. First, we empirically investigate the embedding space patterns of MLLM repre-
+sentations before and after lightweight CL fine-tuning using only textual data, via anisotropy and
+kernel-level similarity. Our results show that text-only fine-tuning not only improves the discrim-
+inability of text embeddings but also generalizes to enhance the discriminability of embeddings in
+non-textual modalities. This finding reveals that MLLMs achieve implicit cross-modal alignment
+during generative pretraining, such that representation activation for one modality generalizes to
+others. We posit that the generative objective of MLLMs enables them to leverage multimodal
+information in the same semantic space by learning to generate textual outputs during pretraining.
+Thus, we argue that the knowledge foundation and intrinsic multimodal alignment established during
+generative pretraining grant MLLM-based embedding models the fundamental advantages.
+
+Building on the observations, we propose a Language-Centric Omnimodal Embedding framework,
+termed LCO-EmMB, that employs language-centric paired data for efficient CL refinement. We
+highlight that CL can function as a lightweight, post-hoc refinement step for mapping pre-aligned
+generative embeddings into a similarity-matching space in MLLMs, which differs sharply from the
+computationally intensive CL required by CLIPs for alignment. Accordingly, this emerging paradigm
+shifts emphasis towards preserving the cross-modal alignment structure established during MLLM
+pretraining. In line with recent work [86], LCO-EmB adopts LoRA for representation
+activation of MLLM, aiming to enhance its representation capability with minimal disruption to the
+pretrained generative capabilities and latent multimodal alignment.
+
+Extensive experiments across diverse backbones and benchmarks show that LCO-EMB outperforms
+state-of-the-art multimodal embedding models trained with much larger multimodal training sets,
+with text-only training sets. Combining minimal additional multimodal paired data in diverse formats
+further calibrates the embedding space of LCO-EMB for downstream tasks, setting a new state-of-
+the-art on MIEB [76], while also providing competitive performance on audio and videos. Further
+analysis reveals that LoRA with language-centric contrastive learning yields superior results compared
+to alternative fine-tuning strategies, suggesting the importance of preserving the latent alignment
+structure during CL through minimal modification to the MLLM’s pretrained knowledge. CL acts
+less as a means of introducing new knowledge and more as a lightweight activation mechanism,
+serving primarily to project the embedding space into a similarity-matching subspace.
+
+As LCO-EMB relies on the inherent multimodal alignment capability of MLLMs, we further inves-
+tigate the relationship between potentials of representation quality and the underlying generative
+ability of MLLMs. Through experiments with backbones of various sizes and generation strengths,
+we identify a Generation-Representation Scaling Law (GRSL), indicating that multimodal rep-
+resentational capabilities gained through contrastive refinement scales positively with the MLLM’s
+generative capabilities before CL. GRSL suggests that improving the MLLM’s initial generative
+capability—via continued generative pretraining or supervised fine-tuning—is an effective strategy
+for enhancing its potential in multimodal representations. We offer a theoretical explanation for
+GRSL through a PAC-Bayesian generalization bound, showing that an MLLM’s generative capability
+determines an upper bound for its representational potential. To empirically validate this, we introduce
+SeaDoc, the most difficult visual document retrieval task to date in low-resource Southeast Asian
+languages. Through continual OCR-intense pretraining in low-resource languages, we show that
+retrieval performance enhances after the same amount of text-only contrastive learning.
+
+Our contributions are threefold: (1) We propose a language-centric omnimodal representation learning
+framework, achieving promising performance across various MLLM backbones and embedding
+benchmarks. (2) We identify a Generation-Representation Scaling Law (GRSL), that representational
+capabilities after CL scales positively with the MLLM’s generative capabilities. (3) We provide a
+theoretical justification for GRSL, followed by comprehensive empirical studies, demonstrating that
+generative capability sets a fundamental upper bound on representational quality in MLLMs.
+
+2 Latent Cross-Modal Alignment in MLLMs
+
+In this section, we conduct an in-depth empirical analysis of multimodal large language models
+(MLLMs) to investigate whether their internal representations exhibit latent cross-modal alignment
+through two geometric properties, i.e., degree of anisotropy and kernel-level similarity [29].
+Specifically, starting with an MLLM, we directly take out its text decoder [30], i.e., the LLM, and
+
+
+Pixmo Cap AudioCaps MSR-VTT
+
+1.0 1.0
+
+Video beforeCL ~ \
+
+& Text before CL
+3 09
+
+209 =
+& Text before CL
+
+508 B08 Audio before CL 3 6a Text before CL |
+aq Image before CL isa) q” vi
+" ideo after CL|
+297 _ Image before CL al — Audio before CL Aadeater “| Ree — Video before CL
+§
+0.6 —Text before CL $0.6 — Text before CL £5 _ Text before CL
+9 Text after CL 8 A. \ 04 .
+‘B05 — Image after CL ‘Bos — Audio after CL | 2 — Video after CL =
+a _ 7] a e el 0.3 = S ext after
+< — Text after CL Image after CL < — Text after CL Jextafter CL < — Text after CL .
+04 + T T T T T T T 04 7 T T T T T T T 02 7 T T T T T T T
+0 5 10 15 20 25 30 35 0 3. 10 15 20 25 30 35 0 5. 10 15 20 25 30 35
+Layer Index Layer Index Layer Index
+
+Figure 1: The anisotropy estimates of Qwen2.5-Omni-3B embeddings across text, image, audio, and
+video modalities. The vanilla model exhibits typical representation degeneration (anisotropy) for
+all modalities. After applying text-only contrastive learning, embeddings across modalities become
+more isotropic, indicating latent language-centric cross-modal alignment within the model.
+
+fine-tune it using text-only contrastive learning with LoRA on anchor-entailment text pairs from NLI
+datasets. Then, we merge the trained LoRA weights into the LLM and re-plug it into the original
+MLLM architecture. The detailed experimental settings are summarized in Section|4.1]
+
+2.1 Analysis of Anisotropy Degrees
+
+Language models trained on self-supervised objectives are known to suffer from anisotropy
+[21], an embedding degeneration issue characterized by hidden representations collapsing into a
+confined region of representation space, resulting in high expected cosine similarity between random
+inputs. Contrastive learning is known to have the uniformity promise through enhancing
+discriminability across random negative pairs. Here, we employ contrastive learning to fine-tune
+multimodal large language models (MLLMs) exclusively with paired text data. We then compare the
+behaviors of models before and after fine-tuning to assess whether text-only training can effectively
+mitigate anisotropy for non-textual modalities, even in the absence of explicit multimodal training.
+The successful transfer of improvements across modalities would provide empirical evidence that
+MLLMs inherently preserve geometrically aligned latent spaces among different modalities.
+
+We follow Ethayarajh and Xiao et al. to approximate the degree of anisotropy using the
+expected mean of cosine similarity between random data points. Let h;,h; ~ D be the embedding
+vectors sampled independently and identically distributed (i.i.d.) from the empirical distribution D of
+the representation space. Then, the degree of anisotropy is calculated as:
+
+Anisotropy = Bn, 05(05)) = Bn. ~> | a ()
+1soWOpy := 4h; ,hj;~D [COS\%77)| = hi hy~D | Toa |
+’ [fas || 5
+In practice, we approximate it empirically using a finite sample of N embeddings {hy,..., hy} as:
+Bs 2 hj h;
+® [cos(@)] = ——-— as os (2)
+N(W—1) eaten [ear hy
+
+Specifically, we use Qwen2.5-Omni-3B [77] as the backbone model and fine-tune it with text-only
+contrastive learning. To ensure objective and fair semantic comparison between text and other
+modalities, we utilize paired datasets, i.e., Pixmo Cap for image-text, AudioCaps for audio-
+text, and MSR-VTT for video-text, for anisotropy comparison. The changes in the embedding
+spaces of different modalities after the text-only contrastive learning are depicted in Figure[I] AS
+anticipated, the embedding space produced by Qwen2.5-Omni-3B initially exhibits a collapsed
+structure and poorly separated distribution across modalities. After text-only contrastive learning,
+embedding spaces of non-text modalities surprisingly generalize to become more isotropic, dispersing
+more uniformly across the respective subspaces. The generalized reduction in anisotropy for
+image, audio, and video embeddings reflects an underlying latent semantic alignment with
+textual representations within the base model.
+
+2.2 Analysis of Kernel-level Similarity
+
+Building on the identified latent cross-modal alignment in MLLMs, we further employ kernel-level
+similarity to analyze the improvement in similarity structure alignment across modalities after fine-
+tuning. Given a function f : 4 — R” that maps inputs to high-dimensional representations, the
+
+
+associated kernel K : ¥ x 4 — R characterizes the induced similarity structure via inner product
+K(a;,x;) = (f(xi), f(x;)), where x;,2; € X and K € K. Then, a kernel alignment metric
+m:K x K — Ris adopted to quantify the similarity between two kernels, i.e., the “similarity of
+similarity structures”, by assessing how closely the distance metric induced by one representation
+space aligns with that of another. Prior work examines these structures across independently
+trained models and finds convergence in their representations. For instance, despite being trained
+separately, LLaMA and DINOv2 exhibit comparable similarity perception of captions and
+images from paired datasets.
+
+Similar to Huh et al. [29], we adopt mutual kNN to quantify the overlap in the top-k nearest neighbors
+of each data point shared across the similarity structures induced by two representation models, f and
+g. Specifically, the data samples (x;, y;) are drawn in mini-batches of size b from a distribution %.
+Taking the image-text alignment as an example, each (x;, y;) pair, i.e., an image and its corresponding
+caption, is assumed to share the same semantic content, denoted as x; = y;. These paired samples
+serve as semantic anchors for evaluating the representations across modalities. Given the models
+f and of | the corresponding embeddings of each paired sample are attained as ¢; = f(a;) and
+wi = g(yi). For a mini-batch of b data samples, we can derive the feature sets ® = {¢),..., d)} and
+W = {u,..., Uo}. For each feature 6; € © (and similarly w; € WV), the KNN set S(¢;) (or S(w;))
+comprises the indices of its k nearest neighbors within its feature collection, excluding itself, which
+is determined by dxny as:
+
+S($i) = denn (Gi, ® \ {Oi}), — SCWi) = Caan (Wa, U \ {Yi})- (3)
+The kernel-level similarity score myn for a specific feature pair (¢;, ~;) is the normalized cardinality
+of the intersection of their /NN sets:
+
+mys (dist) = Z1S(61) NSC] @)
+
+which indicates the proportion of shared nearest neighbors, where k denotes the number of nearest
+neighbors. The overall myn metric is computed as the average of the individual myn(@;, t;) scores
+across the mini-batch.
+
+Different from Huh et al. [29], we utilize ker-
+
+nel alignment metrics to inspect cross-modal Vision-Language Kernel Alignment across Layers
+
+alignment within the same model. Specifically, 5 __ Qwen-VL-3B Genii EEE
+we attain hidden representations at all layers — Qwen-VL-3B-CL
+— Qwen-VL-7B
+
+from the 3B and 7B variants of Qwen2.5-VL- oe
+Instruct, and assess the self-similarity between
+the vision and language kernels using Equa-
+tion The text-only contrastive learning is
+applied to the language decoder, and alignment
+scores are compared before and after fine-tuning.
+As illustrated in Figure|2} two notable findings o
+emerge: (1) cross-modal kernel alignment im- HisereMUcaRecL
+
+proves after text-only contrastive learning, in- 0 4
+dicating the presence of inherent latent align- ° ° 8 * * *° *
+
+— Qwen-VL-7B-CL
+03
+
+Qwen-VL-7B
+
+0.2
+
+Kernel Alignment
+
+Qwen-VL-3B
+
+ment across modalities; and (2) the 7B variant
+exhibits consistently stronger cross-modal ker-
+nel alignment than the 3B variant, both before
+and after fine-tuning. This advantage may be at-
+tributed to the expanded parameter space of the
+larger model, yielding better expressivity and
+a superior ability to capture latent cross-modal
+
+Layer Index
+
+Figure 2: Layer-wise vision-language kernel align-
+ment before and after text-only contrastive learn-
+ing, evaluated on Qwen-VL models with 7B (28
+layers) and 3B (36 layers) parameters. Note the 3B
+model has more layers than the 7B model.
+
+relationships during pre-training. Collectively, these findings suggest that inherent cross-modal
+binding enables the optimization of representation in one modality to induce corresponding
+
+improvements in other modalities.
+
+*TIn this example, we use the same model to encode the image «; and its caption y;, i.e., f = g.
+
+
+Before training: During training: ' After training:
+
+. Text-only CL
+
+Collapsed embedding space Isotropic embedding space
+. LLM Backbone a)
+
+e Vision last token hidden
+
+* Audio last token hidden Summarize the above in one word:
+
+e Text last token hidden Encoder Encoder —
+
+Figure 3: The power of language-centric omnimodal representation learning: Before text-only
+contrastive learning (CL), representations across modalities in multimodal large language models
+(MLLMs) exhibit anisotropy, collapsing into a confined subspace. Text-only CL disperses textual
+representations by increasing their separation, effectively reducing anisotropy. Notably, this process
+generalizes to alleviate anisotropy in non-textual modalities, despite the absence of direct supervision.
+
+u
+
+3 Language-centric Omnimodal Representation Learning
+
+The preliminary experiments reveal that MLLMs implicitly acquire cross-modal alignment dur-
+ing pretraining. Although initial embeddings are suboptimal for similarity matching, latent align-
+ment emerges in intermediate layers. This inherent alignment can be efficiently unlocked through
+lightweight text-only contrastive fine-tuning, enhancing representation quality across both textual and
+non-textual modalities. Building on this insight, we introduce Language-Centric Omnimodal repre-
+sentation learning (LCO-EMB), a framework that leverages language-centric data and lightweight
+contrastive learning to boost MLLM representation capabilities across modalities.
+
+The contemporary architectures of MLLM are composed of modality-specific encoders, a projector,
+and a language decoder (i.e., an LLM), with the projector aligning modality-specific representations
+to the decoder’s embedding space [2/40][59)[77). For text-only variants of LCO-EMB, we isolate and
+fine-tune only the language decoder via text-only contrastive learning, while freezing the parameters
+of modality encoders and the projector. After training, the updated decoder is re-plugged into the
+original model. We further incorporate minimal multimodal paired data to calibrate the embedding
+space for downstream tasks, resulting in multimodal variants of LCO-EMB.
+
+Central to our method is the preservation of the latent cross-modal alignment established during
+generative pretraining. This alignment, wherein multimodal embeddings are integrated into a shared
+latent subspace by the language decoder, is fundamental to the model’s multimodal representation
+capability. We employ LoRA [27], which introduces low-rank trainable parameters into select layers
+while freezing the original model. While LoRA is widely recognized for enabling parameter-efficient
+fine-tuning, its primary advantage in our context is its ability to minimally perturb the original model.
+This approach yields two critical benefits: (1) it preserves the model’s generative capabilities through
+minimal weight modifications [4]; and (2) it maintains the latent cross-modal alignment, especially in
+the language decoder’s embedding layer, which is unaffected by the adaptation.
+
+4 Experiments
+
+4.1 Experimental Settings
+
+Backbones and hyperparameters. We use LLaVA-Next [41], Qwen2.5-VL [2], and Qwen2.5-
+Omni as backbone models, all conforming to the standard architecture of modality-specific
+encoders, a projector, and a language decoder. LLaVA-Next and Qwen2.5-VL focus on image/video-
+text modalities, while Qwen2.5-Omni supports omnimodal inputs, covering text, image, video, and
+audio. We utilize the 8B variant of LLaVA-Next, the 3B and 7B variants for both Qwen2.5-VL
+and Qwen2.5-Omni. We adopt the AdamW optimizer with a cosine learning rate schedule, a peak
+
+
+Average Performance on MIEB-Lite Tasks (English-only) Average Performance on MIEB-Lite Tasks
+
+/ 65
+2
+wv ws
+
+3
+| 58.1 58.0
+5s faa 51.9
+46.0
+49 Et CT
+g > &
+&
+re
+
+=
+
+Average Performance
+Average Performance
+
+60.
+5 & 3) 3)
+¥ 2 8
+2 Sf
+
+Figure 4: Performance comparison of LCO-EMB against the state-of-the-art open-source and
+proprietary embedding models, where we visualize the average performance of MIEB-Lite and its
+English-only subsets. LCO-EMB-VL and LCO-EMB-Omni denotes LCO-EMB trained from the
+Qwen2.5-VL and Qwen2.5-Omni backbones, respectively, while “T” and “M” represent the text-only
+and multimodal variants of LCO-EMB, respectively.
+
+learning rate of 4 x 1074, and a batch size of 768/)| to train the model for 2 epochs. The default
+LoRA rank (r) and a are set as 64 and 16 for text-only variants and 64 and 128 for multimodal
+variants respectively. For multimodal variants of Qwen2.5-Omni-7B, we use a reduced learning rate
+of 3 x 10~* due to the loss spike.
+
+Training datasets. (/) Text-only Setting. We consider two dataset settings: all-NLI and Scale-1M.
+The all-NLI dataset combines MNLI and SNLI [5], both frequently used for sentence repre-
+sentation learning. Each instance includes a premise with three hypotheses (entailment, neutral,
+contradiction). We use ~276k triplets from all-NLI using entailments as positives and contradictions
+as hard negatives. We further construct Scale-1M, a curated collection of 1M sentence pairs sampled
+from 20M multilingual parallel corpora, including Global Voice [48], MUSE [53], News Commen-
+tary [62], Tatoeba [I], Talks [52], WikiMatrix [55], and other Sentence Transformers sources [51].
+This design simultaneously leverages diverse descriptive text to simulate image captions—aiming to
+activate image representations without direct image supervision—and integrates multilingual pairs to
+enhance cross-lingual alignment, which may in turn enhance multimodal alignment across languages.
+(2) Multimodal Setting. Building on all-NLI, we further add ~94k synthetic multimodal pairs (ref.
+Appendix [A) to enhance alignment in the downstream task format space, yielding a final dataset of
+~370k triplets.
+
+Evaluation benchmarks. For image-text embedding tasks, we primarily adopt MIEB-Lite (51
+tasks)—the official lightweight version of MIEB (130 tasks; [76]})—covering eight categories detailed
+in Appendix [B] including Linear Probing, Retrieval (English and Multilingual), Zero-shot Classi-
+fication, Compositionality Evaluation, Vision-centric QA, Document Understanding, Clustering,
+and Visual STS (English and Cross-lingual). For rapid iteration and ablation, we further employ a
+compact subset of 18 overlapping tasks (referred to as MIEB-Sub18; detailed in Appendix[C). For
+audio-text embedding tasks, we evaluate on AudioCaps and Clotho datasets. For video-text
+embedding tasks, we utilize MSR-VTT [79] and ActivityNet datasets. The performance on these
+tasks provides complementary evidence supporting the universality and effectiveness of LCO-EMB,
+extending beyond the vision and language modalities. For both audio-text and video-text embedding
+tasks, we utilize the Recall@ 1 as the evaluation metric.
+
+4.2 Performance Comparison on the MIEB Benchmark
+
+To better understand the experimental results, we briefly introduce the goal and evaluation metric of
+each MIEB-Lite category: (1) Visual STS reformulates semantic textual similarity as a vision task by
+rendering text as images to test visual encoders’ semantic understanding, evaluated by Spearman
+correlation; (2) Document Understanding/Visual Document Retrieval measures a model’s ability
+to capture layout-aware textual semantics in visual documents and image-text alignment, evaluated by
+nDCG@5; (3) Image Linear Probing assesses the discriminative and transferable quality of frozen
+visual representations using accuracy; (4) Compositionality Evaluation tests fine-grained image-
+
+For multimodal variants with limited additional image-text and interleaved data, we scale the batch size by
+the ratio of total to text-only dataset size. For example, for our 370k dataset (276k text-only), the batch size is
+1,052, i.e, 1.37 x 768.
+
+
+Table 1: MIEB-Lite (51 tasks) results broken down by task categories. We provide averages of
+both English and multilingual tasks. Models are ranked by the Mean (m) column. Shortcuts are
+x=“Crosslingual”, m=“Multilingual”, en=“English”, and task categories from MIEB [76]. We refer
+to the latest MIEB leaderboard to obtain scores for the compared baselines.
+
+MIEB.-Lite (51 Tasks)
+
+vSTS Rtrv. vSTS Mean Mean
+
+Model Name (|) Dataset Rtrv. Clus. ZS. LP. Cmp. VC. Doc. (en) (m) (x&m) (en) (m)
+
+° 659) (2) vp) (8) (6) (5) (6) @) (2 (44) (2 9)) (47) (51)
+Encoder baselines
+CLIP-ViT-bigG 2B 34.2 80.8 7224 771.8 35.0 43.0 35.5 73.4 26.2 34.5 56.5 51.3
+SigLIP-so400m 9B 32.4 159 73.8 78.8 32.8 48.0 46.9 69.6 35.4 41.4 57.3 53:5
+MLLM baselines
+VLM2Vec-LoRA 662k 21.0 66.4 32.1 64.8 29.4 65.3 42.7 70.9 24.8 42.2 49.1 46.0
+E5-V 276k 26.9 51.7 36.2 70.6 39.4 52.6 56.0 81.2 58.3 46.3 51.8 51.9
+Voyage Multimodal 3 - 33.2 76.6 48.6 69.3 35.8 50.0 63.5 84.2 49.0 70.4 57.7 58.1
+mmE5 (11B) |8] 2.1M 34.2 77.0 59.8 71.1 27.8 59.2 53.9 78.8 66.6 54.6 57.7 61.8
+GME (7B) 8.0M 37.9 69.6 55.5 68.7 52.2 55.4 86.1 81.8 62.4 75.4 63.4 64.5
+Our Text-only Variants
+LCO-EmMB-VL (3B) 276k 32.6 61.8 45.0 67.4 38.5 57.7 62.2 86.1 52.4 76.5 56.4 58.0
+LCO-EmMB-VL (7B) 276k 31.8 52.7 49.1 68.5 40.4 63.1 66.0 88.4 59.8 84.3 575 60.4
+Our Multimodal Variants
+LCO-EmMB-VL (3B) 370k 34.0 71.6 58.1 68.3 46.1 57.8 73.0 83.8 54.6 76.1 61.6 62.3
+LCO-EmMB-VL (7B) 370k 36.4 76.0 66.8 72.5 51.0 65.2 75.6 86.6 63.1 83.3 66.2 67.6
+LCO-EmB-Omni (3B) 370k 34.5 78.3 66.1 72.8 48.2 59.2 73.4 85.7 54.5 80.4 64.8 65.3
+LCO-EmB-Omni (7B) 370k 36.4 80.0 68.5 74.1 50.1 70.5 75.4 86.2 64.3 82.4 67.6 68.8
+
+text alignment with accuracy; (5) Vision-centric QA evaluates visual reasoning and understanding
+through accuracy; (6) Retrieval measures modality-specific and joint encoding performance with
+nDCG@ 10; (7) Zero-shot Classification evaluates similarity-based classification using accuracy;
+and (8) Clustering examines the structural coherence of embeddings using the NMI metric. We refer
+to Appendix [B]for detailed task descriptions.
+
+We evaluate LCO-EMB on the 51 tasks of the MIEB-Lite benchmark. As shown in Figure|4]and
+Table[I] LCO-EMB consistently outperforms strong baselines, including E5-V [30], VLM2Vec [31],
+Voyage-Multimodal-3 [65], mmE5 [8], and GME [85]. Remarkably, despite using only ~0.37M
+training pairs—about 21x less data than GME (~8M)—our multimodal variants set a new state-
+of-the-art on MIEB. Consistent with findings from Xiao et al. [76], MLLM-based embedding
+models excel at tasks leveraging MLLM backbones’ reasoning and cross-modal understanding
+abilities, such as multilingual alignment, compositionality, and document understanding. Beyond
+these strengths, LCO-EMB also attains competitive results on clustering, linear probing, and zero-
+shot classification—areas where MLLM-based representations typically lag behind CLIP-style
+models. Notably, even our text-only variants, trained with minimal text-only contrastive data, surpass
+advanced proprietary model Voyage-Multimodal-3. Incorporating only ~94k additional multimodal
+samples (image-text and interleaved data; Appendix[A) further calibrates the representation space for
+downstream task formats, resulting in a compact yet highly effective dataset of ~370k triplets.
+
+4.3 Representational Capability of LCO-EMB
+
+To better analyze the representational capability of LCO-EMB, we use the text-only variants, i.e.,
+without utilizing the synthetic multimodal pairs, as evaluation targets and conduct extensive validation
+and ablation studies on MIEB-Sub18 benchmark.
+
+Main results. We assess text-only variants of LCO-EMB against the advanced embedding methods
+on the MIEB-Sub18. As illustrated in Figure 5] LCO-EMB, trained on the 3B and 7B variants
+of Qwen2.5-VL-Instruct (VL) and Qwen2.5-Omni (Omni), consistently outperforms the leading
+embedding models across a variety of multimodal downstream tasks. On average across all evaluation
+categories, the text-only variants of LCO-EMB have outperformed E5-V and Voyage-Multimodal-
+3 by 21.69 and 13.00 points, where E5-V and Voyage-M3 are the advanced open-source and
+proprietary MLLM embedding models, respectively. Notably, LCO-EMB deliver significant im-
+provements on the Linear Probing, Cross-lingual Visual STS, and Multilingual Image Retrieval tasks,
+outperforming prior advanced methods by margins of 21.02, 10.26, and 15.35 points, respectively.
+The results highlight the effectiveness and generalizability of LCO-EMB. It is also noteworthy
+that while Voyage-M3 is a commercial model explicitly optimized on PDF-text pairs for document
+understanding tasks, LCO-EMB, trained solely on textual data, still achieve comparable results.
+
+
+Linear Probe Visual STS. Visual STS (Cross-Lingual)
+
+58.61 84.69 —_
+54.60 :
+
+50 d
+
+8
+
+a9
+3759
+
+75
+
+/ i
+os 70
+
+20 a — = —
+ESV Loo Ea NED ERE (COO ERE” Lee aa “ESV Voyage LCO-Emb-— LCO-Emb- LCO-Emb-  LCO-Emb- EOE:
+
+wanes VLGB) — VL(B) —Omni3B) ini (7B) VLGB) —-VL(7B)—Ommi(3B) mi (7B)
+Visual STS (Multilingual) Document Understanding Multilingual Image Retrieval
+
+65 65
+80 64.81
+714 0 60
+70 S
+58.47 aa
+9 52.25
+50 30 zs
+49.46
+53.61
+5
+: . : Fl
+40 - - 40 - - = —
+~ LCO-En
+
+ESV it ECDs e0Eei Loci © Leo ESV mb- LCO-Emb- © LCO-Enb ~~ LCO-Emb- ESV Voyage LCO-Emb- LCO-Emb- LCO-Emb-  LCO-Emb-
+modal -VLGB)—-VL(TB) ni (3B) Omni (7B) Malina VLGB) ——VL(7B) ni(3B) Omni (7B) Multimodal 3. VL(3B) — VL(7B)_— Omni 3B) Omni (7B)
+
+3
+8
+
+85.23
+
+g
+
+Accuracy
+Spearman Correlation
+Spearman Correlation
+
+vi LCO-Emb-  LCO-Emb- LCO-Emb-  LCO-Emb-
+Mul VLGB) —VL(7B)—Omni(3B) Omni (7B)
+
+Spearman Correlation
+nDCG@S
+nDCG@10
+
+Fema 5: Ablation comparison between the text-only variants of LCO-EMB with advanced open-
+source (E5-V [30]) and proprietary (Voyage Multimodal 3 [65]) embedding models on MIEB-Sub18.
+LCO-EMB-VL and LCO-EMB-Omni denote LCO-EMB trained from Qwen2.5-VL and Qwen?2.5-
+Omni backbones, respectively.
+
+Table 2: Exploring the impact of training dataset utilization and model ensemble on LCO-EMpB,
+where LCO-EMB-Ens denotes the ensemble model produced by applying the model soup
+technique to LCO-EMB variants fine-tuned on all-NLI and Scale-1M.
+
+v-STS v-STS  v-STS Doc. Multi.
+
+Model Data Source Linear Prob. (Eng.) (cross) (multi) Und. Img. Rtr. Avg.
+LCO-EMB all-NLI 51.86 84.69 85.23 83.48 65.36 56.37 71.17
+LCO-EMB Scale-1M 58.61 81.27 8142 7842 62.12 64.81 71.11
+LCO-EMB-Ens - 55.69 83.79 84.88 82.82 63.15 62.67 72.17
+
+Exploring the impact of text-only training dataset and model merging. Recognizing that lan-
+guage models fine-tuned on different datasets often demonstrate distinct strengths, we independently
+fine-tune LCO-EMB, using Qwen-2.5-VL-Instruct as the backbone model, on all-NLI and Scale-1M
+via contrastive learning, then assess the performance of each variant in isolation. Subsequently, we
+investigate the effect of model ensembling by applying the model soup technique, which merges
+the parameters of multiple separately fine-tuned models by averaging their weights. The results,
+presented in Table [2 provide the following three key insights:
+
+¢ Performance of all-NLI fine-tuned variant. LCO-EMB trained by all-NLI excels in Visual STS
+and Document Understanding, indicating that NLI supervision sharpens not only textual similarity
+perception but also generalizes to improve their ability to preserve vision-text semantic similarity.
+
+¢ Performance of Scale-1M fine-tuned variant. LCO-EMB adapted by Scale-1M leads on Linear
+Probing and Multilingual Image Retrieval tasks. Since Scale-1M supplies semantically rich descrip-
+tions of real-world scenes, LCO-EMB fine-tuned on this corpus appears to emulate image—caption
+pre-training, thereby activating image representations without explicit visual data.
+
+¢ Performance of model ensemble. The LCO-EMB-Ens, through merging the LCO-EMB variants
+trained by all-NLI and Scale-1M, achieves the best overall performance, demonstrating that the
+model ensemble strategy effectively integrates the complementary strengths of each checkpoint.
+
+Comparison of different training strategies. We apply LoRA to enhance representational capacity
+while preserving latent cross-modal alignment. To assess this design, we experiment with Qwen?2.5-
+VL 3B and 7B backbones, comparing LoRA against three baselines: (1) standard CLIP-style
+contrastive fine-tuning on 800K PixmoCaps image-caption pairs, (2) full fine-tuning, and (3) a
+shallow projection that adds a linear layer after the output. Reported in Table [3] the CLIP-style
+baseline underperforms text-only LoRA, requires 50 more training time, and the shallow projection
+increases parameters but does not effectively leverage pretrained cross-modal structure, yielding only
+marginal gains over native embeddings. Full fine-tuning achieves reasonable results but remains
+
+
+Table 3: Performance and efficiency comparisons of different training strategies using 3B and 7B
+variants of Qwen2.5-VL backbones. GPU hours are benchmarked by hours x number of H20 GPUs.
+Training Time Multiling. V-STS V-STS V-STS Doc. Linear
+
+nsining Satategy (GPU Hows) Img. Rie (Eng) (cross) Gaol) Und. Probe "8°
+Qwen2.5-VL-3B n/a 31.73 73.82 59.03 68.57 28.82 46.96 51.49
+w/ CLIP-style CL (multimodal) | ~453.0 Hours 25.15 72.51 6745 65.22 48.91 41.05 53.38
+w/ Linear Proj. (text-only) ~4.5 Hours 31.31 75.25 62.95 69.32 28.12 49.19 52.69
+w/ Full-Finetune (text-only) ~8.5 Hours 44.61 81.65 68.67 77.75 49.71 50.21 62.10
+w/ LoRA (text-only) ~4.7 Hours 51.61 81.88 74.97 78.30 57.90 53.05 66.28
+Qwen2.5-VL-7B n/a 40.31 73.82 59.03 68.56 28.82 46.96 52.92
+w/ CLIP-style CL (multimodal) | ~550.0 Hours 18.24 73.92 68.70 65.41 44.89 38.93 50.02
+w/ Linear Proj. (text-only) ~8.8 Hours 40.29 72.05 65.46 70.88 35.69 52.96 56.22
+w/ Full-Finetune (text-only) ~17.3 Hours 44.05 83.15 79.09 81.28 58.02 53.34 66.49
+w/ LoRA (text-only) ~9.3 Hours 56.64 85.05 85.30 83.48 67.49 53.91 71.98
+
+notably inferior to LORA. We attribute this gap to an objective mismatch: contrastive loss deviates
+from the model’s pretraining objective, and full fine-tuning consequently induces larger perturbations
+to the pretrained parameters, which are more likely to disrupt the established cross-modal alignment.
+Detailed analysis of LoORA hyperparameterg"Jis presented in Appendix |[D]
+
+5 Generation-Representation Scaling Law
+
+The superior performance of LCO-EMB is primarily attributed to the intrinsic multimodal alignment
+capabilities of the backbone MLLMs, which we activate through lightweight contrastive fine-tuning.
+This observation prompts a fundamental question: What is the relationship between the inherent mul-
+timodal generative ability of MLLMs and their representation potential ? Through empirical analysis,
+we reveal a positive scaling correlation between these two aspects. Furthermore, we substantiate our
+empirical findings with a theoretical analysis with a PAC-Bayesian generalization bound, linking
+models’ generative capabilities with the upper bound of their representation performance.
+
+5.1 The Relationship between Generative and Representational Capabilities
+
+We conduct an empirical analysis to investigate the relationship between improving multimodal
+representation capabilities via text-only contrastive learning and the intrinsic generative capacity of
+MLLMs. Our analysis spans three different types of modality pairs, i.e., OCR-based image-text tasks,
+video-text tasks, and audio-text tasks. The experimental setup is detailed below:
+
+* OCR-Based Image-Text Tasks: We evaluate OCR-dependent capabilities through paired repre-
+sentation and generative tasks. For representation tasks, we average scores from Visual Semantic
+Textual Similarity (V-STS-English) and Document Understanding. Generative performance is mea-
+sured by averaging results from TextVQA [56], DocVQA [45], OCRBench [42], and ChartQA [44].
+
+* Video-Text Tasks: Representation capabilities are assessed using video-text Recall@1 scores
+averaged across MSR-VTT and ActivityNet [6]. Generative performance combines results
+from Video-MMEw, sub and MVBench [38].
+
+¢ Audio-Text Tasks: We compute Recall@1 scores using Clotho and AudioCaps [32]. For gen-
+erative evaluation, we average performance on MMAU and VoiceBench [10], comprehensive
+benchmarks encompassing multiple sub-tasks.
+
+Results. As depicted in Figure|6] we observe a consistently positive correlation between baseline
+generative performance before CL and the post-CL representational performance across different
+MLLM backbones on all task categories. This observation leads to the discovery of Generation-
+Representation Scaling Law (GRSL), where the representational abilities of MLLMs, enhanced
+through contrastive refinement, scale positively with the model’s original generative capability. This
+insight suggests an alternative pathway for advancing multimodal models by harnessing the scaling
+effects of generative capacity. Next, we provide a theoretical analysis of GRSL, which formally links
+the MLLM’s generative quality to the upper bound on its final embedding performance.
+
+“There is a slight difference in evaluation resolution between Table[2]and Table[3]due to different codebase
+versions used for the experiments.
+
+
+46
+vL-78 @ “| 243 a
+Omni-7B Pa ~
+
+374 _ ee | Y
+Ss ri a R) rs ®) =
+a Omni-7B o Say E 242 Omni Bg
+S x 3 3 ra
+$22 sgl 4 Z % 24.1 a
+of Omni-3B“ S42 +4
+s ae rT] O YL-7B @ 24.0 e
+3 Z 3 mni-3B@ $
+
+Pi Pg &
+10 - VL3B@® 2 a 2
+x e r oO
+a ee 40 2 23.9
+q cd 2 2
+D 68 7 ye 238 a
+& a z 38 Ps 2 Omni-3B
+° UBYAKex-sB VL-3B@ 23.7 A
+
+23.6
+65 70 75 80 66 67 68 69 70 71 72 65 66 67 68 69 70 71
+OCR Generation Performance Video-text Generation Performance Audio-text Generation Performance
+
+Figure 6: Scaling relationship between generation benchmark performance (X-axis) and representa-
+tion benchmark performance after language-centric contrastive learning (Y-axis).
+
+5.2 Theoretical Analysis of Generation-Representation Scaling Law
+
+We aim to prove that a stronger generative prior of MLLMs leads to better representations after
+contrastive fine-tuning. We formalize this intuition using the PAC-Bayesian framework.
+
+5.2.1 Definitions
+
+Definition 1 (Population and Empirical Risk). Let D be the data distribution. The population
+contrastive risk for a model @ is its true expected InfoNCE loss:
+
+LPP) == Ecx,y)nv [Emfonce(X,; Y;4)] (1)
+
+Given a training set S = {(X;, Y;)}7_, of size n, the empirical contrastive risk is defined as:
+
+x 1—
+Loe (8) = ny S- LinfoNCE( Xi, Yi; 6). (2)
+
+i=l
+
+Definition 2 (Generative Quality of the Prior). Let P be the prior distribution over the parameters of
+a pre-trained autoregressive generative model. In the common case where P = dg, is a point mass of
+the model parameters at a pretrained checkpoint 09, we define its generative quality via the mutual
+information captured by 4:
+
+Ip(X;Y) := Ig, (XY). (3)
+
+Under the standard approximation that the generative cross-entropy loss £,(P) estimates the condi-
+tional entropy (ref. Appendix IF). we have the following approximation:
+
+L(P) * H(Y)—Ip(X;Y) = > Ip(X;Y) x H(Y)-L,(P). (4)
+
+Here, H(Y) is the Shannon entropy of the target data distribution, which quantifies the inherent
+diversity and complexity of the target modality (e.g., text). Thus, for a fixed dataset, a lower generative
+loss £,(P) corresponds to a higher mutual information and therefore a higher generative quality.
+
+5.2.2 Central Hypothesis
+
+The core of our argument is that a good generative prior provides a “warm start” for contrastive
+fine-tuning. We formalize this as follows.
+
+Hypothesis 1 (Generative Warm Start). Let P be a generative prior of a pre-trained autoregressive
+generative model and Q the posterior of the generative model after optimized by the empirical
+contrastive loss L°™?. The expected empirical loss under Q is bounded by:
+
+toma [£2"°(0)] < log N — Ip(X:¥) +p, (5)
+
+where €p > 0 captures the gap between the information-theoretic optimum and the loss achieved
+after finite-step contrastive fine-tuning. A better prior (higher Ip) leads to a smaller €p.
+
+10
+
+
+Justification: A high Ip(X;Y) implies that the representation of the generative model before
+contrastive finetuning, fp(X), is already predictive of Y. This pre-existing alignment means positive
+pairs are closer in representation space, enabling contrastive optimization to reach a lower empirical
+loss. The term log N — Ip(X;Y) is the theoretical lower bound on InfoNCE loss under ideal
+conditions. This hypothesis aligns with our empirical findings in Section [5.1] which show that
+stronger pretrained generative models yield better representations for downstream tasks, and is
+consistent with recent literature on decoder-based embedding models [86].
+
+5.2.3. Main Theoretical Result
+
+Theorem 1 (Generative-Contrastive PAC-Bayes Bound). Let P be a generative prior of a pre-trained
+autoregressive generative model and Q the posterior of the generative model after contrastive fine-
+tuning on a dataset of n samples. Under Hypothesis{]| with probability at least 1 — 6 over the draw
+of the training set, the expected population contrastive risk is bounded by:
+
+‘ 0 KL P) +log(1/6
+tong [EB"(0)] <logN —Ie(X¥)+ en, +f SV@IP) Flos)
+Generative Bottleneck Inefficiency Gap
+
+PAC-Bayes Complexity Penalty
+
+Proof. We begin with the standard PAC-Bayesian generalization bound, which holds with probability
+at least 1 — 6 for any posterior Q:
+
+Sax [L2°P(8)] < Bong [£2"°(0)| + / RL(QIP) + log(1/d)_ 9
+
+According to Hypothesis[I] the empirical risk is bounded as:
+
+tana [£e?(8)] < log N — Ip(X;¥) + ep. (8)
+
+Substituting (8) into (7) yields Theorem[]]
+
+Corollary 1 (Generative Performance Governs Representation Bound). By substituting the approxi-
+mation Ip(X;Y) * H(Y) — £,(P) into the main bound from Theorem|I| the expected population
+risk is directly governed by the prior’s generative loss:
+
+9.0 [LP°P(0)] S Lo(P) + (log N — H(Y)) +ep + / BIG IE 7 log(1/5)
+
+This result formalizes the central claim of our work: a lower generative loss £,(P) in the prior
+model directly tightens the upper bound on the final contrastive performance. Furthermore, the use
+of parameter-efficient methods like LoRA is justified as it keeps the complexity term KL(Q||P) small,
+ensuring the benefits of the strong generative prior are not lost during fine-tuning.
+
+Interpretation of the Bound. The theorem and its corollary reveal three distinct factors that govern
+the final representation quality:
+
+1. The Generative Bottleneck (log N — Ip(X;Y)): This term dictates the theoretical best-case
+performance. The quality of the final representation is fundamentally limited by the mutual
+information, p(X; Y), captured by the generative prior. A stronger generative model (higher Ip)
+lowers this performance floor, creating a better potential outcome before fine-tuning even begins.
+
+2. The Optimization Inefficiency (€): This term captures the practical realities of fine-tuning. Our
+hypothesis posits that a better prior not only provides a better starting point but also creates a more
+favorable optimization landscape. This results in a smaller "inefficiency gap" €p, meaning the
+fine-tuned model gets closer to the theoretical optimum.
+
+3. The Fine-tuning Cost (,/---): The PAC-Bayes complexity penalty quantifies the risk of over-
+fitting and straying too far from the prior. The use of parameter-efficient methods like LoRA
+is theoretically justified as it constrains the posterior Q to be close to the prior P, keeping the
+KL(Q||P) term small. This ensures we reap the benefits of contrastive learning without losing the
+powerful, generalizable knowledge encoded in the generative prior.
+
+11
+
+
+5.3. Improving Representation Bounds via Enhancing Generative Capability
+
+To further investigate the hypothesis that enhancing an MLLM’s generative ability improves its
+representations, a key aspect of the Generation-Representation Scaling Law, we introduce a challeng-
+ing cross-lingual multimodal document retrieval task, SeaDoc. This task enables a comprehensive
+evaluation of MLLM’s representational capacity. In this task, an English query is used to retrieve a
+corresponding multimodal document page in a low-resource target language.
+
+5.3.1 Data Curation
+
+SeaDoc is a cross-lingual visual document retrieval benchmark specifically designed for low-resource
+SouthEast Asian (SEA) languages. While building upon foundational concepts from existing visual
+document understanding benchmarks like ViDoRe [19], SeaDoc uniquely challenges MLLMs’ visual
+document understanding capabilities on non-English languages at an unprecedented scale.
+
+To construct SeaDoc, we curate a corpus of 5,055 pages drawn from 29 book publications from
+in-house collections across four SEA languages [84]—Thai, Vietnamese, Malay, and Lao. The
+documents span diverse subject areas, including economics, natural sciences, technology, history,
+politics, art, psychology, education, and country reports. We design a rigorous pipeline that uses
+Gemini-2.5-Flash to generate queries for each document page, ensuring that each query maps
+uniquely to its ground-truth page and that no other page in the corpus is a valid match, thereby
+eliminating false negatives. Human annotators then filter out low-quality queries. This process
+yields 1, 001 high-quality English queries for retrieval over the 5, 055-page corpus in Southeast Asian
+languages. Details of the data construction process are provided in the Appendix[E]
+
+5.3.2 Experimental Settings
+
+We use Qwen2.5-VL-3B as the backbone and
+establish a baseline with lightweight contrastive
+learning. To assess whether enhanced generative 367 Baseline (high-resolution) == |
+ability benefits embedding quality, we further 34.4
+train a variant with additional generative pre-
+
+training before lightweight contrastive learning.
+
+We apply supervised fine-tuning to enhance
+the model’s image-to-text generative capabil- —-- Baseline
+
+ity. This stage utilizes a mixture of image-to- 76 | --- Baseline (high-resolution)
+text training data, comprising OCR data in SEA ;
+
+languages (derived from the training split of Ss
+SeaDoc) and general-domain image caption- SeaDoc  SeaDoc(H)  SeaDoc+PC SeaDoc+PC (H)
+ing data, i.e., PixmoCaps [13]. The OCR data
+
+strengthens its capability in generating SEA lan- Figure 7: Retrieval performance of Qwen2.5-VL-
+guages from visual documents, while the inclu- 3B fine-tuned on various continual generative fine-
+sion of general image captioning data helps pre- tuning strategies before CL on SeaDoc benchmark,
+serve its semantic alignment between image and where “PC” represents PixmoCaps and “H” de-
+text modalities in the general domain. notes high-resolution. The results suggest that en-
+Given that text in multimodal documents can hancing the generative ability of MLLMs before
+be small, requiring higher image resolution for CL can enhance their embedding capability.
+MLLMs to accurately read textual content, we
+
+further employ two settings—high- and low-resolution—to assess the impact of image resolution. For
+the low-resolution setting, we follow standard practice by using a maximum of 262, 144 pixels [87].
+For the high-resolution setting, we use a 10x larger maximum of 2, 621, 440 pixels. Here, we adopt
+nDCG @10 as the primary metric.
+
+—®— Continual Generative Training
+
+5.3.3 Experimental Results
+
+Figure|7|summarizes the retrieval performance of the same backbone model fine-tuned using different
+continual SFT strategies before the same CL tuning process on our SeaDoc benchmark}| We draw
+the following key observations:
+
+Unless otherwise specified, we evaluate model performance at the maximum resolution used during training.
+
+12
+
+
+(1) When SFT training is conducted exclusively on OCR-intensive data, i.e., SeaDoc-train, at
+lower resolution, the model experiences a significant capability collapse compared to the baseline
+(Qwen2.5-VL-3B after lightweight CL). This SFT-induced degradation aligns with observations
+in recent multimodal reasoning research [[7] [SI]. Since foundation models have
+already undergone extensive SFT and RL, continual SFT can lead to overfitting and degrade models’
+generalization capability.
+
+(2) Training on SeaDoc with higher resolution partly mitigates this collapse. This is because the text
+in visual documents is typically small; training with higher resolution allows for better grounding of
+the generated output in the visual text of the source image, as opposed to overfitting to example-level
+visual cues.
+
+(3) Incorporating PixmoCaps captions into the training set further boosts visual document retrieval
+performance post-CL. This is because general-domain image captioning data helps preserve the latent
+image-text alignment learned by MLLMs during pre-training. This preserved alignment is crucial for
+its effective exploitation by the subsequent text-only contrastive finetuning process.
+
+6 Related Work
+
+Omnimodal Representation Learning. Existing approaches to omnimodal representation learn-
+ing typically rely on large-scale cross-modal pairs to train modality-specific encoders. Recent
+progress highlights the potential of MLLMs for image-text alignment. However, the effec-
+tiveness of exploiting the latent alignment inherent in MLLMs’ generative capabilities for omnimodal
+representation learning—and its underlying theoretical basis—remains unexplored.
+
+Modality-centric Representation Learning. Prior work explores representation learning for
+a single modality. For instance, ImageBind leverages the image modality as the anchor for
+contrastive learning to align with all other modalities. Web-SSL explores language-free (thus
+“vision-centric”’) visual representation learning, which scales data volume to be on par with CLIPs to
+train DINOv2. By scaling up data volume, the vision-centric self-supervised learning can achieve
+OCR performance on par with CLIP, which is typically thought to attain through textual supervi-
+sion [63]. E5-V leverages text-only learning to generalize to images and composed retrieval
+tasks. We extensively study the language-centric view to train omnimodal representation models.
+
+Representation Capabilities. Through investigating 50 models across 130 tasks in 39 languages,
+Xiao et al. report that CLIP’s performance gains from scaling data, batch size, and model
+size have largely plateaued on advanced representation benchmarks, including interleaved encod-
+ings [69], compositionality [61], textual visual representations [19] {74], and image—multilingual text
+alignment [57]. They further highlight MLLM-based embedding models as a promising alternative,
+motivating our exploration of the relationship between representational and generative capabilities in
+MLLMs. Prior work has explored this connection: Cambrian-1 combines a shared language de-
+coder with various vision encoders for downstream generation and demonstrates that the downstream
+performance of MLLMs scales with the representation capabilities of the vision encoders, while
+Yang et al. formalizes the law between visual representation and MLLM generative capabilities.
+In contrast, we explore a fundamentally different concept: the “Generation-Representation Scaling
+law” between generation and representation capabilities of the MLLM itself. We see above as the
+“Representation-Generation Scaling Law” where the MLLM’s generation performance scales with the
+strength of modality-specific encoders. In this work, we explore a fundamentally different concept:
+the “Generation-Representation Scaling law” where the MLLM’s representation abilities scale with
+its own generation capabilities. Our findings align closely with Xiao et al. [75], who demonstrate that
+LLM-based embeddings excel at instruction following and reasoning-oriented retrieval.
+
+7 Conclusion
+
+In this work, we reveal that the superior performance of MLLM-based embedding approaches
+originates from implicit cross-modal alignment established during generative pretraining, wherein the
+language decoder learns to integrate multimodal information within a unified representation space.
+Leveraging this insight, we develop LCO-EMB, a language-centric omnimodal embedding framework
+that treats contrastive learning as a lightweight refinement stage, thereby enhancing representational
+quality while preserving the model’s generative structure. Building on this formulation, we introduce
+
+13
+
+
+the Generation-Representation Scaling Law (GRSL), which establishes a positive correlation between
+a model’s generative capacity and the effectiveness of contrastive refinement. Our theoretical analysis,
+through a PAC-Bayesian generalization bound, together with extensive empirical validation on diverse
+and challenging benchmarks, confirms both the efficacy of LCO-EMB and the generality of GRSL.
+Collectively, these findings re-conceptualize the role of contrastive learning and position generative
+pretraining—not merely the expansion of cross-modal data—as the central driver of scalable, efficient,
+and robust multimodal representation learning.
+
+Limitations
+
+In this work, we have studied the scaling law between generative capabilities of pretrained MLLMs,
+their latent multimodal alignment, and their representational capabilities after contrastive learning.
+We use MLLMs that have gone through generative pretraining and those that have attained different
+levels of generative capabilities, and let them go through lightweight contrastive learning. During
+contrastive learning, model weights are minimally adjusted, through low-rank adaptation, to project
+the original knowledge space into an embedding space suitable for similarity matching. However,
+we do note that one can also jointly train generative loss and contrastive loss to maintain a
+model’s knowledge (through continual generative training), and enhance its representational power
+(through continual contrastive learning). Due to the high computational cost of this approach, we
+leave it as a promising direction for future work in the context of omnimodal representation learning.
+
+References
+
+[1] Mikel Artetxe and Holger Schwenk. Massively multilingual sentence embeddings for zero-
+shot cross-lingual transfer and beyond. Transactions of the Association for Computational
+
+Linguistics, 7:597-610, 2019. URL https: //aclanthology.org/Q19- 1038/
+
+[2] Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang,
+Shijie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li, Jianqiang
+Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen
+Cheng, Hang Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. Qwen2.5-vl technical report.
+
+ArXiv, abs/2502.13923, 2025. URL https: //arxiv. org/abs/2502.13923
+
+[3] Thomas Berg, Jiongxin Liu, Seung Woo Lee, Michelle L. Alexander, David W. Jacobs, and
+Peter N. Belhumeur. Birdsnap: Large-scale fine-grained visual categorization of birds. In 20/4
+IEEE Conference on Computer Vision and Pattern Recognition, pages 2019-2026, 2014. URL
+10.1109/CVPR.2014.259
+
+[4] Dan Biderman, Jacob Portes, Jose Javier Gonzalez Ortiz, Mansheej Paul, Philip Greengard,
+Connor Jennings, Daniel King, Sam Havens, Vitaliy Chiley, Jonathan Frankle, Cody Blakeney,
+and John Patrick Cunningham. LoRA learns less and forgets less. Transactions on Machine
+
+Learning Research, 2024. URL|https://openreview.net/forum?id=aloEru2qCG
+
+[5] Samuel R. Bowman, Gabor Angeli, Christopher Potts, and Christopher D. Manning. A large
+annotated corpus for learning natural language inference. In Proceedings of the 2015 Conference
+on Empirical Methods in Natural Language Processing, pages 632-642, Lisbon, Portugal,
+
+September 2015. Association for Computational Linguistics. URL|https://aclanthology
+org/D15-1075/
+
+[6] Fabian Caba Heilbron, Victor Escorcia, Bernard Ghanem, and Juan Carlos Niebles. Ac-
+tivitynet: A large-scale video benchmark for human activity understanding. In Proceed-
+ings of the IEEE conference on Computer Vision and Pattern Recognition, pages 961-
+
+970, 2015. URL|https: //www.cv-foundation. org/openaccess/content_cvpr_2015
+papers/Heilbron_ActivityNet_A_Large-Scale_2015_CVPR_paper. pdf
+
+[7] Guizhen Chen, Weiwen Xu, Hao Zhang, Hou Pong Chan, Deli Zhao, Anh Tuan Luu, and
+Yu Rong. Geopqa: Bridging the visual perception gap in mllms for geometric reasoning. ArXiv,
+
+abs/2509.17437, 2025. URL https: //arxiv.org/abs/2509. 17437
+
+14
+
+
+[8] Haonan Chen, Liang Wang, Nan Yang, Yutao Zhu, Ziliang Zhao, Furu Wei, and Zhicheng
+Dou. mmE5: Improving multimodal multilingual embeddings via high-quality synthetic
+data. In Findings of the Association for Computational Linguistics: ACL 2025, pages 8254—
+8275, Vienna, Austria, July 2025. Association for Computational Linguistics. URL {https :
+//aclanthology.org/2025.findings-acl .433/
+
+[9] Ting Chen, Simon Kornblith, Mohammad Norouzi, and Geoffrey Hinton. A simple framework
+for contrastive learning of visual representations. In Proceedings of the 37th International
+Conference on Machine Learning, volume 119 of Proceedings of Machine Learning Research,
+pages 1597-1607. PMLR, 13-18 Jul 2020. URL https: //proceedings .mlr.press/v119/
+
+Yiming Chen, Xianghu Yue, Chen Zhang, Xiaoxue Gao, Robby T. Tan, and Haizhou Li.
+Voicebench: Benchmarking Ilm-based voice assistants. ArXiv, abs/2410.17196, 2024. URL
+https://arxiv.org/abs/2410.17196
+
+a
+—
+o
+
+=
+
+[11
+
+ra
+
+Yew Ken Chia, Liying Cheng, Hou Pong Chan, Chaoqun Liu, Maojia Song, Sharifah Mahani
+Aljunied, Soujanya Poria, and Lidong Bing. M-longdoc: A benchmark for multimodal super-
+long document understanding and a retrieval-aware tuning framework. In Proceedings of
+the 2025 Conference on Empirical Methods in Natural Language Processing, EMNLP 2025.
+
+Association for Computational Linguistics, 2025. URL https://arxiv.org/abs/2411
+06176
+
+[12
+
+so
+
+Google DeepMind. Gemini 2.5: Pushing the frontier with advanced reasoning, multimodality,
+long context, and next generation agentic capabilities. ArXiv, abs/2507.06261, 2025. URL
+
+https: //arxiv.org/abs/2507 .06261
+
+Matt Deitke, Christopher Clark, Sangho Lee, Rohun Tripathi, Yue Yang, Jae Sung Park, Mo-
+hammadreza Salehi, Niklas Muennighoff, Kyle Lo, Luca Soldaini, Jiasen Lu, Taira Anderson,
+Erin Bransom, Kiana Ehsani, Huong Ngo, YenSung Chen, Ajay Patel, Mark Yatskar, Chris
+Callison-Burch, Andrew Head, Rose Hendrix, Favyen Bastani, Eli VanderBilt, Nathan Lambert,
+Yvonne Chou, Arnavi Chheda, Jenna Sparks, Sam Skjonsberg, Michael Schmitz, Aaron
+Sarnat, Byron Bischoff, Pete Walsh, Chris Newell, Piper Wolters, Tanmay Gupta, Kuo-Hao
+Zeng, Jon Borchardt, Dirk Groeneveld, Crystal Nam, Sophie Lebrecht, Caitlin Wittlif, Carissa
+Schoenick, Oscar Michel, Ranjay Krishna, Luca Weihs, Noah A. Smith, Hannaneh Hajishirzi,
+Ross Girshick, Ali Farhadi, and Aniruddha Kembhavi. Molmo and pixmo: Open weights
+and open data for state-of-the-art vision-language models. In Proceedings of the Computer
+Vision and Pattern Recognition Conference (CVPR), pages 91-104, June 2025. URL
+
+[13
+
+“4
+
+[14] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-
+scale hierarchical image database. In 2009 IEEE Conference on Computer Vision and Pattern
+Recognition, pages 248-255, 2009. URL
+
+[15] Yihe Deng, Hritik Bansal, Fan Yin, Nanyun Peng, Wei Wang, and Kai-Wei Chang. Open-
+vithinker: An early exploration to complex vision-language reasoning via iterative self-
+
+improvement. ArXiv, abs/2503.17352, 2025. URL|https://arxiv.org/abs/2503. 17352
+
+[16] Konstantinos Drossos, Samuel Lipping, and Tuomas Virtanen. Clotho: An audio captioning
+
+dataset. ArXiv, abs/1910.09387, 2019. URL https: //arxiv. org/abs/1910.09387
+
+[17] Kawin Ethayarajh. How contextual are contextualized word representations? Compar-
+ing the geometry of BERT, ELMo, and GPT-2 embeddings. In Proceedings of the 2019
+Conference on Empirical Methods in Natural Language Processing and the 9th Interna-
+tional Joint Conference on Natural Language Processing (EMNLP-IJCNLP), pages 55-65,
+Hong Kong, China, November 2019. Association for Computational Linguistics. URL
+
+https: //aclanthology.org/D19-1006/
+
+[18] David Fan, Shengbang Tong, Jiachen Zhu, Koustuv Sinha, Zhuang Liu, Xinlei Chen, Michael
+Rabbat, Nicolas Ballas, Yann LeCun, Amir Bar, et al. Scaling language-free visual representa-
+
+tion learning. ArXiv, abs/2504.01017, 2025. URL|https: //arxiv.org/abs/2504.01017
+
+15
+
+
+[19] Manuel Faysse, Hugues Sibille, Tony Wu, Bilel Omrani, Gautier Viaud, Celine Hudelot, and
+Pierre Colombo. Colpali: Efficient document retrieval with vision language models. In
+The Thirteenth International Conference on Learning Representations, 2025. URL https}
+
+//openreview.net/forum?id=ogjBpZ8usi
+[20
+
+=
+
+Chaoyou Fu, Yuhan Dai, Yongdong Luo, Lei Li, Shuhuai Ren, Renrui Zhang, Zihan Wang,
+Chenyu Zhou, Yunhang Shen, Mengdan Zhang, Peixian Chen, Yanwei Li, Shaohui Lin, Sirui
+Zhao, Ke Li, Tong Xu, Xiawu Zheng, Enhong Chen, Caifeng Shan, Ran He, and Xing Sun.
+Video-mme: The first-ever comprehensive evaluation benchmark of multi-modal Ilms in
+video analysis. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 24108-24118, June 2025. URL
+
+[21
+
+ra
+
+Jun Gao, Di He, Xu Tan, Tao Qin, Liwei Wang, and Tieyan Liu. Representation degeneration
+problem in training natural language generation models. In International Conference on
+
+Learning Representations, 2019. URL/https: //openreview.net/forum? id=SkEYojRqtm
+
+Rohit Girdhar, Alaaeldin El-Nouby, Zhuang Liu, Mannat Singh, Kalyan Vasudev Alwala,
+Armand Joulin, and Ishan Misra. Imagebind: One embedding space to bind them all. In
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pages
+
+15180-15190, 2023. URL https://openaccess.thecvf.com/content/CVPR2023
+
+papers/Girdhar_ImageBind_One_Embedding_Space_To_Bind_Them_A11_CVPR_
+
+[22
+
+“4
+
+2023_paper. pdf
+
+[23] Nathan Godey, Eric Clergerie, and Benoit Sagot. Anisotropy is inherent to self-attention in
+transformers. In Proceedings of the 18th Conference of the European Chapter of the Association
+for Computational Linguistics (Volume 1: Long Papers), pages 35-48, St. Julian’s, Malta,
+March 2024. Association for Computational Linguistics. URL'https : //aclanthology.org/|
+
+2024.eacl-long.3/
+
+“4
+
+[24
+
+aay
+
+Michael Giinther, Saba Sturua, Mohammad Kalim Akram, Isabelle Mohr, Andrei Ungureanu,
+Bo Wang, Sedigheh Eslami, Scott Martens, Maximilian Werk, Nan Wang, and Han Xiao.
+jina-embeddings-v4: Universal embeddings for multimodal multilingual retrieval. ArXiv,
+
+abs/2506. 18902, 2025. URL|https://arxiv.org/abs/2506. 18902
+
+[25] Kaiming He, Haoqi Fan, Yuxin Wu, Saining Xie, and Ross Girshick. Momentum contrast
+for unsupervised visual representation learning. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition (CVPR), June 2020. URL
+
+//openaccess.thecvf .com/content_CVPR_2020/papers/He_Momentum_Contrast_
+for_Unsupervised_Visual_Representation_Learning_ CVPR_2020_paper.pdf
+
+[26] Fabian Caba Heilbron, Victor Escorcia, Bernard Ghanem, and Juan Carlos Niebles. Ac-
+tivitynet: A large-scale video benchmark for human activity understanding. In 20/5
+IEEE Conference on Computer Vision and Pattern Recognition (CVPR), pages 961-970,
+June 2015. URL https: //www. cv- foundation. org/openaccess/content_cvpr_2015/
+
+Edward J Hu, yelong shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang,
+Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In
+
+International Conference on Learning Representations, 2022. URL|https://openreview
+net/forum?id=nZeVKeeFYf9
+
+Wenxuan Huang, Bohan Jia, Zijie Zhai, Shaosheng Cao, Zheyu Ye, Fei Zhao, Zhe Xu, Yao Hu,
+and Shaohui Lin. Vision-r1: Incentivizing reasoning capability in multimodal large language
+
+models. ArXiv, abs/2503.06749, 2025. URL https: //arxiv.org/abs/2503.06749
+
+Minyoung Huh, Brian Cheung, Tongzhou Wang, and Phillip Isola. Position: The platonic
+representation hypothesis. In Proceedings of the 41st International Conference on Machine
+Learning, volume 235 of Proceedings of Machine Learning Research, pages 20617-20642.
+
+PMLR, 21-27 Jul 2024. URL https: //proceedings.mlr.press/v235/huh24a.html
+
+[27
+
+—
+
+[28
+
+“4
+
+N
+Ss
+
+16
+
+
+[30] Ting Jiang, Minghui Song, Zihan Zhang, Haizhen Huang, Weiwei Deng, Feng Sun, Qi Zhang,
+Deqing Wang, and Fuzhen Zhuang. E5-v: Universal embeddings with multimodal large
+language models. ArXiv, abs/2407.12580, 2024. URL
+
+Ziyan Jiang, Rui Meng, Xinyi Yang, Semih Yavuz, Yingbo Zhou, and Wenhu Chen. VLM2vec:
+Training vision-language models for massive multimodal embedding tasks. In The Thirteenth
+
+International Conference on Learning Representations, 2025. URL|https://openreview
+net/forum?id=TEOKOZWYAF
+
+[32] Chris Dongjoo Kim, Byeongchang Kim, Hyunmin Lee, and Gunhee Kim. AudioCaps: Generat-
+ing captions for audios in the wild. In Proceedings of the 2019 Conference of the North American
+Chapter of the Association for Computational Linguistics: Human Language Technologies,
+Volume I (Long and Short Papers), pages 119-132, Minneapolis, Minnesota, June 2019. Asso-
+
+ciation for Computational Linguistics. URL|https: //aclanthology.org/N19-1011/
+
+Jonathan Krause, Michael Stark, Jia Deng, and Li Fei-Fei. 3d object representations for fine-
+grained categorization. In 20/3 IEEE International Conference on Computer Vision Workshops,
+
+pages 554-561, 2013. URL|10.1109/TCOWW. 2013.77
+
+[34] laion. Clip-vit-bigg- 14-laion2b-39b-b1 60k. https: //huggingface.co/laion
+2024.
+
+[35] Hugo Laurengon, Andrés Marafioti, Victor Sanh, and Léo Tronchon. Building and better
+understanding vision-language models: insights and future directions. ArXiv, abs/2408.12637,
+
+2024. URL https: //arxiv.org/abs/2408 .12637
+
+Sicong Leng, Jing Wang, Jiaxi Li, Hao Zhang, Zhigqiang Hu, Boqiang Zhang, Yuming Jiang,
+Hang Zhang, Xin Li, Lidong Bing, Deli Zhao, Wei Lu, Yu Rong, Aixin Sun, and Shijian Lu.
+Mmrl: Enhancing multimodal reasoning with variance-aware sampling and open resources.
+
+ArXiv, abs/2509.21268, 2025. URL|https://arxiv. org/abs/2509 .21268
+
+[37] Junnan Li, Dongxu Li, Caiming Xiong, and Steven Hoi. BLIP: Bootstrapping language-
+image pre-training for unified vision-language understanding and generation. In Proceedings
+of the 39th International Conference on Machine Learning, volume 162 of Proceedings of
+Machine Learning Research, pages 12888-12900. PMLR, 17-23 Jul 2022. URL [https :
+//proceedings.mlr.press/v162/1i22n.html
+
+[31
+
+sy
+
+[33
+
+“4
+
+[36
+
+=
+
+[38
+
+“4
+
+Kunchang Li, Yali Wang, Yinan He, Yizhuo Li, Yi Wang, Yi Liu, Zun Wang, Jilan Xu,
+Guo Chen, Ping Luo, Limin Wang, and Yu Qiao. Mvbench: A comprehensive multi-
+modal video understanding benchmark. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pages 22195-22206, June 2024.
+
+URL |https://openaccess.thecvf .com/content/CVPR2024/papers/Li_MVBench_A_
+Comprehensive_Multi-modal_Video_Understanding_Benchmark_CVPR_2024_paper
+
+Sheng-Chieh Lin, Chankyu Lee, Mohammad Shoeybi, Jimmy Lin, Bryan Catanzaro, and Wei
+Ping. MM-EMBED: UNIVERSAL MULTIMODAL RETRIEVAL WITH MULTIMODAL
+LLMS. In The Thirteenth International Conference on Learning Representations, 2025. URL
+https: //openreview.net/forum? id=i45NQb2ik0
+
+[39
+
+—“
+
+[40
+
+=
+
+Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. Visual instruction tuning. In
+Advances in Neural Information Processing Systems, volume 36, pages 34892-34916. Curran
+
+Associates, Inc., 2023. URL https: //proceedings .neurips.cc/paper_files/paper
+
+2023/file/6dcf277ea32ce3288914f af 369f e6de0-Paper-Conference. pdf
+
+[41
+
+ra
+
+Haotian Liu, Chunyuan Li, Yuheng Li, Bo Li, Yuanhan Zhang, Sheng Shen, and Yong Jae
+Lee. Llava-next: Improved reasoning, ocr, and world knowledge, January 2024. URL|ht tps :
+//l\lava-vl.github. io/blog/2024-01-30-llava-next/
+
+[42
+
+“4
+
+Yuliang Liu, Zhang Li, Mingxin Huang, Biao Yang, Wenwen Yu, Chunyuan Li, Xu-Cheng
+Yin, Cheng-Lin Liu, Lianwen Jin, and Xiang Bai. Ocrbench: on the hidden mystery of
+ocr in large multimodal models. Science China Information Sciences, 67(12), 2024. URL
+https: //arxiv.org/abs/2305.07895
+
+
+[43]
+
+[44]
+
+[50
+
+=
+
+[51
+
+sy
+
+Feipeng Ma, Hongwei Xue, Guangting Wang, Yizhou Zhou, Fengyun Rao, Shilin Yan, Yueyi
+Zhang, Siying Wu, Mike Zheng Shou, and Xiaoyan Sun. Multi-modal generative embedding
+
+model. ArXiv, abs/2405.19333, 2024. URL https: //arxiv.org/abs/2405 . 19333
+
+Ahmed Masry, Xuan Long Do, Jia Qing Tan, Shafiq Joty, and Enamul Hoque. ChartQA: A
+benchmark for question answering about charts with visual and logical reasoning. In Findings
+of the Association for Computational Linguistics: ACL 2022, pages 2263-2279, Dublin, Ireland,
+May 2022. Association for Computational Linguistics. URL https: //aclanthology.org/|
+
+2022.findings-acl.177
+
+Minesh Mathew, Dimosthenis Karatzas, and C.V. Jawahar. Docvga: <A dataset
+for vqa on document images. In Proceedings of the IEEE/CVF Winter Con-
+ference on Applications of Computer Vision (WACV), pages 2200-2209, January
+
+2021. URL |https://openaccess.thecvf.com/content/WACV2021/papers/Mathew_
+DocVQA_A_Dataset_for_VQA_on_Document_Images_WACV_2021_paper. pdf
+
+Niklas Muennighoff, Hongjin SU, Liang Wang, Nan Yang, Furu Wei, Tao Yu, Amanpreet
+Singh, and Douwe Kiela. Generative representational instruction tuning. In The Thirteenth
+
+International Conference on Learning Representations, 2025. URL|https://openreview
+net /forum?id=BC41IvfSzv
+
+Niklas Muennighoff, Nouamane Tazi, Loic Magne, and Nils Reimers. MTEB leaderboard.
+https: //huggingface.co/spaces/mteb/leaderboard, 2025.
+
+Khanh Nguyen and Hal Daumé III. Global Voices: Crossing borders in automatic news
+summarization. In Proceedings of the 2nd Workshop on New Frontiers in Summarization, pages
+90-97, Hong Kong, China, November 2019. Association for Computational Linguistics. URL
+
+https: //aclanthology.org/D19-5411/
+
+Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy V. Vo, Marc Szafraniec, Vasil
+Khalidov, Pierre Fernandez, Daniel HAZIZA, Francisco Massa, Alaaeldin El-Nouby, Mido
+Assran, Nicolas Ballas, Wojciech Galuba, Russell Howes, Po-Yao Huang, Shang-Wen Li,
+Ishan Misra, Michael Rabbat, Vasu Sharma, Gabriel Synnaeve, Hu Xu, Herve Jegou, Julien
+Mairal, Patrick Labatut, Armand Joulin, and Piotr Bojanowski. DINOv2: Learning robust
+visual features without supervision. Transactions on Machine Learning Research, 2024. URL
+
+https: //openreview.net/forum?id=a68SUt6zFt
+
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agar-
+wal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and
+Ilya Sutskever. Learning transferable visual models from natural language supervision. In
+
+Proceedings of the 38th International Conference on Machine Learning, volume 139 of Pro-
+ceedings of Machine Learning Research, pages 8748-8763. PMLR, 18-24 Jul 2021. URL
+
+https: //proceedings.mlr.press/v139/radford21a.html
+
+Nils Reimers and Iryna Gurevych. Sentence-BERT: Sentence embeddings using Siamese
+BERT-networks. In Proceedings of the 2019 Conference on Empirical Methods in Natural Lan-
+guage Processing and the 9th International Joint Conference on Natural Language Processing
+(EMNLP-IJCNLP), pages 3982-3992, Hong Kong, China, November 2019. Association for
+
+Computational Linguistics. URL https: //aclanthology.org/D19-1410/
+
+Nils Reimers and Iryna Gurevych. Making monolingual sentence embeddings multilingual using
+knowledge distillation. In Proceedings of the 2020 Conference on Empirical Methods in Natural
+Language Processing (EMNLP), pages 4512-4525, Online, November 2020. Association for
+
+Computational Linguistics. URL https: //aclanthology.org/2020.emnlp-main.365/
+
+Vin Sachidananda, Ziyi Yang, and Chenguang Zhu. Filtered inner product projection for
+crosslingual embedding alignment. In /nternational Conference on Learning Representations,
+
+2021. URL https: //openreview.net/forum?id=A2gNouoXE7
+
+S Sakshi, Utkarsh Tyagi, Sonal Kumar, Ashish Seth, Ramaneswaran Selvakumar, Oriol Nieto,
+Ramani Duraiswami, Sreyan Ghosh, and Dinesh Manocha. MMAU: A massive multi-task
+audio understanding and reasoning benchmark. In The Thirteenth International Conference on
+
+Learning Representations, 2025. URL https: //openreview.net/forum? id=TeVAZXr3yv
+
+18
+
+
+[55] Holger Schwenk, Vishrav Chaudhary, Shuo Sun, Hongyu Gong, and Francisco Guzman. Wiki-
+Matrix: Mining 135M parallel sentences in 1620 language pairs from Wikipedia. In Proceedings
+of the 16th Conference of the European Chapter of the Association for Computational Lin-
+guistics: Main Volume, pages 1351-1361, Online, April 2021. Association for Computational
+
+Linguistics. URL/https://aclanthology.org/2021.eacl-main.115/
+
+[56] Amanpreet Singh, Vivek Natarajan, Meet Shah, Yu Jiang, Xinlei Chen, Dhruv Batra, Devi
+Parikh, and Marcus Rohrbach. Towards vqa models that can read. In Proceedings of
+the IEEE/CVF conference on computer vision and pattern recognition, pages 8317-8326,
+
+2019. URL |https://openaccess.thecvf.com/content_CVPR_2019/papers/Singh_
+Towards_VQA_Models_That_Can_Read_CVPR_2019_paper . pdf
+
+Krishna Srinivasan, Karthik Raman, Jiecao Chen, Michael Bendersky, and Marc Najork. Wit:
+Wikipedia-based image text dataset for multimodal multilingual machine learning. In Pro-
+ceedings of the 44th International ACM SIGIR Conference on Research and Development in
+Information Retrieval, SIGIR ’21, page 2443-2449, New York, NY, USA, 2021. Association
+
+for Computing Machinery. URL https ://doi.org/10.1145/3404835 . 3463257
+
+[58] Quan Sun, Yuxin Fang, Ledell Wu, Xinlong Wang, and Yue Cao. Eva-clip: Improved training
+
+techniques for clip at scale. ArXiv, 2303.15389, 2023. URL https: //arxiv.org/abs/2303
+15389
+
+[57
+
+a
+
+[59] Kimi Team. Kimi-vl technical report. ArXiv, abs/2504.07491, 2025. URL
+
+[60] Ashish V. Thapliyal, Jordi Pont Tuset, Xi Chen, and Radu Soricut. Crossmodal-3600: A
+massively multilingual multimodal evaluation dataset. In Proceedings of the 2022 Conference
+on Empirical Methods in Natural Language Processing, pages 715-729, Abu Dhabi, United
+Arab Emirates, December 2022. Association for Computational Linguistics. URL |https :
+//aclanthology.org/2022.emnlp-main.45/
+
+[61] Tristan Thrush, Ryan Jiang, Max Bartolo, Amanpreet Singh, Adina Williams, Douwe Kiela, and
+Candace Ross. Winoground: Probing vision and language models for visio-linguistic composi-
+tionality. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recog-
+
+nition (CVPR), pages 5238-5248, June 2022. URL https: //openaccess.thecvf .com
+
+content/CVPR2022/papers/Thrush_Winoground_Probing_Vision_and_Language_
+
+Models_for_Visio-Linguistic_Compositionality_CVPR_2022_paper.pdf
+
+[62] Jérg Tiedemann. News commentary v16. https://opus.nlpl.eu/News-Commentary/
+corpus/version/News-Commentary, 2012. Accessed: May 16, 2024.
+
+[63] Peter Tong, Ellis Brown, Penghao Wu, Sanghyun Woo, Adithya Jairam Vedagiri
+TYER, Sai Charitha Akula, Shusheng Yang, Jihan Yang, Manoj Middepogu, Ziteng
+Wang, et al. Cambrian-1: A fully open, vision-centric exploration of multi-
+modal Ilms. Advances in Neural Information Processing Systems, 37:87310—-87356,
+
+2024. URL https://proceedings.neurips.cc/paper_files/paper/2024/file/
+Yee3ab664ccfeabcOdal6ac6f1lficfe59-Paper-Conference. pdf
+
+[64] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timo-
+thée Lacroix, Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal Azhar, Aurelien Rodriguez,
+Armand Joulin, Edouard Grave, and Guillaume Lample. Llama: Open and efficient founda-
+
+tion language models. ArXiv, abs/2302.13971, 2023. URL https: //arxiv.org/abs/2302
+
+[65] Voyage AI. voyage-multimodal-3: all-in-one embedding model for interleaved text, images, and
+
+screenshots. https: //blog. voyageai. com/2024/11/12/voyage-multimodal-3/) Nov
+2024.
+
+[66] Haozhe Wang, Chao Qu, Zuming Huang, Wei Chu, Fangzhen Lin, and Wenhu Chen. VI1-
+rethinker: Incentivizing self-reflection of vision-language models with reinforcement learning.
+
+ArXiv, abs/2504.08837, 2025. URL|https://arxiv. org/abs/2504 .08837
+
+19
+
+
+[67] Peng Wang, Shijie Wang, Junyang Lin, Shuai Bai, Xiaohuan Zhou, Jingren Zhou, Xinggang
+Wang, and Chang Zhou. One-peace: Exploring one general representation model toward
+
+unlimited modalities. ArXiv, abs/2305.11172, 2023. URL https: //arxiv.org/abs/2305
+11172
+
+[68
+
+“4
+
+Tongzhou Wang and Phillip Isola. Understanding contrastive representation learning through
+alignment and uniformity on the hypersphere. In Proceedings of the 37th International Con-
+ference on Machine Learning, volume 119 of Proceedings of Machine Learning Research,
+pages 9929-9939. PMLR, 13-18 Jul 2020. URL|https : //proceedings .mlr.press/v119/|
+
+Cong Wei, Yang Chen, Haonan Chen, Hexiang Hu, Ge Zhang, Jie Fu, Alan Ritter, and Wenhu
+Chen. Uniir: Training and benchmarking universal multimodal information retrievers. In
+European Conference on Computer Vision, pages 387-404. Springer, 2024. URL https:
+
+//www.ecva.net/papers/eccv_2024/papers_ECCV/papers/11927.pdf
+
+Adina Williams, Nikita Nangia, and Samuel Bowman. A broad-coverage challenge corpus
+for sentence understanding through inference. In Proceedings of the 2018 Conference of the
+North American Chapter of the Association for Computational Linguistics: Human Language
+Technologies, Volume I (Long Papers), pages 1112-1122, New Orleans, Louisiana, June 2018.
+
+Association for Computational Linguistics. URL https: //aclanthology.org/N18-1101/
+
+Mitchell Wortsman, Gabriel Ilharco, Samir Ya Gadre, Rebecca Roelofs, Raphael Gontijo-
+Lopes, Ari S Morcos, Hongseok Namkoong, Ali Farhadi, Yair Carmon, Simon Kornblith, and
+Ludwig Schmidt. Model soups: averaging weights of multiple fine-tuned models improves
+accuracy without increasing inference time. In Proceedings of the 39th International Conference
+on Machine Learning, volume 162 of Proceedings of Machine Learning Research, pages
+
+23965-23998. PMLR, 17-23 Jul 2022. URL https: //proceedings.mlr.press/v162
+
+[72] Chenghao Xiao, Yizhi Li, G Hudson, Chenghua Lin, and Noura Al Moubayed. Length is a
+curse and a blessing for document-level semantics. In Proceedings of the 2023 Conference on
+Empirical Methods in Natural Language Processing, pages 1385-1396, Singapore, December
+2023. Association for Computational Linguistics. URL{https : //aclanthology. org/2023 |
+
+Chenghao Xiao, Yang Long, and Noura Al Moubayed. On isotropy, contextualization and
+learning dynamics of contrastive-based sentence representation learning. In Findings of the
+Association for Computational Linguistics: ACL 2023, pages 12266-12283, Toronto, Canada,
+
+July 2023. Association for Computational Linguistics. URL https: //aclanthology.org/
+
+2023.findings-acl.778/
+
+[74] Chenghao Xiao, Zhuoxu Huang, Danlu Chen, G Thomas Hudson, Yizhi Li, Haoran Duan,
+Chenghua Lin, Jie Fu, Jungong Han, and Noura Al Moubayed. Pixel sentence representation
+
+learning. ArXiv, abs/2402.08183, 2024. URL https: //arxiv.org/abs/2402.08183
+
+[75] Chenghao Xiao, G Thomas Hudson, and Noura Al Moubayed. Rar-b: Reasoning as retrieval
+benchmark. ArXiv, abs/2404.06347, 2024. URL https: //arxiv.org/abs/2404.06347
+
+[76] Chenghao Xiao, Isaac Chung, Imene Kerboua, Jamie Stirling, Xin Zhang, Marton Kardos,
+Roman Solomatin, Noura Al Moubayed, Kenneth Enevoldsen, and Niklas Muennighoff. Mieb:
+Massive image embedding benchmark. ArXiv, abs/2504.10471, 2025. URL https://arxiv)
+
+[77] Jin Xu, Zhifang Guo, Jinzheng He, Hangrui Hu, Ting He, Shuai Bai, Keqin Chen, Jialin Wang,
+Yang Fan, Kai Dang, Bin Zhang, Xiong Wang, Yunfei Chu, and Junyang Lin. Qwen2.5-
+omni technical report. ArXiv, abs/2503.20215, 2025. URL https: //arxiv.org/abs/2503
+
+20215
+
+[69
+
+—
+
+[70
+
+=
+
+[71
+
+ra
+
+[73
+
+“4
+
+[78] Jun Xu, Tao Mei, Ting Yao, and Yong Rui. Msr-vtt: A large video description dataset for
+bridging video and language. In Proceedings of the IEEE conference on computer vision
+and pattern recognition, pages 5288-5296, 2016. URL
+
+20
+
+
+[79] Jun Xu, Tao Mei, Ting Yao, and Yong Rui. Msr-vtt: A large video description dataset for
+bridging video and language. In 2016 IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 5288-5296, June 2016. URL
+
+[80] Shijia Yang, Bohan Zhai, Quanzeng You, Jianbo Yuan, Hongxia Yang, and Chenfeng Xu. Law
+of vision representation in mllms. ArXiv, abs/2408.16357, 2024. URL
+
+Ruifeng Yuan, Chenghao Xiao, Sicong Leng, Jianyu Wang, Long Li, Weiwen Xu, Hou Pong
+Chan, Deli Zhao, Tingyang Xu, Zhongyu Wei, et al. Vl-cogito: Progressive curriculum
+reinforcement learning for advanced multimodal reasoning. ArXiv, abs/2507.22607, 2025. URL
+
+https://arxiv.org/abs/2507 . 22607
+
+Mert Yuksekgonul, Federico Bianchi, Pratyusha Kalluri, Dan Jurafsky, and James Zou. When
+and why vision-language models behave like bags-of-words, and what to do about it? In
+
+International Conference on Learning Representations, 2023. URL|https://openreview
+net/forum?id=KRLUvxh8uaX
+
+[83] Xiaohua Zhai, Basil Mustafa, Alexander Kolesnikov, and Lucas Beyer. Sigmoid
+loss for language image pre-training. In Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision (ICCV), pages 11975-11986, October 2023.
+
+URL aaa EE //openaccess. Eheuvt ST 0S Sigmoid_
+
+[81
+
+sy
+
+[82
+
+so
+
+[84] Wenxuan Zhang, Hou Pong Chan, Yiran Zhao, Mahani Aljunied, Jianyu Wang, Chaoqun Liu,
+Yue Deng, Zhiqiang Hu, Weiwen Xu, Yew Ken Chia, Xin Li, and Lidong Bing. SeaLLMs 3:
+Open foundation and chat multilingual large language models for Southeast Asian languages. In
+Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association
+for Computational Linguistics: Human Language Technologies (System Demonstrations), pages
+96-105, Albuquerque, New Mexico, April 2025. Association for Computational Linguistics.
+
+URL https: //aclanthology.org/2025 .naacl-demo.10/
+
+[85] Xin Zhang, Yanzhao Zhang, Wen Xie, Mingxin Li, Ziqi Dai, Dingkun Long, Pengjun Xie,
+Meishan Zhang, Wenjie Li, and Min Zhang. Gme: Improving universal multimodal retrieval by
+
+multimodal Ilms. ArXiv, abs/2412.16855, 2024. URL http: //arxiv.org/abs/2412. 16855
+
+[86] Yanzhao Zhang, Mingxin Li, Dingkun Long, Xin Zhang, Huan Lin, Baosong Yang, Pengjun
+Xie, An Yang, Dayiheng Liu, Junyang Lin, Fei Huang, and Jingren Zhou. Qwen3 embedding:
+Advancing text embedding and reranking through foundation models. ArXiv, abs/2506.05176,
+
+2025. URL https: //arxiv.org/abs/2506.05176
+
+[87] Yaowei Zheng, Richong Zhang, Junhao Zhang, Yanhan Ye, and Zheyan Luo. LlamaFactory:
+Unified efficient fine-tuning of 100+ language models. In Proceedings of the 62nd Annual
+Meeting of the Association for Computational Linguistics (Volume 3: System Demonstrations),
+pages 400-410, Bangkok, Thailand, August 2024. Association for Computational Linguistics.
+
+URL https: //aclanthology.org/2024.acl-demos.38/
+
+21
+
+
+A Details of Additional Multimodal Data
+
+On top of our text-only all-NLI training corpus—which plays a crucial role in unlocking the model’s
+representational capacity—we further construct approximately 94k multimodal training samples to
+align the embedding space with the downstream multimodal task space. Specifically, we include:
+(1) Visual Document. Unlike most prior studies, we intentionally construct only about 23k triplets
+from Colpali and Docmatix [35], rather than performing exhaustive data exposure. We found
+that large-scale visual document data, when not balanced with text and other task datasets, can
+degrade overall task generalization. (2) Retrieval and Compositionality. We include only 3k
+triplets from MS-COCO, aiming to introduce basic image-text alignment. To enhance robustness
+to varying input lengths, we apply augmentation techniques from LA(SER)* [72]. Interestingly,
+this not only improves length robustness but also enhances the model’s spatial perception and
+image-—text compositional reasoning. (3) Multilingual/Diverse Text Data. To enhance linguistic and
+contextual diversity, we sample several thousand examples from our Scale-1M dataset introduced in
+the main paper. (4) General Synthetic Data. We further construct around 60k synthetic samples in
+diverse formats to maintain and reinforce the model’s instruction-following and interleaved alignment
+capabilities—which is important for tasks like VQA under the Reasoning-as-Retrieval paradigm.
+The diverse synthetic data also benefits classification tasks, improving both probing and zero-shot
+performance.
+
+B_ Details of MIEB-Lite Benchmark
+
+The MIEB-Lite benchmark comprises 51 tasks in 8 categories, where the details of each category are
+summarized as follows:
+
+* Visual STS [74]: It conceptualizes traditional semantic textual similarity (STS) as a vision task by
+rendering text as images and evaluating the semantic understanding of visual encoders. Similarity
+scores are computed from the embeddings of image-text pairs and compared against human
+annotations using Spearman correlation. This task comprises three subcategories: English (STS 13
+and STS 15), cross-lingual (STS-17, with image pairs in different languages, e.g., Arabic—English),
+and multilingual (STS-b, with pairs in the same language, e.g., Italian—Italian). Visual STS naturally
+assesses a model’s interleaved encoding ability to capture semantic meaning from text in image
+form, with Spearman correlation as the primary evaluation metric.
+
+Document Understanding/Visual Document Retrieval: MIEB-lite selects 6 tasks from the
+Vidore benchmark [19], which is to retrieve visual documents that contain information to solve the
+problem in the query. This task assesses a model’s ability to understand the complex layouts and
+textual information in visual documents, and the interleaved image-text alignment. Here we use
+nDCG@%5 as the evaluation metric.
+
+Image Linear Probing: MIEB-lite selects 8 challenging linear-probing datasets, including Coun-
+try211, DTD, EuroSAT, GTSRB, OxfordPets, PatchCamelyon, RESISC45, and SUN397, which
+MLLMs typically struggle compared to CLIP-style models, as indicated by the MIEB benchmark
+leaderboard. We follow Xiao et al. to adopt 16-shot linear probing, which closely preserves
+ranking compared to full-dataset probing, and report accuracy as the metric.
+
+Compositionality Evaluation: It evaluates fine-grained alignment of image-text features, requiring
+retrieving the groundtruth texts corresponding to the correct composition of all elements, e.g., an
+accurate fine-grained caption of an image, and vice versa for images given texts. This category
+includes ARO-Benchmark and Winoground [61]. Here we use accuracy as the evaluation
+metric.
+
+Vision-centric QA: Given an interleaved input composed of a question conditioned on an image,
+the task requires models to retrieve the correct answer under the reasoning-as-retrieval paradigm
+[75]. This task category is mostly made of tasks assessing vision-centric capabilities [63], such as
+spatial relation perception, depth estimation, and relative distance. Here we use accuracy as the
+evaluation metric.
+
+Retrieval: MIEB-Lite adopts 11 retrieval tasks, consisting of image-only retrieval, image-text
+retrieval, and interleaved retrieval, providing a comprehensive assessment of models’ modality-
+specific and composed encoding capabilities. In addition, it also selects WIT datasets and
+XM3600 [60], totally covering image retrieval tasks across 38 different languages, i.e., multilingual
+
+22
+
+
+image retrieval, to assess a model’s alignment capability between image and multilingual text
+embeddings, using nDCG@10 as the primary metric.
+
+Zero-shot Classification: Zero-shot Classification assesses classification in a similarity-matching
+fashion. We use text prompts like “an image of a {label}” following common practices Radford
+et al. and Xiao et al. [76]. MIEB-lite selects 7 challenging fine-grained zero-shot classification
+tasks, including CIFAR100, Country211, FER2013, FGVCAircraft, Food101, OxfordPets, and
+StanfordCars. Here we use accuracy as the evaluation metric.
+
+Clustering: Clustering provides an extra lens to inspect the clustered structure of embeddings.
+MIEB-lite adopts two clustering tasks, including fine-grained tasks such as Imagenet-Dog15 [14],
+which MLLM-based embedding models typically fail compared to CLIP-style models [76]. The
+Normalized Mutual Information (NMI) is utilized as the main evaluation metric.
+
+C_ Details of MIEB-Sub18 Benchmark
+
+We further select a smaller-scale subset than MIEB-lite, including 18 tasks from MIEB Xiao et al.
+[76] as MIEB-Sub18, which comprises 47 subtasks that are considered most challenging to the
+image-text embedding models, particularly in evaluating the capabilities of visual text representation,
+multilingual understanding, and interleaved encodings. Specifically, we focus on Visual STS [74],
+multilingual image retrieval [57], and document understanding from Vidore [19]. Additionally, we
+assess three image linear probing tasks where MLLM embeddings underperform relative to CLIP
+and self-supervised vision models, as reported on the MIEB leaderboard [47]. All evaluations are
+conducted using the official MIEB codebase [76].
+
+* Visual STS [74]: It conceptualizes traditional semantic textual similarity (STS) as a vision task by
+rendering text as images and evaluating the semantic understanding of visual encoders. Similarity
+scores are computed from the embeddings of image-text pairs and compared against human
+annotations using Spearman correlation. This task comprises three subcategories: English (STS-
+12~16), cross-lingual (STS-17, with image pairs in different languages, e.g., Arabic—English), and
+multilingual (STS-b, with pairs in the same language, e.g., Italian—Italian). Visual STS naturally
+assesses a model’s interleaved encoding ability to capture semantic meaning from text in image
+form, with Spearman correlation as the primary evaluation metric.
+
+Multilingual Image Retrieval: We utilize the WIT datasets and select its image retrieval
+subtasks across 11 different languages. This task accesses a model’s alignment capability between
+image and multilingual text embeddings with nDCG @10 as the main metric.
+
+Document Understanding: We select 7 tasks from the Vidore benchmark [19], which is to retrieve
+visual documents that contain information to solve the problem in the query. This task assesses a
+model’s ability to handle the complex layouts in visual documents and the interleaved image-text
+alignment. Here we use nNDCG@5 as the evaluation metric.
+
+Image Linear Probing: We evaluate three linear probing tasks—Stanford Cars [B3], BirdSnap [3],
+and Country211 [50]—which MLLMs struggle the most, as indicated by the MIEB benchmark
+leaderboard. We follow Xiao et al. to adopt 16-shot linear probing, which closely preserves
+ranking compared to full-dataset probing, and report accuracy as the metric.
+
+D_ Impact of LoRA Hyperparameters for LCO-EMB
+
+Our approach, LCO-EMB, employs LoRA fine-tuning for lightweight contrastive learning, which
+aims to refine MLLM representations while minimally perturbing the model’s intrinsic knowledge and
+abilities, thereby effectively preserving its inherent cross-modal alignment capability. We encapsulate
+this benefit as the “learn less, forget less” characteristic of LORA. Here, we further analyze the impact
+of two critical LORA hyperparameters—rank (r) and a—on the performance of LCO-EMB.
+
+In LoRA, rank (7) and alpha (qa) jointly control the capacity for new knowledge integration and
+the extent to which it modulates existing knowledge. The rank defines the dimensionality of the
+trainable weight matrices used to approximate the original model’s weight updates; a higher rank
+thus increases the capacity for injecting new knowledge. Conversely, alpha scales the contribution of
+these matrices to the overall model weights, meaning a larger alpha amplifies the extent to which this
+new knowledge is infused into the model.
+
+23
+
+
+Table 4: Comparison of different LoRA ranks and alpha values using Qwen2.5-VL-7B as the
+backbone. *r = 256, a = 512 setting experiences unrecoverable loss spikes in training.
+
+VC- Multiling. V-STS V-STS V-STS Doc. Linear
+Rank(ry Alpha(e) | Comp. QA Img. Rit (eng.) (cross) (multi) Und. Probe Average
+8 16 48.35 58.08 56.64 85.05 85.30 83.48 67.49 53.91 67.29
+64 16 55.64 60.62 55.62 84.60 85.16 83.40 65.76 52.44 67.90
+64 128 43.40 51.86 58.93 84.98 84.44 83.39 67.66 57.24 66.49
+256 16 52.29 57.30 57.49 84.88 85.68 83.61 66.95 53.36 67.70
+256 128 43.07 57.56 56.32 85.89 84.82 83.98 67.33 55.51 66.81
+256 512 85.52*  39.24* 0.70* 5.90* 12.90* 7.80* 0.90*  1.50* 19.31*
+
+Table [4] presents the results of LCO-EMB under different values of rank and alpha. We observe
+distinct patterns for different task categories, and there doesn’t exist a global optimal setting of LORA
+hyperparameters. For instance, LoRA hyperparameters bring minimal variations to tasks optimized
+by the training (e.g., V-STS, whose textual counterpart STS is deemed directly optimized by All-NLI
+in text embedding literature, is invariant to LoRA hyperparameters). The optimal performance for
+multilingual retrieval, document understanding, and image linear probe generally occurs when alpha
+a is scaled up appropriately to rank r, such as r = 8,a = 16 andr = 64,a = 128. However,
+we notice that for tasks whose capabilities assessed largely differ from those which the training set
+optimizes, e.g., compositionality and vision-centric QA, a larger alpha a generally brings significant
+performance degradation, showing the importance of the preservation of the base model’s knowledge
+for generalization to OOD tasks. We observe that with rank 256 and alpha 512, models experience
+unrecoverable loss spikes in training.
+
+We acknowledge that an optimal rank and alpha likely exist for models of each size, striking a balance
+between introducing new knowledge and the extent to which it modifies pretrained model weights.
+We leave a more comprehensive empirical analysis and theoretical study to quantify this relationship
+for future work.
+
+E Details of the data construction process of SeaDoc
+
+Specifically, we utilize Gemini-2.5-Flash to annotate each PDF page by sequentially applying
+OCR, translating the content into English, and generating an English query answerable exclusively
+from that specific page. This results in 5,055 annotated {OCR, English translation, English query}
+triplets. To construct a high-quality query pool for the retrieval dataset in SeaDoc, we implement a
+three-stage quality control process:
+
+1. Qwen2.5-7B-Instruct is first used to filter out functional pages (e.g., title pages, author pages,
+tables of contents), which reduces the dataset to 4, 491 content page annotations.
+
+2. The same model then scores these annotations for Quality and Groundedness on a 10-point scale.
+Only questions with a quality score of at least 9 and a groundedness score of 10 are retained.
+Note that Quality measures the informativeness of the content and relevance of the query, and
+Groundedness measures the exclusivity of the answer to the page.
+
+3. Our in-house linguists conduct a final review of the remaining triplets to ensure their quality.
+
+As aresult, we derive 1,001 high-quality queries to be used for retrieval tasks within the 5, 055 page
+corpus.
+
+For conducting additional OCR-intensive generative training, we construct a training set leveraging
+images that do not correspond to retrieval test set queries, resulting in 4k seed images. We construct 5
+SFT tasks per image: 1) OCR the image. 2) OCR the image, then generate a question from the image.
+3) Provide the English translation given the OCR’d text. 4) Provide the English translation directly
+from the image. 5) Provide the answer to the generated query. Note that compared to the SeaDoc test
+set, the training set is separately generated and includes an additional “provide answer to the generated
+question” part in the seed prompt. This process leads us to an around 20k training set to enhance
+targeted generative capability on low-resource visual documents, which we also explore combining
+with the PixmoCap dataset (710k) for general capability preservation in the main experiments.
+
+24
+
+
+F_ Relationship Between Generative Loss and Conditional Entropy
+
+Definition 3 (Generative Quality of the Prior). Let P be the prior distribution over the parameters of
+a pre-trained autoregressive generative model, centered at #9. We define its generative quality via
+the mutual information Ip(X;Y) := Ip,(X;Y) that its representations capture between the input X
+and the target output Y.
+
+The mutual information is defined as Ip(X;Y) = H(Y) — H(Y|X). While the true conditional
+entropy H(Y|X) is unknown, it can be estimated by the model’s generative cross-entropy loss,
+£,(P). The formal relationship is:
+
+L,(P) = A(Y|X) + Dxu (Paata(¥ |) || Poo (¥|X)), (10)
+
+where pg, is the model’s predictive distribution. For a well-trained MLLM, the goal of minimiz-
+ing generative loss is to minimize this KL divergence. Thus, for a strong prior, we can use the
+approximation H(Y|X) + £,(P). Substituting this into the definition of mutual information yields:
+
+Ip(X;Y) © H(Y) — L£,(P). (11)
+
+Here, H(Y) is the entropy of the target data, which is constant for a given dataset. Therefore, a
+lower generative loss £,(P) directly corresponds to higher mutual information and thus a higher
+generative quality of the prior.
+
+25

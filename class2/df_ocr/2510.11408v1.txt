@@ -1,0 +1,2050 @@
+arXiv:2510.11408v1 [cs.CL] 13 Oct 2025
+
+Valid Survey Simulations with Limited Human Data:
+The Roles of Prompting, Fine-Tuning, and Rectification
+
+Stefan Krsteski!, Giuseppe Russo!”, Serina Chang*, Robert West!, Kristina Gligorié
+
+4
+
+"EPFL
+*Stanford University
+3University of California, Berkeley
+“Johns Hopkins University
+Correspondence: stefan.krsteski@epfl.ch
+
+Abstract
+
+Surveys provide valuable insights into pub-
+lic opinion and behavior, but their execution
+is costly and slow. Large language models
+(LLMs) have been proposed as a scalable, low-
+cost substitute for human respondents, but their
+outputs are often biased and yield invalid es-
+timates. We study the interplay between syn-
+thesis methods that use LLMs to generate sur-
+vey responses and rectification methods that
+debias population estimates, and explore how
+human responses are best allocated between
+them. Using two panel surveys with questions
+on nutrition, politics, and economics, we find
+that synthesis alone introduces substantial bias
+(24-86%), whereas combining it with rectifi-
+cation reduces bias below 5% and increases
+effective sample size by up to 14%. Overall,
+we challenge the common practice of using all
+human responses for fine-tuning, showing that
+under a fixed budget, allocating most to rectifi-
+cation results in far more effective estimation.
+
+1 Introduction
+
+Self-reported surveys are the gold standard for cap-
+turing how people think, feel, and behave across
+domains such as public policy, economics, and
+health. However, they are costly, time-consuming,
+and logistically complex (Groves et al., 2011). Re-
+cent works at the intersection of survey research
+and natural language processing have explored us-
+ing LLMs as proxies for human respondents (Gao
+et al., 2024; Lira et al., 2022; Argyle et al., 2023;
+Anthis et al., 2025; Bail, 2024).
+
+Despite their potential (Manning et al., 2024;
+Shah et al., 2025), LLMs are not reliable out-of-
+the-box as survey respondents (Gao et al., 2024).
+Empirical studies document demographic and po-
+sitional biases (Cheng et al., 2023; Wang et al.,
+2025a), sensitivity to prompt wording, lexical fea-
+tures, and option order (Atreja et al., 2025; Gligoric
+et al., 2024), desirability bias (Sharma et al., 2023;
+
+Cheng et al., 2025), and hallucinations or self-
+contradictions (Tjuatja et al., 2024; Dominguez-
+Olmedo et al., 2024; Pezeshkpour and Hruschka,
+2023; Huang et al., 2025). Naive use can there-
+fore distort population estimates. Training-time
+adaptations such as fine-tuning on survey responses
+demand extensive human annotation and remain
+vulnerable to domain shift, whereas inference-time
+techniques like demographic prompting or persona-
+based generation are highly prompt-sensitive (Sun
+et al., 2025).
+
+Methods such as Prediction-Powered-Inference
+(PPI) and Design-based Supervised Learning
+(DSL) (Angelopoulos et al., 2023a; Egami et al.,
+2023) have been proposed as a post-hoc correction
+approach, but they have not been rigorously eval-
+uated for large-scale survey simulation or in com-
+bination with training- and inference-time adapta-
+tions often used in practice. Moreover, these ap-
+proaches guarantee validity only for corrected esti-
+mates, not for the generated responses themselves.
+Ensuring that generations are unbiased remains im-
+portant when follow-up questions are posed (Wang
+et al., 2024a; Shaikh et al., 2024) or when other
+quantities beyond the corrected estimate need to be
+inferred.
+
+Consequently, the effectiveness of training-time,
+inference-time, and post-hoc methods for valid
+LLM-based survey simulation is still unclear, as
+are their potential interactions. A priori, the opti-
+mal allocation of limited human data across these
+methods is not evident. For example, dedicating
+all data to fine-tuning precludes effective post-hoc
+correction, while allocating none may compromise
+the quality of generated responses. Nonetheless,
+these interactions remain uncharacterized and no
+guidelines exist to date.
+
+To address these gaps, we conduct an evaluation
+examining supervised fine-tuning, persona-guided
+prompting, and rectification methods, and how to
+allocate gold-standard human responses for maxi-
+
+
+Synthesis
+Labeled (n)
+
+X"- demographics gga
+
+prompting or fine-tuning.
+
+Y"- human responses
+
+You are participating in a survey.
+You are person 1, your profile is:
+{demographic_profile}...
+
+Unlabeled (N)
+
+[Z)
+
+X" demographics gq G
+Apple, 182 g
+Brown rice, 200 g
+
+generate survey responses using either
+
+Simulated person 1
+
+weet tea with lemon, 77 ¢
+rilled chicken breast, 150 g
+
+Rectification
+
+Y"- generated responses Estimate of interest
+
+estimated quantity of interest
+|
+
+Y" - generated responses |
+
+Figure 1: Evaluation setup: Overview of synthesis and rectification. Given a small human dataset (X”, Y”) and
+a disjoint, large demographic only dataset XY, Synthesis produces responses yr, YN using either prompting
+or fine-tuning. Rectification then combines model predictions Y” with human responses Y” to compute
+a correction term. Then, this term is combined with Y to produce a final estimate 6 of the target 0*, with
+
+corresponding confidence intervals.
+
+mizing performance. Our evaluation is carried out
+on two large-scale surveys: the NHANES dietary
+recall survey (for Health Statistics et al., 2017)
+and the American Trends Panel (ATP) (Pew Re-
+search Center). Studying longitudinal data allows
+us to address the most general setting, from which
+simpler survey designs can be derived. Through
+this setup, we contribute a head-to-head, format-
+agnostic, budget-aware study of training-time (fine-
+tuning), inference-time (prompting), and post-hoc
+rectification methods for survey simulation. Our
+contributions are the following:
+
+1. A rigorous evaluation of four common syn-
+thesis strategies combined with two rectifi-
+cation methods, grounded in two large-scale
+surveys with focal tasks in food, politics, and
+economics (§4, §5.1).
+
+2. Quantitative insights showing that popula-
+tion and subpopulation estimates can be cor-
+rected to within 5% bias using as few as 100
+responses (1% of a full survey) (§5.2).
+
+3. Evidence-based guidelines for allocating re-
+sponses across synthesis and rectification (Ta-
+ble 4). For example, while dedicating all data
+to fine-tuning may seem natural, we show that
+under a fixed budget, allocating the majority
+of responses to rectification yields the best
+bias—variance trade-off.
+
+All code and data are released to support develop-
+ment of new methods and benchmarks!.
+
+'Code is available at: anonymous.4open.science/synrec
+
+2 Related work
+
+Training-time adaptation. LLMs have been pro-
+posed as proxies for human respondents, enabling
+low-cost, large-scale survey simulation in domains
+such as public opinion, voting(Argyle et al., 2023;
+Santurkar et al., 2023). A common way to im-
+prove domain performance is fine-tuning. Recent
+work aligns response distributions by minimizing a
+forward KL divergence between model probabili-
+ties and human distributions for a given (question,
+subgroup) pair (Suh et al., 2025; Cao et al., 2025;
+Davidson et al., 2024; Russo et al., 2020). First-
+token probability alignment is typical for multiple-
+choice questions (MCQs). Although LoRA and
+other PEFT techniques reduce computation, fine-
+tuning still requires unpredictable amounts of gold-
+standard data and meticulous preprocessing. (Hu
+et al., 2022; Suh et al., 2025; Wang et al., 2025b).
+Moreover, survey-specific artifacts require careful
+format alignment (Dominguez-Olmedo et al., 2024;
+Wang et al., 2024b). This raises the question of
+where scarce human responses are most valuable,
+but existing studies provide no principled answer.
+Our evaluation aims to address this gap.
+
+Inference-time adaptation. Prompting and in-
+context learning adapt the model at inference with-
+out parameter updates, making them a popular
+choice for survey simulation (Brown et al., 2020;
+Latona et al., 2024; Russo et al., 2025c). Early
+work such as “silicon sampling” shows that so-
+ciodemographic conditioning can elicit responses
+with high population-level fidelity to humans (Ar-
+gyle et al., 2023; Santurkar et al., 2023; Sun et al.,
+2024). Later methods introduce synthetic personas
+
+
+and steering (Hu and Collier, 2024), including
+steering vectors (Kim et al., 2025; Russo et al.,
+2025b), soft-prompt control (Li et al., 2023, 2025),
+and probabilistic mixtures of persona-conditioned
+agents (Bui et al., 2025). Despite this progress,
+evaluations report prompt sensitivity, question- and
+option-order artifacts, and demographic skew, cast-
+ing doubt on reliability for population-level in-
+ference (Dominguez-Olmedo et al., 2024; Tjuatja
+et al., 2024; Geng et al., 2024). A related con-
+cern is format-induced bias: many studies focus on
+MCQ/Likert formats, whereas prior work shows
+that responses under constrained generation can di-
+verge from open-ended ones (ROttger et al., 2024;
+Zhang et al., 2025). If minor setup changes (e.g.,
+prompt or model) lead to substantially different
+responses, the validity of conclusions from such
+simulations is questionable. In this work we show
+that incorporating even a small amount of human
+responses via rectification can mitigate such biases.
+
+Post-hoc adaptation. A complementary strategy
+bypasses model editing, treating the LLM as a pow-
+erful but biased black-box predictor whose outputs
+are statistically corrected. Frameworks such as
+PPI (Angelopoulos et al., 2023a) and confidence-
+driven inference (CDI) (Gligorié et al., 2024) pro-
+vide finite-sample—valid estimators and confidence
+intervals by combining abundant model predictions
+with a small human subset. Although previously ap-
+plied to annotation tasks (Fan et al.; Calderon et al.,
+2025; Rister Portinari Maranca et al., 2025), this
+paradigm fits survey workflows where instrument
+design is costly, but collecting a small subsample of
+human answers is easy. In social-science methodol-
+ogy, design-based semi-supervised learning (DSL)
+combines model predictions with a small human
+sample via a doubly robust estimator (Egami et al.,
+2023). Similarly, the mixed-subjects design in-
+corporates LLM predictions as additional observa-
+tions alongside human responses (Broska et al.,
+2025). However, existing validations focus on
+controlled behavioral tasks rather than large-scale
+survey simulation, and they do not examine inter-
+actions with different synthesis strategies or data-
+allocation trade-offs. Here, we provide practical
+guidance on how to get the best of both worlds,
+simultaneously debiasing synthesis models and
+population-level estimates. We fill this gap with a
+multi-dataset evaluation that pairs several synthesis
+choices (prompting/personas and fine-tuning) with
+post-hoc correction across both MCQ and open-
+
+ended questions.
+
+3 Methodology
+
+The task of interest is producing accurate
+population-level estimates that reflect human sur-
+vey responses. To this end, we evaluate strategies
+that synthesize responses conditioned on demo-
+graphics, correct estimates using a small subset
+of human responses, and combine both to balance
+their strengths.
+
+Problem formalization. We frame the problem
+in the general setting of panel surveys, from which
+cross-sectional designs arise as a special case.
+Thus, the formulation leverages histories when
+available and reduces to the cross-sectional case
+when not. A panel survey is a sequence of re-
+sponses collected from the same N individuals
+over T discrete time points. A single time point ¢
+(a “wave’”) may represent, for example, a monthly
+opinion poll. For each wave t, let q@ € Q de-
+note the survey question asked. Each participant
+i € {1,...,.N} provides a response y; 4 to q, re-
+specting the response space J,,. (e.g., multiple-
+choice options or free-text answers). Given a his-
+tory window of length T’ — 1, we generate a syn-
+thetic response at wave T’ using an LLM:
+fir = f(%i, yar-1)-
+
+Our objective is to recover the population estimand
+at wave T' as the finite-population mean over the
+unlabeled, demographic-only frame:
+
+1 N
+Tims > Ovi)
+
+where @ : Y — R maps responses to a common
+scale (e.g. numeric coding for Likert, scalar extrac-
+tion for open-ended). Population-level estimates
+are, by definition, question-specific and require a
+single target question.
+
+Synthesis. We use LLMs to generate survey re-
+sponses, considering both inference-time adapta-
+tions (e.g., demographic or persona prompting) and
+training-time adaptations (e.g., domain-specific
+fine-tuning on survey data). At a high level, synthe-
+sis strategies divide into two categories:
+Prompt-based methods rely on conditioning
+without parameter updates. Demo-only (demo-
+graphic conditioning) prompts models with par-
+ticipant demographics x; alone. Persona-guided
+
+
+extends demographic prompting by incorporating
+behavioral patterns from past responses (y;,1:7—1).
+An auxiliary LLM analyzes each participant’s past
+responses to generate natural language personas
+capturing recurring behavioral tendencies, which
+then condition response generation at time T’.
+
+Fine-tuning methods adapt model parameters
+using training data, typically through supervised
+fine-tuning (SFT) as in instruction-following setups
+(Ouyang et al., 2022). Domain-FT fine-tunes on
+historical responses from our target survey across
+time points 1 to T’ — 1, learning from (question,
+demographics, response) triplets via standard cross-
+entropy loss. SubPOP-FT fine-tunes on the SubPOP
+auxiliary dataset (Suh et al., 2025), which contains
+3,229 questions from American Trends Panel with
+response distributions across 22 subpopulations.
+This method applies first-token alignment to min-
+imize KL divergence between model logits and
+empirical response distributions for each (question,
+subgroup) pair, using external survey data rather
+than the target survey’s history. We include it due to
+its demonstrated generalization to unseen surveys
+and subpopulations (Suh et al., 2025).
+
+Rectification. In the synthesis step, a language
+model f generates predictions %j; 7 for each partic-
+ipant. However, these predictions can be biased
+by factors such as the model’s training data or the
+chosen prompt (Bender et al., 2021). An alternative
+is to collect human responses for the same survey
+question to try and estimate 6*. While more reli-
+able, such human data are costly to obtain (Groves
+et al., 2011), and far less abundant than LLM re-
+sponses. This trade-off motivates correction frame-
+works such as PPI and DSL (Angelopoulos et al.,
+2023a; Egami et al., 2023), which combine cheap,
+plentiful model predictions with a small set of hu-
+man answers.
+
+We therefore assume access to a small set of hu-
+man responses H = {(x,;, yj) } 4-1 at wave T’. For
+each 7 € H, we also compute a model prediction
+yj; = f,(x;) using our synthesis setup. A general
+correction estimator takes the form
+
+N aw
+
+x 1 1
+
+= 5) \Hi+—> (yj; -AGj), WD
+‘1 =
+
+synthetic mean
+
+bias correction
+
+where A € [0, 1] is a scalar (“power-tuning” param-
+eter) interpolating between ignoring model predic-
+tions (A = 0) and using them fully (A = 1). This
+
+formulation corresponds to the PPI estimator (An-
+gelopoulos et al., 2023a), with DSL (Egami et al.,
+2023) recovered as the special case A = 1, which
+we refer to as Rec,—1. When A is not specified, it
+is chosen from the human set H. using the PPI++
+power-tuning rule (Angelopoulos et al., 2023b),
+which minimizes the estimated variance of the esti-
+mator; we denote this as Rec),,,,.
+
+A key benefit is variance reduction. If the syn-
+thetic mean (first term) is computed on a set U/
+disjoint from the human responses set , the vari-
+ance decomposes as
+
+d? Var(i) n Var(y — A¥)
+
+Var()) = N n
+
+(2)
+
+The first term is the variability of synthetic predic-
+tions, while the second term reflects the prediction
+error variance on the human responses set. Accord-
+ing to Eq. (2), two conditions make this estimator
+more effective than using human data alone: (i)
+access to a large set of demographics and (ii) rea-
+sonably accurate predictions. Or, formally:
+dM? Var(y)  Var(y — A¥) 2 Var(y)
+
+N n n
+
+The first condition is typically satisfied in survey
+research, since demographic covariates can be col-
+lected at scale (e.g., from census data) without re-
+quiring human responses to substantive questions.
+The second condition is equally important: an ac-
+curate model means the prediction error variance,
+Var(y—y), is small. As a result, the second term in
+Eq. (3) becomes negligible, and the estimator’s vari-
+ance is dominated by the first term Var(@) Since
+this term shrinks as the synthetic sample size N
+increases, rectification can produce significantly
+tighter confidence intervals than estimators that
+rely solely on the small set of human responses.
+We refer readers to Appendix B.1 for more details.
+
+(3)
+
+4 Experiments
+
+Our evaluation uses two longitudinal panel surveys
+spanning different domains and response formats
+(Table 1). Following our problem formulation,
+we evaluate at the question level: NHANES con-
+tributes one repeated dietary-intake item across two
+waves, while ATP contributes two distinct opinion
+items across four waves.
+
+NHANES. The U.S. National Health and Nu-
+trition Examination Survey 2015-2016 (for
+Health Statistics et al., 2017) is a food-consumption
+
+
+NHANES (Diet)
+
+ATP Q1 (Economics)
+
+ATP Q2 (Politics)
+
+Response format Open-ended (24h recall)
+
+Participants 8.5k
+
+Target Mean daily energy intake (kcal)
+Target mean 1766 kcal
+Covariates 12 demo./lifestyle
+
+Waves (7T’) and repeat 2 (repeated)
+
+Multiple choice (6) Multiple choice (4)
+691 643
+Mean Likert score
+3.57 (scale 1-4)
+25 demo./political
+4 (not repeated)
+
+Mean Likert score
+3.16 (scale 1-6)
+25 demo./political
+4 (not repeated)
+
+Table 1: Datasets used in our evaluation. NHANES includes two waves (T=2) asking the same food choice
+question, so responses are directly comparable across waves. ATP Q1 and Q2 are observed over four waves (T'=4),
+with unique (non repeated) focal questions at wave T’. We nevertheless treat ATP as a panel on covariates and prior
+responses: cross-wave trajectories (waves 1:T’—1) are used to construct personas and for fine-tuning.
+
+survey with over 16,000 full-day dietary recall
+entries from 8,500 participants across two waves
+(T’=2). Each entry records participants’ food in-
+take over the previous 24 hours in an open-ended
+format (e.g., ‘oatmeal 100g, rice 150g, banana
+45g’), along with total daily energy intake. Par-
+ticipant metadata includes 12 demographic and
+lifestyle covariates (e.g., age, sex, income). This
+survey allows us to evaluate open-ended genera-
+tion with substantial individual- and temporal-level
+variation. The target is mean daily energy intake
+(kcal) per participant, with a dataset mean of 1,766.
+
+American Trends Panel (ATP). ATP is the
+Pew Research Center’s longitudinal panel for U.S.
+public-opinion research (Pew Research Center),
+consisting of approximately 10,000 randomly se-
+lected adults nationwide. We select two focal ques-
+tions from waves 146-149, differing in domain
+(economics vs. politics) and distribution (normal
+vs. skewed), providing a controlled yet diverse
+setting to assess the robustness of the methods.
+
+Question 1 (Economic well-being): “Compared
+to your parents when they were the age you are now,
+do you think your own standard of living now is...”
+Options: (1) Much better, (2) Somewhat better, (3)
+About the same, (4) Somewhat worse, (5) Much
+worse, (6) Not sure. We analyze 691 complete
+cases. The target is the mean Likert score on a 1-6
+scale (dataset mean: 3.16).
+
+Question 2 (Political opinion): “How would you
+rate the job Supreme Court justices are doing in
+keeping their own political views out of how they
+decide major cases?” Options: (1) Excellent, (2)
+Good, (3) Only fair, (4) Poor. We analyze 643
+complete cases. The target is the mean Likert score
+on a 1-4 scale with a mean of 3.57.
+
+Both ATP items include 25 demographic and
+political covariates (e.g., age, gender, education,
+
+race, party ID, income, region). The two questions
+have different answer distributions (Q1 is approxi-
+mately normal, Q2 left-skewed), allowing us to test
+performance across distinct response patterns.
+
+Evaluation setup. We compare four synthesis
+methods across multiple datasets and models, ap-
+plying two post-hoc correction strategies uniformly
+to each. For each dataset and model, we gener-
+ate synthetic responses at wave T’ using one of the
+four synthesis methods described in §3. All mod-
+els use a fixed sampling temperature of 7 = 0.7,
+with prompts held constant (Appendix B.3). We
+evaluate across four language models: Qwen2.5
+8B, Llama 3.1 8B, Mistral v0.3 7B, and GPT-40
+mini. Rectification methods are applied on top
+of each synthesis strategy. At wave 7’, we draw
+Nhuman = LOO participants as the gold-standard set
+and treat the remainder as unlabeled. As baselines,
+we use previous-day responses for NHANES and
+random responses for ATP, since its questions are
+not repeated across waves.
+
+We assess performance using two complemen-
+tary metrics capturing bias and variance. Bias is
+measured as the relative error between estimated
+and true population parameters:
+
+*
+Ay, — =e"
+
+6 = a x 100, (4)
+
+where 6 is our estimator and 6* is the ground-truth
+population parameter from full human responses.
+Variance reduction is summarized by ESS gain,
+
+ESS... _ Var (human)
+aia Var —
+
+- 7 x 100, (5)
+
+so, for example, an ESS gain of 50% means the
+method achieves the same precision as having 1.5 x
+more human data. This is equivalent to getting
+“more information” out of each human response.
+
+
+Bias (%)J| ESS Gain (%)
+
+Method
+
+NHANES ATPQ1 ATPQ2 = Avg. NHANES ATPQIi ATPQ2 = Avg.
+Baseline 7.61 62.41 24.11 T T T T
+
+Synthesize only
+Domain-FT | None 7.03 34.27 62.69 34.66 T T T T
+SubPOP-FT | None 180.78 44.82 33.08 86.23 T t t T
+Demo-only | None 88.10 47.53 31.18 55.60 T T T T
+Persona-guided | None 82.08 50.22 19.99 50.76 T T T tT
+Synthesize + Rectify
+
+Domain-FT | Reca=1 9A 8.46 7.33 -32.95 -16.97 -62.23 = -37.38
+SubPOP-FT | Recy=1 37.57 8.74 10.98 19.10 -72.91 -13.57 -41.69 = -42.72
+Demo-only | Recy=1 13.38 16.94 é 11.15 -50.51 =22.27 -24.05 -32.28
+Persona-guided | Rec)=1 12732 11.10 9.31 -60.61 -20.47 -28.34 -36.47
+Domain-FT | Rec), 2.82 1.71
+SubPOP-FT | Rec)... 3.45 1.34
+Demo-only | Rec. 4.34 3.97
+Persona-guided | Rec), 5.39) 6.92
+
+Table 2: Bias (%) | and effective sample size (ESS) gain (%) + on three datasets. Top block: unrectified LLM
+synthesis (Synthesize only). Bottom block: synthesis combined with rectification. X | Y indicates synthesis method
+X with rectification method Y. All results are computed at a human sample size of |H| = Nhuman=100. Green
+indicates 95% bootstrap CIs where bias includes 0 and ESS > 0; averages are macro-averages across datasets. +
+= ESS not reported because nominal coverage (0.95) is not achieved for unrectified methods. For Rec),,,, 4 was
+automatically selected with average values of \ ~ 0.15 (NHANES), 0.3 (ATP Q1), and 0.05 (ATP Q2).
+
+Subgroup n Bias (FT only) | Bias (FT| Rec),,,)| Abs. Af Rel. A(%) TF
+sex: Female 3608 4.62 7.32 -2.70 -58.55
+sex: Male 3419 13.86 8.72
+
+race: Non-Hispanic White 2342 7.93 4.38
+
+race: Non-Hispanic Black 1525 5.79 3.45
+
+race: Mexican American 1312 7.77 4.83
+
+household income: $35,000 to $44,999 717 8.34 4.25
+
+household income: $100,000 and over 1182 8.34 5.54
+
+Table 3: Subgroup bias changes on NHANES. We compare fine-tuned (FT) models before and after global
+rectification (Rec Nop)" Green = subgroup bias decreases (improvement); red = subgroup bias increases (deterioration).
+Fixed human sample size of Nhuman=100. Note: NHANES records “sex” as a self-reported variable (male/female).
+
+5 Results (skewed/heavy-tailed answer distribution),
+Persona-guided reduces the unrectified bias to
+19.99% vs. a 62.41% baseline, but performs poorly
+elsewhere. This variability in bias across methods
+and datasets confirms that synthesis-only methods
+cannot be trusted to make valid claims about
+population preferences or behaviors. Applying
+rectification collapses bias to single digits (bottom
+5.1 Bias and efficiency across methods block). Rec)—1 achieves some reduction but leaves
+significant residual bias, making it less reliable
+than Rec),,.. By contrast, Rec), consistently
+drives bias even lower: the lowest average bias
+is achieved by Domain-FT | Rec),,, (2.82%),
+followed closely by SubPOP-FT | Rec),,, (3.45%),
+both training-based methods, while all approaches
+under Rec),,, on average remain below 5.5% bias.
+Importantly, training-based methods with Rec),,,
+
+We first compare synthesis and rectification meth-
+ods across datasets, focusing on population-level
+bias and variance (Table 2). Then, we turn to deeper
+analyses, examining how to best allocate human
+responses between fine-tuning and correction, as
+well as how rectification affects subgroup bias.
+
+Unrectified synthesis is biased, whereas
+rectification consistently fixes it. Pure LLM
+synthesis shows large and inconsistent bias (top
+block). Averaged across datasets, the baseline has
+24.11% bias, while Domain-FT, Persona-guided,
+Demo-only, and SubPOP-FT have 34.66%, 50.76%,
+55.60%, and 86.23%, respectively. Per-dataset
+behavior is heterogeneous: e.g., on ATP Q2
+
+
+
+wu
+
+(a)
+
+Bias (%) <—
+N w ES
+
+B
+
+°
+
+40 50 60 70 80
+
+FT Allocation (%)
+
+10 20 30
+
+(c)
+
+2.0 4
+
+ESS Gain (%) >
+i ia
+° in
+
+i)
+u
+
+2 3
+Bias (%)
+
+FT Allocation (%)
+
+(b)
+
+2.0
+
+BH
+un
+
+ESS Gain (%) >
+
+0.5
+
+0.0
+
+40 50 60 70 80
+
+FT Allocation (%)
+
+10 20 30
+
+3.0
+
+1) Bias (%)
+3 Efficiency (%)
+[£1 Uncertainty
+
+(d)
+
+2.5
+
+2.0 1.88
+
+Performance Metrics
+w
+in
+
+0.5
+
+0.31
+
+0.0
+
+Balanced
+(40% FT)
+FT+Rectification Modes
+
+Conservative
+(s20% FT)
+
+Aggressive
+(260% FT)
+
+Figure 2: Fine-tuning and rectification interaction analysis. Results are averaged over 100 independent runs. (a)
+Bias vs. FT allocation with confidence bands; 20% allocation minimizes bias (red star). (b) Efficiency peaks at 80%
+FT allocation but with high uncertainty. (c) Pareto frontier with 95% confidence ellipses where points toward the
+upper left reflect better trade-offs. (d) Comparison across allocation policies.
+
+reduce bias to statistically insignificant levels
+across all datasets, unlike other combinations.
+
+Rec),,, rectification enables positive ESS gains.
+ESS is meaningful only when confidence intervals
+achieve nominal coverage, i.e., when they contain
+the true population value at the expected frequency.
+All unrectified methods fail this criterion. How-
+ever, when combined with Rec),,,, every method
+achieves positive ESS gains, confirming a signif-
+icant reduction in variance relative to the human-
+only estimator. Persona-guided + Rec),,, attains
+the highest average ESS gain (6.92%) and peaks
+at 14.19% on NHANES, equivalent to a ~14% in-
+crease in human sample size without additional
+data collection. In contrast, Rec,=, consistently
+produces negative ESS gains. As expected, the
+most biased methods deliver the largest ESS gains,
+a direct manifestation of the bias—variance trade-
+off. Based on these findings, we focus on Rec),,,
+in all subsequent analyses.
+
+ESS gains shrink as the number of human
+responses grow. We next vary the num-
+ber of human responses used in rectification
+Rec),., “human € {50,100,150,200}, and
+track ESS (Fig. 4, Appendix A.2). Similarly,
+Persona-guided maintains the largest ESS gains
+across settings, while all methods show an expected
+decline in ESS gain as Npuman increases (the human-
+
+only estimator improves). In practice, correction
+is most beneficial when npuman 1S limited and the
+remaining pool JN is large. A reasonable stopping
+rule in terms of variance is to discontinue using
+synthetic responses once Eq. (3) is not satisfied.
+
+5.2 Subgroup effects and allocation strategies
+
+Rectification reduces bias per subgroup. A key
+concern is whether rectification reduces error con-
+sistently across sub-populations, rather than only at
+the population level. To test this, we evaluate sub-
+group error on NHANES before and after applying
+global Rec),,, rectification to a fine-tuned model
+(Table 3). Specifically, we re-center each response
+around the estimate Opec opt and compare subgroup-
+level bias. Most subgroups (6 of 7) show reduc-
+tions (e.g., Mexican-Americans: —37%; income
+$35—45k: -49%), though bias increases for female
+respondents (+58%). Thus, while population-level
+re-centering renders such heterogeneity expected,
+careful validation is required to ensure no subgroup
+suffers increased bias. Nevertheless, the overall
+trend suggests that rectification mitigates perfor-
+mance disparities across groups.
+
+Rectification for bias, fine-tuning for efficiency.
+Since training-based methods achieve the best rec-
+tified performance, a natural question arises: with
+a limited human set, should responses be allocated
+
+
+
+to fine-tuning the synthesis model or reserved for
+post-hoc correction”? To study this trade-off, we
+fix a budget of 1,000 human responses and evalu-
+ate allocations between Domain-FT and Rec),,, in
+proportions of 10-90, 20-80, 40-60, 60-40, and
+80-20. Experiments are run on NHANES, as it
+offers a larger sample size than ATP °.
+
+Figure 2 shows that bias is lowest when 20% of
+responses are allocated to fine-tuning and the re-
+mainder to correction (panel a). Larger allocations
+(40-80%) yield greater efficiency gains (panel b)
+but at the cost of higher bias and uncertainty. The
+Pareto frontier (panel c) summarizes this trade-off:
+points toward the upper left represent more favor-
+able combinations. To illustrate, we group strate-
+gies into three regimes (panel d): Conservative
+(<200 responses for FT), Balanced (400 for FT),
+and Aggressive (+600 for FT). These regimes high-
+light how different allocation rules trace distinct
+positions along the frontier, offering interpretable
+levers for balancing bias and efficiency.
+
+6 Discussion
+
+Across three longitudinal surveys, we find that all
+adaptation strategies reduce LLM bias once rec-
+tified, with Domain-FT achieving the lowest error
+(<3% on average). At the same time, every synthe-
+sis method yields significant ESS gains after cor-
+rection, showing clear improvements over a human-
+only estimator.
+
+Augmenting surveys with LLM responses is
+therefore not a universal solution but a set of
+context-dependent choices guided by the analyst’s
+goals. Accordingly, we present our recommen-
+dations in Table 4 as practical guidelines. These
+guidelines are supported by experiments in nutri-
+tion, economics, and politics within the U.S., where
+LLMs show reliable factual grounding. While we
+expect the main patterns to hold broadly, generaliz-
+ing to other domains requires awareness of poten-
+tial differences in performance.
+
+Overall, we show that rectification improves ef-
+ficiency when a large demographic frame is avail-
+able and model predictions are reasonably accu-
+rate (Eq. 3). Power-tuning further enhances effi-
+ciency by avoiding negative ESS outcomes, unlike
+Rec)—1. Subgroup analysis suggests that it reduces
+disparities, but warrants further validation.
+
+?PPI requires held-out data; reusing fine-tuning data vio-
+lates its guarantees (Angelopoulos et al., 2023a).
+>This analysis uses a different data split than Table 2.
+
+Moving forward, promising directions include
+developing subgroup-aware correction methods,
+extending evaluations to multilingual and cross-
+cultural contexts, and testing live deployments
+within survey infrastructure. Beyond surveys, our
+findings highlight how LLM predictions and lim-
+ited human data can be combined for valid infer-
+ence in other settings where labeled data are scarce.
+
+Objective Practical recommendations
+
+e Reserve the majority of the labeling bud-
+get for post-hoc correction.
+
+e Synthesize with Domain-FT (or
+SubPOP-FT if target histories are un-
+available).
+
+A. Minimizing
+the error of
+the population
+estimate
+
+e Similarly allocate the majority share to
+correction.
+
+B. Minimizing
+the number of
+
+needed e Afterwards, generate responses with
+human Persona-guided prompting for the
+responses largest ESS gains.
+
+C. Inference °¢ When neither historical data nor fine-
+
+in very low tuning compute are available, apply
+data or Demo-only synthesis plus correction.
+compute e Bias collapses below 5% and ESS im-
+regimes proves modestly.
+
+e If the end-goal is a single best-
+performing synthesis model (e.g., for
+follow-up questions or downstream
+quantities beyond the corrected esti-
+mate), skip prompting and fine-tune
+directly on available responses.
+
+D. Having the
+best synthesis
+model for
+follow-up
+
+Table 4: Evidence-based guidelines for LLM-assisted
+survey simulation.
+
+7 Conclusion
+
+We presented the first head-to-head evaluation of
+training-time, inference-time, and post-hoc adap-
+tations for LLM-assisted survey simulation across
+three longitudinal datasets. Our results show that
+uncorrected LLM synthesis is consistently biased,
+but rectification with a small set of human re-
+sponses reduces bias to below 5% while achieving
+positive ESS gains. Training-based methods paired
+with rectification (Aop:) provide the most reliable es-
+timates, while inference-time prompting strategies
+deliver greater ESS gains at the cost of higher bias.
+In our N=1000 experiments, allocating a majority
+of responses (60-80%) to correction gave the best
+trade-off between bias and efficiency, though the
+precise percentages will vary with data and budget.
+
+
+Limitations
+
+We identify key limitations of our work. First, our
+evaluation is restricted to the U.S. context, drawing
+on NHANES and ATP data with all interactions
+conducted in English. Performance is likely to
+vary across languages, cultural norms, and survey
+methodologies (Shi et al., 2024; Russo et al., 2023;
+Ziegenfuss et al., 2021). Extending benchmarks to
+multilingual and non-Western contexts is therefore
+essential before drawing global conclusions.
+
+Second, our experiments rely on simple non-
+adaptive correction methods. Although accessible
+due to their simplicity and theoretical guarantees,
+alternative methods such as confidence-driven in-
+ference (CDI) (Gligorié et al., 2024) may offer
+stronger performance in practice. In particular,
+adaptive procedures that re-weight based on model
+confidence could deliver larger efficiency gains, es-
+pecially when prediction reliability varies across
+subgroups. However, adaptive approaches during
+data collection (rather than post hoc) are less acces-
+sible to practitioners and require careful validation
+of the sampling rule. Future work should examine
+how practitioners balance data-collection simplic-
+ity against potential efficiency gains.
+
+Third, rectification is effective for population-
+level estimation but does not solve the harder
+problem of individual-level simulation. Accu-
+rately reproducing a single respondent’s answers
+requires capturing idiosyncratic confounders and
+latent traits (Shaikh et al., 2025; Belyaeva et al.,
+2023), which current methods struggle to represent.
+We explicitly show the difficulty of this problem
+through the results in Appendix A.1. Progress here
+will likely require richer behavioral models and
+new data sources. Moreover, current rectification
+methods operate as numerical adjustments, while
+the actual responses themselves remain biased (i.e.,
+we do not directly correct the LLM outputs). Future
+work could explore approaches that jointly improve
+both the statistical estimates and the generated re-
+sponses.
+
+Ethical considerations
+
+Survey data often include sensitive personal
+information. If such data are processed by
+large language models hosted by commercial
+providers, questions of privacy and consent be-
+come paramount (Kalluri et al., 2025). Partici-
+pants should retain meaningful control over their
+responses, and safeguards are needed to prevent
+
+concentration of power among technology compa-
+nies (Vincent et al., 2021; Vincent and Li, 2023).
+
+Replacing or reducing human survey participa-
+tion has economic implications and potential in-
+come displacements. Surveys currently provide
+paid opportunities for respondents (Gray and Suri,
+2019), and widespread substitution with LLM-
+generated data could displace this source of in-
+come (Shao et al., 2025; Tiwari, 2023). Any de-
+ployment of methods as described in our guidelines
+must weigh efficiency gains against potential harms
+to individuals who rely on survey participation.
+
+Large-scale use of LLMs has broader societal
+costs, including environmental impacts from train-
+ing and inference (Wu et al., 2022; Zhong et al.,
+2024). The studied approach offers a partial mit-
+igation: by rectifying predictions from existing
+models rather than training new ones from scratch,
+we reduce the need for additional large-scale model
+development (Lacoste et al., 2019). In this sense,
+our evaluation demonstrates how methodological
+innovation can align with more sustainable AI prac-
+tices.
+
+Lastly, subgroup bias amplification is an impor-
+tant ethical consideration. If the labeled data is
+sparse or unrepresentative, rectification can inad-
+vertently amplify subgroup-level errors, correcting
+toward majority patterns while leaving minority
+responses systematically misestimated. This risk is
+particularly salient for survey applications where
+small subpopulations are of substantive interest.
+Future work should examine subgroup-aware, strat-
+ified, or adaptive rectification strategies that ex-
+plicitly mitigate disparities (Fogliato et al., 2024;
+Russo et al., 2020).
+
+References
+
+Anastasios N Angelopoulos, Stephen Bates, Clara
+Fannjiang, Michael I Jordan, and Tijana Zrnic.
+2023a. Prediction-powered inference. Science,
+382(667 1):669-674.
+
+Anastasios N Angelopoulos, John C Duchi, and Tijana
+Zrnic. 2023b. Ppi++: Efficient prediction-powered
+inference. arXiv preprint arXiv:2311.01453.
+
+Jacy Reese Anthis, Ryan Liu, Sean M Richardson,
+Austin C Kozlowski, Bernard Koch, James Evans,
+Erik Brynjolfsson, and Michael Bernstein. 2025.
+LLM social simulations are a promising research
+method. arXiv preprint arXiv:2504.02234.
+
+Lisa P Argyle, Ethan C Busby, Nancy Fulda, Joshua R
+Gubler, Christopher Rytting, and David Wingate.
+
+
+2023. Out of one, many: Using language mod-
+els to simulate human samples. Political Analysis,
+31(3):337-35 1.
+
+Shubham Atreja, Joshua Ashkinaze, Lingyao Li, Julia
+Mendelsohn, and Libby Hemphill. 2025. What’s in
+a Prompt?: A Large-Scale Experiment to Assess the
+Impact of Prompt Design on the Compliance and
+Accuracy of LLM-Generated Text Annotations. In
+Proceedings of the International AAAI Conference on
+Web and Social Media, volume 19, pages 122-145.
+
+Christopher A Bail. 2024. Can Generative AI im-
+prove social science? Proceedings of the National
+Academy of Sciences, 121(21):e2314021121.
+
+Anastasiya Belyaeva, Justin Cosentino, Farhad Hormoz-
+diari, Krish Eswaran, Shravya Shetty, Greg Corrado,
+Andrew Carroll, Cory Y McLean, and Nicholas A
+Furlotte. 2023. Multimodal Ilms for health grounded
+in individual-specific data. In Workshop on Machine
+Learning for Multimodal Healthcare Data, pages 86—
+102. Springer.
+
+Emily M Bender, Timnit Gebru, Angelina McMillan-
+Major, and Shmargaret Shmitchell. 2021. On the
+dangers of stochastic parrots: Can language models
+be too big? In Proceedings of the 2021 ACM confer-
+ence on fairness, accountability, and transparency,
+
+pages 610-623.
+
+David Broska, Michael Howes, and Austin van Loon.
+2025. The Mixed Subjects Design: Treating Large
+Language Models as Potentially Informative Obser-
+vations. Sociological Methods & Research, page
+0049 1241251326865.
+
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, and 1 others. 2020. Language models are
+few-shot learners. Advances in neural information
+processing systems, 33:1877-1901.
+
+Ngoc Bui, Hieu Trung Nguyen, Shantanu Kumar, Ju-
+lian Theodore, Weikang Qiu, Viet Anh Nguyen,
+and Rex Ying. 2025. Mixture-of-personas language
+models for population simulation. arXiv preprint
+arXiv:2504.05019.
+
+Nitay Calderon, Roi Reichart, and Rotem Dror. 2025.
+The alternative annotator test for LLM-as-a-judge:
+How to statistically justify replacing human annota-
+tors with LLMs. arXiv preprint arXiv:2501.10970.
+
+Yong Cao, Haijiang Liu, Arnav Arora, Isabelle Augen-
+stein, Paul R6ttger, and Daniel Hershcovich. 2025.
+Specializing large language models to simulate sur-
+vey response distributions for global populations.
+arXiv preprint arXiv:2502.07068.
+
+Myra Cheng, Esin Durmus, and Dan Jurafsky. 2023.
+Marked Personas: Using Natural Language Prompts
+to Measure Stereotypes in Language Models. In
+Proceedings of the 61st Annual Meeting of the As-
+sociation for Computational Linguistics (Volume 1:
+Long Papers), pages 1504-1532.
+
+Myra Cheng, Sunny Yu, Cinoo Lee, Pranav Khadpe,
+Lujain Ibrahim, and Dan Jurafsky. 2025. Social syco-
+phancy: A broader understanding of Ilm sycophancy.
+arXiv preprint arXiv:2505.13995.
+
+Tim R Davidson, Viacheslav Surkov, Veniamin
+Veselovsky, Giuseppe Russo, Robert West, and
+Caglar Gulcehre. 2024. Self-recognition in language
+models. arXiv preprint arXiv:2407.06946.
+
+Ricardo Dominguez-Olmedo, Moritz Hardt, and Celes-
+tine Mendler-Diinner. 2024. Questioning the survey
+responses of large language models. Advances in
+Neural Information Processing Systems, 37:45850—
+45878.
+
+Naoki Egami, Musashi Hinck, Brandon Stewart, and
+Hanying Wei. 2023. Using imperfect surrogates
+for downstream inference: Design-based supervised
+learning for social science applications of large lan-
+guage models. Advances in Neural Information Pro-
+cessing Systems, 36:68589-68601.
+
+Shuxian Fan, Adam Visokay, Kentaro Hoffman,
+Stephen Salerno, Li Liu, Jeffrey T Leek, and Tyler
+McCormick. From Narratives to Numbers: Valid
+Inference Using Language Model Predictions from
+Verbal Autopsies. In First Conference on Language
+Modeling.
+
+Riccardo Fogliato, Pratik Patil, Mathew Monfort, and
+Pietro Perona. 2024. A Framework for Efficient
+Model Evaluation through Stratification, Sampling,
+and Estimation. In European Conference on Com-
+puter Vision, pages 140-158. Springer.
+
+National Center for Health Statistics and 1 others. 2017.
+National Health and Nutrition Examination Survey
+2015-2016. Centers for Disease Control and Preven-
+tion.
+
+Chen Gao, Xiaochong Lan, Nian Li, Yuan Yuan, Jingtao
+Ding, Zhilun Zhou, Fengli Xu, and Yong Li. 2024.
+Large language models empowered agent-based mod-
+eling and simulation: A survey and perspectives.
+Humanities and Social Sciences Communications,
+
+11(1):1-24.
+
+Mingmeng Geng, Sihong He, and Roberto Trotta. 2024.
+Are large language models chameleons? an _at-
+tempt to simulate social surveys. arXiv preprint
+arXiv:2405.19323.
+
+Kristina Gligoric, Myra Cheng, Lucia Zheng, Esin Dur-
+mus, and Dan Jurafsky. 2024. NLP systems that
+can’t tell use from mention censor counterspeech,
+but teaching the distinction helps. In Proceedings of
+the 2024 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies (Volume 1: Long
+Papers), pages 5942-5959, Mexico City, Mexico. As-
+sociation for Computational Linguistics.
+
+Kristina Gligori¢, Tijana Zrnic, Cinoo Lee, Emmanuel J
+Candés, and Dan Jurafsky. 2024. Can Unconfident
+LLM Annotations Be Used for Confident Conclu-
+sions? arXiv preprint arXiv:2408. 15204.
+
+
+Mary L Gray and Siddharth Suri. 2019. Ghost work:
+How to stop Silicon Valley from building a new global
+underclass. Harper Business.
+
+Robert M Groves, Floyd J Fowler Jr, Mick P Couper,
+James M Lepkowski, Eleanor Singer, and Roger
+Tourangeau. 2011. Survey methodology. John Wiley
+& Sons.
+
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan
+Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang,
+Weizhu Chen, and 1 others. 2022. Lora: Low-rank
+adaptation of large language models. JCLR, 1(2):3.
+
+Tiancheng Hu and Nigel Collier. 2024. Quantifying the
+Persona Effect in LLM Simulations. In Proceedings
+of the 62nd Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers),
+pages 10289-10307.
+
+Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong,
+Zhangyin Feng, Haotian Wang, Qianglong Chen,
+Weihua Peng, Xiaocheng Feng, Bing Qin, and | oth-
+ers. 2025. A survey on hallucination in large lan-
+guage models: Principles, taxonomy, challenges, and
+open questions. ACM Transactions on Information
+
+Systems, 43(2):1-55.
+
+Pratyusha Ria Kalluri, William Agnew, Myra Cheng,
+Kentrell Owens, Luca Soldaini, and Abeba Birhane.
+2025. Computer-vision research powers surveillance
+technology. Nature, pages 1-7.
+
+Junsol Kim, James Evans, and Aaron Schein. 2025.
+Linear representations of political perspective
+emerge in large language models. arXiv preprint
+arXiv:2503.02080.
+
+Alexandre Lacoste, Alexandra Luccioni, Victor
+Schmidt, and Thomas Dandres. 2019. Quantifying
+the carbon emissions of machine learning. arXiv
+preprint arXiv: 1910.09700.
+
+Giuseppe Russo Latona, Manoel Horta Ribeiro, Tim R
+Davidson, Veniamin Veselovsky, and Robert West.
+2024. The ai review lottery: Widespread ai-assisted
+peer reviews boost paper scores and acceptance rates.
+arXiv preprint arXiv:2405.02150.
+
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio
+Petroni, Vladimir Karpukhin, Naman Goyal, Hein-
+rich Kiittler, Mike Lewis, Wen-tau Yih, Tim Rock-
+taschel, and 1 others. 2020. Retrieval-augmented gen-
+eration for knowledge-intensive nlp tasks. Advances
+in neural information processing systems, 33:9459-
+
+9474.
+
+Ang Li, Haozhe Chen, Hongseok Namkoong, and
+Tianyi Peng. 2025. LLM Generated Persona
+is a Promise with a Catch. arXiv preprint
+arXiv:2503.16527.
+
+Junyi Li, Ninareh Mehrabi, Charith Peris, Palash Goyal,
+Kai-Wei Chang, Aram Galstyan, Richard Zemel, and
+Rahul Gupta. 2023. On the steerability of large lan-
+guage models toward data-driven personas. arXiv
+preprint arXiv:2311.04978.
+
+11
+
+Benjamin Lira, Joseph M O’Brien, Pablo A Pefia,
+Brian M Galla, Sidney D’Mello, David S Yeager,
+Amy Defnet, Tim Kautz, Kate Munkacsy, and An-
+gela L Duckworth. 2022. Large studies reveal how
+reference bias limits policy applications of self-report
+measures. Scientific reports, 12(1):19189.
+
+Benjamin S Manning, Kehang Zhu, and John J Horton.
+2024. Automated social science: Language models
+as scientist and subjects. Technical report, National
+Bureau of Economic Research.
+
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,
+Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+Sandhini Agarwal, Katarina Slama, Alex Ray, and 1
+others. 2022. Training language models to follow in-
+structions with human feedback. Advances in neural
+information processing systems, 35:27730-27744.
+
+Pew Research Center. American Trends Panel
+(ATP) datasets. https: //www. pewresearch.org/
+american-trends-panel-datasets/. Accessed
+September 19, 2025.
+
+Pouya Pezeshkpour and Estevam Hruschka. 2023.
+Large language models sensitivity to the order of
+options in multiple-choice questions. arXiv preprint
+arXiv:2308.11483.
+
+Alessandra Rister Portinari Maranca, Jihoon Chung,
+Musashi Hinck, Adam D Wolsky, Naoki Egami,
+and Brandon M Stewart. 2025. Correcting the
+Measurement Errors of AlI-Assisted Labeling in
+Image Analysis Using Design-Based Supervised
+Learning. Sociological Methods & Research, page
+0049124125 1333372.
+
+Paul R6ttger, Valentin Hofmann, Valentina Pyatkin,
+Musashi Hinck, Hannah Rose Kirk, Hinrich Schiitze,
+and Dirk Hovy. 2024. Political compass or spinning
+arrow? towards more meaningful evaluations for val-
+ues and opinions in large language models. arXiv
+preprint arXiv:2402.16786.
+
+Giuseppe Russo, Kristina Gligorié, Vincent Moreau,
+and Robert West. 2025a. Meat-free day reduces
+greenhouse gas emissions but poses challenges for
+customer retention and adherence to dietary guide-
+lines. arXiv preprint arXiv:2504.02899.
+
+Giuseppe Russo, Nora Hollenstein, Claudiu Musat, and
+Ce Zhang. 2020. Control, generate, augment: A scal-
+able framework for multi-attribute text generation.
+arXiv preprint arXiv:2004. 14983.
+
+Giuseppe Russo, Debora Nozza, Paul Rottger, and Dirk
+Hovy. 2025b. The pluralistic moral gap: Under-
+standing judgment and value differences between
+humans and large language models. arXiv preprint
+arXiv:2507.17216.
+
+Giuseppe Russo, Maciej Styczen, Manoel Horta Ribeiro,
+and Robert West. 2025c. Does content moderation
+lead users away from fringe movements? evidence
+from a recovery community. In Proceedings of the
+International AAAI Conference on Web and Social
+Media, volume 19, pages 1719-1734.
+
+
+Giuseppe Russo, Luca Verginer, Manoel Horta Ribeiro,
+and Giona Casiraghi. 2023. Spillover of antisocial
+behavior from fringe platforms: The unintended con-
+sequences of community banning. In Proceedings of
+the international AAAI conference on web and social
+media, volume 17, pages 742-753.
+
+Shibani Santurkar, Esin Durmus, Faisal Ladhak, Cinoo
+Lee, Percy Liang, and Tatsunori Hashimoto. 2023.
+Whose opinions do language models reflect? In In-
+ternational Conference on Machine Learning, pages
+
+29971-30004. PMLR.
+
+Anand Shah, Kehang Zhu, Yanchen Jiang, Jeffrey G
+Wang, Arif K Dayi, John J Horton, and David C
+Parkes. 2025. Learning from Synthetic Labs: Lan-
+guage Models as Auction Participants. arXiv preprint
+arXiv:2507.09083.
+
+Omar Shaikh, Kristina Gligoric, Ashna Khetan,
+Matthias Gerstgrasser, Diyi Yang, and Dan Jurafsky.
+2024. Grounding gaps in language model genera-
+tions. In Proceedings of the 2024 Conference of
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies (Volume 1: Long Papers), pages 6279-6296,
+Mexico City, Mexico. Association for Computational
+Linguistics.
+
+Omar Shaikh, Shardul Sapkota, Shan Rizvi, Eric
+Horvitz, Joon Sung Park, Diyi Yang, and Michael S
+Bernstein. 2025. Creating General User Models from
+Computer Use. arXiv preprint arXiv:2505. 10831.
+
+Yijia Shao, Humishka Zope, Yucheng Jiang, Jiaxin Pei,
+David Nguyen, Erik Brynjolfsson, and Diyi Yang.
+2025. Future of Work with AI Agents: Auditing
+Automation and Augmentation Potential across the
+US Workforce. arXiv preprint arXiv:2506.06576.
+
+Mrinank Sharma, Meg Tong, Tomasz Korbak, David Du-
+venaud, Amanda Askell, Samuel R Bowman, Newton
+Cheng, Esin Durmus, Zac Hatfield-Dodds, Scott R
+Johnston, and | others. 2023. Towards understand-
+ing sycophancy in language models. arXiv preprint
+arXiv:2310.13548.
+
+Weiyan Shi, Ryan Li, Yutong Zhang, Caleb Ziems,
+Sunny Yu, Raya Horesh, Rogério Abreu De Paula,
+and Diyi Yang. 2024. CultureBank: An Online
+Community-Driven Knowledge Base Towards Cul-
+turally Aware Language Technologies. In Findings
+of the Association for Computational Linguistics:
+EMNLP 2024, pages 4996-5025.
+
+Joseph Suh, Erfan Jahanparast, Suhong Moon, Min-
+woo Kang, and Serina Chang. 2025. Language
+model fine-tuning on scaled survey data for predict-
+ing distributions of public opinions. arXiv preprint
+arXiv:2502.16761.
+
+Huaman Sun, Jiaxin Pei, Minje Choi, and David Jur-
+gens. 2025. Sociodemographic prompting is not yet
+an effective approach for simulating subjective judg-
+ments with LLMs. In Proceedings of the 2025 Con-
+ference of the Nations of the Americas Chapter of the
+
+12
+
+Association for Computational Linguistics: Human
+Language Technologies (Volume 2: Short Papers),
+pages 845-854.
+
+Seungjong Sun, Eungu Lee, Dongyan Nan, Xiangy-
+ing Zhao, Wonbyung Lee, Bernard J Jansen, and
+Jang Hyun Kim. 2024. Random silicon sam-
+pling: Simulating human sub-population opinion
+using a large language model based on group-
+level demographic information. arXiv preprint
+arXiv:2402.18144.
+
+Rudra Tiwari. 2023. The impact of AI and machine
+learning on job displacement and employment op-
+portunities. International Journal of Engineering
+Technologies and Management Research, 7(1):1-9.
+
+Lindia Tjuatja, Valerie Chen, Tongshuang Wu, Ameet
+Talwalkwar, and Graham Neubig. 2024. Do LLMs
+exhibit human-like response biases? a case study in
+survey design. Transactions of the Association for
+Computational Linguistics, 12:1011-1026.
+
+Nicholas Vincent, Hanlin Li, Nicole Tilly, Stevie Chan-
+cellor, and Brent Hecht. 2021. Data leverage: A
+framework for empowering the public in its relation-
+ship with technology companies. In Proceedings of
+the 2021 ACM Conference on Fairness, Accountabil-
+ity, and Transparency, pages 215-227.
+
+Nick Vincent and Hanlin Li. 2023. ChatGPT Stole
+Your Work. So What Are You Going to Do. Wired
+Magazine, 20.
+
+Angelina Wang, Jamie Morgenstern, and John P Dick-
+erson. 2025a. Large language models that replace
+human participants can harmfully misportray and
+flatten identity groups. Nature Machine Intelligence,
+pages 1-12.
+
+Luping Wang, Sheng Chen, Linnan Jiang, Shu Pan,
+Runze Cai, Sen Yang, and Fei Yang. 2025b.
+Parameter-efficient fine-tuning in large language
+models: a survey of methodologies. Artificial In-
+telligence Review, 58(8):227.
+
+Qianli Wang, Tatiana Anikina, Nils Feldhus, Josef Gen-
+abith, Leonhard Hennig, and Sebastian MOller. 2024a.
+LLMCheckup: Conversational Examination of Large
+Language Models via Interpretability Tools and Self-
+Explanations. In Proceedings of the Third Workshop
+on Bridging Human-Computer Interaction and Nat-
+ural Language Processing, pages 89-104.
+
+Xinpeng Wang, Bolei Ma, Chengzhi Hu, Leon Weber-
+Genzel, Paul R6ttger, Frauke Kreuter, Dirk Hovy,
+and Barbara Plank. 2024b. " My Answer is C": First-
+Token Probabilities Do Not Match Text Answers in
+Instruction-Tuned Language Models. arXiv preprint
+arXiv:2402. 14499,
+
+Carole-Jean Wu, Ramya Raghavendra, Udit Gupta,
+Bilge Acun, Newsha Ardalani, Kiwan Maeng, Gloria
+Chang, Fiona Aga, Jinshi Huang, Charles Bai, and 1
+others. 2022. Sustainable ai: Environmental impli-
+cations, challenges and opportuities. Proceedings of
+machine learning and systems, 4:795-813.
+
+
+Puxuan Yu, Luke Merrick, Gaurav Nuti, and Daniel
+Campos. 2024. Arctic-embed 2.0: Multilingual
+retrieval without compromise. arXiv _ preprint
+arXiv:2412.04506.
+
+Long Zhang, Meng Zhang, Wei Lin Wang, and Yu Luo.
+2025. Simulation as Reality? The Effectiveness
+of LLM-Generated Data in Open-ended Question
+Assessment. arXiv preprint arXiv:2502.06371.
+
+Junhao Zhong, Yilin Zhong, Minghui Han, Tianjian
+Yang, and Qinghua Zhang. 2024. The impact of AI
+on carbon emissions: evidence from 66 countries.
+Applied Economics, 56(25):2975—2989.
+
+Jeanette Y Ziegenfuss, Casey A Easterday, Jennifer M
+Dinh, Meghan M JaKa, Thomas E Kottke, and Marna
+Canterbury. 2021. Impact of demographic survey
+questions on response rate and measurement: A ran-
+domized experiment. Survey Practice, 14(1).
+
+13
+
+A Supplementary results and
+experiments
+
+Both datasets used in our study are publicly avail-
+able. The U.S. National Health and Nutrition Ex-
+amination Survey (NHANES) is produced by the
+National Center for Health Statistics and is in the
+public domain. The American Trends Panel (ATP)
+is released by the Pew Research Center for schol-
+arly use under its data use terms. No special li-
+censes or permissions were required for access or
+use of these datasets in our work.
+
+A.1  Individual-level simulation results
+
+This analysis supports the discussion within the
+limitations section regarding the difficulty of cap-
+turing idiosyncratic behaviors. We report Mean
+Absolute Error (MAE) between the ground-truth
+scalar target y; = @(Yj,7) and the synthetic value
+9i = 0(¥i,r) for each individual i in NHANES.
+
+These results show that while LLMs can be ef-
+fectively calibrated to produce unbiased population
+estimates, accurately predicting an individual’s re-
+sponse remains fundamentally difficult. From the
+LLM’s perspective, individuals sharing identical
+demographic profiles appear indistinguishable, as
+illustrated in Figure 3. The model has no mecha-
+nism to differentiate between a 67-year-old white
+female who consumes 800 kcal versus another with
+identical observable characteristics who consumes
+2,200 kcal.
+
+Several factors contribute to this issue. First,
+identical observable features mean that LLMs
+only observe coarse demographic categories, miss-
+ing subtle but crucial individual differences in
+metabolism, food preferences, cooking skills, or
+economic circumstances. Second, natural daily
+variation ensures that even the same individual
+has substantial day-to-day fluctuations based on
+work schedule, social events, mood, stress levels,
+and purely stochastic factors. Finally, unobserved
+determinants such as genetics, medication effects,
+micronutrient status, food allergies, and personal
+dietary history remain completely hidden from the
+model yet strongly influence behavior.
+
+A.2__ ESS gains with increasing nhuman
+
+Figure 4 reports ESS gains under Rec),,, as the
+number of labeled participants increases. We ob-
+serve the same trend across all three datasets: gains
+shrink as Nhuman ZTOWS, since the human-only esti-
+mator improves with more labels.
+
+
+What the LLM sees
+
+30004
+
+2500 4
+
+2000 4
+
+1500 4
+
+Energy (kcal)
+
+1000 4
+
+10
+Individual (ID)
+
+20
+
+Figure 3: Individual variation in energy intake within identical demographic groups. To the LLM, each point
+represents an individual with the same observable characteristics (age 66-70, female, 60-70kg, Non-Hispanic
+White, no special diet), yet their actual energy consumption varies greatly from 500 to 2,500 kcal.
+
+-@: Persona guided - fi}: Finetuned -&: LLMonly } SubPOP
+= ae (a) NHANES) 18%] (b) ATP QI 18%} (c) ATP Q2
+15% 4 Me 15% 4 15%
+4 ‘ a
+
+12% 4°. \ 12% +a\ 12%
+a BS \\ a
+10% 7 S XN 10%4 -® 10%
+a \ N - .
+i] Oa @- -
+é N -- les Laie S
+
+8% | N “© 38%1 AN s 8% 4
+B a. =A, s
+2 We -- econ clita .
+
+5% Gh, Ps a 5% {ae} = © 5%
+
+rs “ x \ S =
+s>~ o \ ae z<cle
+2% 4 & 2% 4 ens aa 2% 4 ——
+0% | 0% 0% = KO)
+
+50
+Numan
+
+Figure 4: ESS gain under Rec)
+
+‘opt
+
+Synthesis method MAE (kcal) |
+
+Demo-only 1257.2
+Persona-guided 1417.5
+Domain-FT 815.0
+SubPOP-FT 920.1
+
+Table 5: Individual-level absolute error (MAE) for daily
+energy intake (kcal) on NHANES. The high individual-
+level errors highlight the difficulty of this setting.
+
+A.3 Ablation studies (NHANES)
+
+Context ablation. We ablate the demographic in-
+formation provided to the model at inference time
+by incrementally expanding the prompt (e.g., the
+demographic profile of the person). Each group
+adds a new set of attributes to the prompt. Group
+1 uses only age and sex. Group 2 adds anthropo-
+metric variables (height, weight, BMI). Group 3 in-
+cludes dietary preference (e.g., vegan, vegetarian).
+
+Numan
+
+14
+
+100 150 200
+
+Mhuman
+
+50
+
+across labeled-sample sizes Nhuman € {50, 100, 150, 200}.
+
+Group 4 incorporates race/ethnicity, and Group 5
+adds citizenship status. Adding more context about
+the participant increases performance. The results
+are summarized in Table 6.
+
+Prompting strategy ablation. We compare four
+prompting strategies that vary along two axes: (1)
+single-turn vs. multi-turn prompting, and (2) un-
+conditioned vs. conditioned inputs. In single-turn
+prompting, the model is asked to recall the entire
+day’s intake in one pass. Multi-turn prompting
+follows a structured format modeled after real di-
+etary surveys (e.g., the Automated Multiple-Pass
+Method), where the model is guided through mul-
+tiple passes and explicitly asked whether anything
+was forgotten. Conditioning improves accuracy
+and coverage. Interestingly, multi-turn prompt-
+ing consistently leads to higher nutrient estimates,
+which may reflect memory probing (i.e., the model
+“recalling” additional foods) or acquiescence bias*.
+
+“ Acquiescence bias is the tendency to provide affirmative
+
+
+Conditioning level A from truth(%) CI width(%) CI coverage +
+Basic: age, sex 13.44 13.42 0.22
++ anthropometrics 12.34 15.79 0.34
++ dietary preference 10.26 15.47 0.45
++ ethnicity 11.51 15.57 0.53
++ citizenship 8.96 14.55 0.60
+
+Table 6: Effect of conditioning level on estimation.
+
+Prompt format
+
+Single-turn, no profile
+Multi-turn, no profile
+Single-turn, full profile
+Multi-turn, full profile
+
+Table 7: Comparison of prompting strategies.
+
+A.4_ Results by base model
+
+A from truth (%) CI width (%) CI coverage +
+
+19.84
+34.67
+10.00
+25.31
+
+Table 8 reports bias and ESS gains separately for
+each base model and synthesis—rectification combi-
+nation. Overall, the patterns are consistent with our
+main findings: unrectified synthesis remains biased
+and fails to achieve valid coverage (hence ESS is
+not reported), while applying rectification collapses
+bias and yields positive ESS gains in most cases.
+
+responses regardless of content. When repeatedly asked “Did
+you forget anything?’”’, LLMs may generate additional foods
+due to the prompting structure rather than genuine recall.
+
+15
+
+8.37
+7.85
+14.77
+13.71
+
+0.16
+0.14
+0.60
+0.27
+
+
+Bias (%) | ESS Gain (%) t
+NHANES ATPQ1 ATPQ2 NHANES ATPQI ATP Q2
+
+Model: Synthesis | Rectify
+
+Unrectified synthesis (LLM-only)
+
+Baseline: — | None 7.51 2.16 59.90 T T T
+GPT-40-mini: Persona-guided | None 16.77 52.74 27.53 tT T T
+GPT-40-mini: Demo-only | None 18.11 32.78 36.77 T T T
+Llama: Persona-guided | None 186.24 63.04 8.66 T T T
+Llama: Domain-FT | None 9.22 33.09 73.51 T T T
+Llama: Demo-only | None 213.77 83.24 12.67 T T T
+Llama: SubPOP-FT | None 165.42 55.56 16.82 T T T
+Mistral: Persona-guided | None 90.15 52.74 27.53 T T T
+Mistral: Domain-FT | None 2.74 50.57 71.14 T T T
+Mistral: Demo-only | None 108.27 61.00 44.93 T T T
+Mistral: SubPOP-FT | None 359.05 49.66 47.83 T T T
+Qwen: Persona-guided | None 35.12 37.60 32.57 T T T
+Qwen: Domain-FT | None 9.21 20.67 46.31 T T T
+Qwen: Demo-only | None 11.93 14.49 36.77 T T tT
+Qwen: SubPOP-FT | None 17.76 29.12 36.77 T T T
+Synthesize, then Rectify
+GPT-40-mini: Persona-guided | Rec),,, 0.48 6.09 2.63 22.4 6.6 1.0
+GPT-40-mini: Persona-guided | Rec,=1 7.59 6.85 3.48 -41.0 -19.1 -25.1
+GPT-40-mini: Demo-only | Rec), 4.50 7.49 3.69 4.8 7.6 1.8
+GPT-40-mini: Demo-only | Recy=1 5.18 8.83 2.43 -30.9 -24.9 -26.0
+Llama: Persona-guided | Reca,,: 10.03 6.09 1.16 15.2 4.6 1.0
+Llama: Persona-guided | Rec)=1 35.25 0.81 7.78 -84.6 -29.5 -31.0
+Llama: Domain-FT | ReC)go¢ 4.01 15.01 6.27 5.4 1.0 1.0
+Llama: Domain-FT | Rec)=1 12.67 14.80 3.63 -19.9 -30.4 -60.1
+Llama: Demo-only | Rec), 4.48 12.07 2.06 9.5 8.6 Sell
+Llama: Demo-only | Rec)=1 20.87 14.40 0.03 -87.8 TA -26.0
+Llama: SubPOP-FT | ReC)go¢ 2.43 9.98 1.10 1.0 1.2 1.0
+Llama: SubPOP-FT | Recy=1 20.09 12.29 0.38 -85.8 -31.3 -64.9
+Mistral: Persona-guided | Rec),,, 3.08 5.15 3.69 25.7 6.6 1.0
+Mistral: Persona-guided | Rec)=1 3.39 6.85 2.24 -68.0 -12.0 -25.1
+Mistral: Domain-FT | Rec), 9.97 1.23 15.07 1.0 1.0 1.0
+Mistral: Domain-FT | Rec,—1 13.26 6.30 4.12 -62.9 -22.8 -61.3
+Mistral: Demo-only | Rec), 11.99 23.38 7.69 5.4 5.9 1.8
+Mistral: Demo-only | Rec)=1 20.80 25.08 6.91 -57.8 -6.7 -47.8
+Mistral: SubPOP-FT | Rec). 7.31 5.77 10.02 1.0 2.0 3.5
+Mistral: SubPOP-FT | Recy=1 90.98 13.74 26.34 -98.5 1.0 -60.1
+Qwen: Persona-guided | Rec),,, 3.84 13.39 2.63 3.1 11.2 1.0
+Qwen: Persona-guided | Rec)=1 3.07 25.63 3.48 -44.4 -19.1 -13.8
+Qwen: Domain-FT | Rec), 4.75 3.40 1.16 1.6 2.0 1.0
+Qwen: Domain-FT | Recy=1 2.30 4.27 4.58 -34.1 -25.3 -54.1
+Qwen: Demo-only | Rec),, 9.83 20.44 3.69 3.8 4.7 1.0
+Qwen: Demo-only | Rec)=1 6.69 19.44 2.43 -35.9 -35.3 0.9
+Qwen: SubPOP-FT | Rec), 1.35 1.55 6.22 1.8 2.8 1.0
+Qwen: SubPOP-FT | Recy=1 1.65 0.19 6.22 -38.9 -18.0 1.0
+
+Table 8: Per-model results across datasets. Bias (%) | and ESS gain (%) ¢ (ESS @100) on NHANES, ATP Q1,
+and ATP Q2. Notation X | Y indicates synthesis method X combined with rectification method Y; None denotes
+unrectified synthesis. { = ESS not reported because nominal coverage (0.95) is not achieved. Prompting temperature
+fixed at 0.7 for all generations.
+
+16
+
+
+B Methods
+
+B.1  Prediction-Powered Inference (PPI)
+
+Prediction-Powered Inference (PPI) (Angelopou-
+los et al., 2023a) provides valid confidence inter-
+vals for statistical estimands by combining a small
+labeled dataset with predictions from a machine-
+learning system on a large unlabeled dataset. Let
+{(Xi, ¥;)}"_, denote the labeled data and {X;}*_,
+denote unlabeled covariates with N >> n, both
+drawn i.i.d. from the same distribution. The pre-
+dictor f is trained independently of both datasets.
+PPI applies to estimands 6* defined as solutions to
+convex optimization problems of the form:
+
+E[Co(X, YI,
+
+és .
+
+6° = arg ron
+where £9 is a convex loss function. Under mild
+regularity conditions, 6* can be characterized by
+the estimating equation E|gg«(X, Y)] = 0, where
+ge Volo is a subgradient of the loss. PPI
+constructs an estimator by combining two com-
+ponents. The imputed gradient uses unlabeled data
+and model predictions:
+
+IQ os as
+98 = yD 90(Xi, f(%)).
+i=1
+
+The rectifier uses labeled data to correct for predic-
+tion bias:
+
+as Lig
+Bo = 5D (aol %n¥i) — go(Xs f(D).
+The PPI estimator Opp] solves:
+af + Ap =0.
+This estimator is unbiased by construction:
+E[go-(X, f(X))]
+
+E(go-(X,Y) — goe(X, f(X)))
+E[go-(X,¥)] = 0.
+
+E[gd. + Ag]
+
+Power tuning. PPI can be extended to include a
+power tuning parameter  € [0, 1] that controls the
+relative weight given to predictions versus labeled
+data. The rectifier can be scaled as dg, yielding
+the modified estimating equation af + Ag = 0.
+When A = 1, this recovers the standard PPI esti-
+mator; when A = 0, it reduces to pure imputation
+using predictions; intermediate values interpolate
+between these extremes. The parameter \ can be
+chosen to optimize statistical power while main-
+taining validity, though the default choice 4 = 1
+provides valid inference without tuning.
+
+17
+
+Example: population mean estimation. For es-
+timating the population mean 6* = E[Y], the PPI
+estimator takes the form:
+
+230% £4)
+i=1
+
+. iw
+Oppl = wd fK+
+
+prediction average bias correction
+
+Under the assumption that f is independent of the
+inference data and both samples are i.i.d. from the
+same distribution, unbiasedness follows:
+
+E[ppi] = E[f(X)] +E[Y — f(X)] = EY] =
+
+B.2. Mapping ¢: VR
+
+NHANES. We use the USDA FNDDS database
+to obtain nutrient profiles and define a mapping
+function ¢ that returns a scalar target from open-
+ended text (e.g., energy in kcal for a food mention).
+For each simulated food item, we first retrieve
+the top 40 candidate foods by cosine similarity
+over FNDDS (using snowflake-arctic-embed
+(Yu et al., 2024)). These candidates and the query
+are then passed to GPT-40-mini with temperature
+0 in a RAG-style setup (Lewis et al., 2020; Russo
+et al., 2025a) to select the best match and we re-
+trieve its kcal density. Using the retrieved kcal den-
+sity and the reported grams for each food item, we
+compute the total daily caloric intake. Importantly,
+this mapping function must remain deterministic
+so as not to introduce unnecessary variance into the
+correction step.
+
+ATP. For ATP, ¢ maps ordinal multiple choice
+responses to numerical values. Specifically, we
+assign Ar+1, Br+2, Cr>3, Dr +4, and so forth.
+
+B.3 Prompts
+
+NHANES. The prompt for simulating responses
+for NHANES is included in the box below.
+
+ATP. The prompt for simulating responses for
+ATP questions is included in the boxes below.
+
+Persona-guided prompt template. To generate
+detailed persona descriptions from demographic
+and survey response data, we used the following
+prompt template:
+
+
+apred
+
+Rectifier Ag
+
+Prediction-based score
+
+Estimand Io
+3 Wn HEX) < 6}
+
+d— © ea U(X) < 9}
+
+Mean
+
+Median (q = 3)
+q-quantile
+Logistic reg.
+
+W Dies (MiX7 0 — Xi f(X))
+W Dover VE0(Xi, f(Xi))
+
+Linear reg.
+
+Convex minimizer
+
+ae (o(0" Xi) — f(X:)
+
+)
+
+oy
+
+pe
+
+Procedure
+rea (f(Xi) — Yi) Alg. 1
+fy (1{F (Xi) < 6} — 1{¥; < 9}) Alg. 2
+par (L{ P(X) < 6} — L{¥i < 9}) Alg. 2
+gaa Self (X) — ¥) Alg. 3
+jor Xi(f (Xi) — Yi) Alg. 4
+| (Vlo(Xi, Yi) — Vlo(Xi, f(Xi))) Allg. 5
+
+Table 9: Prediction-powered estimating equations for common estimands. Here o denotes the logistic sigmoid.
+
+NHANES prompt template
+
+System message:
+
+You are participating in a dietary recall sur-
+vey. Describe what you ate and drank in
+the past 24 hours, based on your memory.
+Below is your personal profile:
+{demographic_profile}
+Answer honestly and realistically as you are
+recalling from memory.
+User prompt:
+Please list everything you ate and drank in
+the past 24 hours. Include meals, snacks,
+drinks, and small bites, in the order you con-
+sumed them.
+Use this exact format on each line:
+[Food name] - [Short description] -
+[Grams as a number only]
+Instructions:
+¢ One item per line.
+¢ Use a single hyphen and space (" - ”)
+to separate fields.
+¢ Grams must be a number only, no units
+like “g” or “grams”.
+¢ Do not add summaries or explana-
+tions—only the list.
+
+18
+
+ATP prompt template
+
+System message: You are a_ sur-
+vey respondent. Adopt this profile:
+{demographic_profile} Answer as your-
+self in first person. Pick exactly one option
+from the list. Output only one uppercase
+letter from {letter choices}. No words, no
+punctuation, no explanations, no qualifiers.
+Do not discuss ethics, study design, or what
+most people would do.
+
+User prompt: {survey_question}
+Choices: {multiple_choice_options}
+
+Persona-guided prompt for synthesizing
+personas based on historical data
+
+System message: You are an expert at syn-
+thesizing detailed persona descriptions from
+demographic and behavioral data. Your out-
+put must be a single, coherent paragraph.
+User prompt: Here is a person’s demo-
+graphic information and a log of what they
+answered in the past.
+
+Demographics {demo}
+
+History {context}
+
+Your task: Based on this information, write
+a single, detailed paragraph describing this
+person’s habits, lifestyle, and personality in
+general. Your description should be a coher-
+ent narrative that synthesizes all the avail-
+able evidence. Focus on inferring patterns,
+routines, and constraints that are supported
+by the provided information. Do not use
+lists, bullet points, or scores. Do not include
+extra explanations or reasoning. Just pro-
+vide the narrative persona description.
+
+
+
+C_ Data and Computational Resources
+
+C.1 Dataset Licensing
+
+Both datasets used in our study are publicly avail-
+able. The U.S. National Health and Nutrition Ex-
+amination Survey (NHANES) is produced by the
+National Center for Health Statistics and is in the
+public domain. The American Trends Panel (ATP)
+is released by the Pew Research Center for schol-
+arly use under its data use terms. No special li-
+censes or permissions were required for access or
+use of these datasets in our work.
+
+C.2 Computational Resources
+
+All experiments were conducted using models with
+approximately 7-8 billion parameters. Training and
+evaluation were performed on a single NVIDIA
+A100 GPUs. The total training duration across all
+runs was approximately 3 days (#72 GPU hours).
+This includes all fine-tuning, evaluation, and vali-
+dation steps.
+
+19

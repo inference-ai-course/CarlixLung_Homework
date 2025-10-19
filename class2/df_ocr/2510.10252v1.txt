@@ -1,0 +1,1200 @@
+arX1iv:2510.10252v1 [cs.CL] 11 Oct 2025
+
+Audit-of-Understanding: Posterior-Constrained Inference
+for Mathematical Reasoning in Language Models
+
+Samir Abdaljalil Erchin Serpedin
+Texas A&M University
+College Station, TX., USA
+{sabdaljalil, eserpedin} @tamu.edu
+
+Abstract
+
+Large language models (LLMs) often gen-
+erate reasoning traces that appear coherent
+but rest on unsupported assumptions, lead-
+ing to hallucinated conclusions. Prior work
+mainly addresses factual hallucinations or re-
+lies on post-hoc verification, leaving reasoning-
+induced hallucinations largely unaddressed.
+We propose Audit-of-Understanding (AoU),
+a framework that constrains inference to val-
+idated premises through three phases: (1)
+decomposing a query into candidate assump-
+tions, (2) auditing their support, and (3) con-
+ditioning inference only on the validated sub-
+set. Formally, AoU is posterior-constrained
+inference, connecting to selective prediction
+and rejection learning. Our contributions are
+threefold: (i) theoretical guarantees under per-
+fect validation, (ii) excess-risk bounds under
+imperfect audits, and (iii) tractability anal-
+ysis. Empirically, AoU improves both accu-
+racy and faithfulness on GSM8K, MultiArith,
+and SVAMP, achieving up to +30% gains
+on GSM8K, +45% on MultiArith, and con-
+sistent +20-28% improvements on SVAMP
+over Chain-of-Thought, Self-Consistency,
+and CoT-Decoding. Code is available
+at https://anonymous.4open.science/r/
+audit-of-understanding-E28B.
+
+1 INTRODUCTION
+
+A central challenge in machine learning is ensuring
+
+that inference is faithful to its underlying assumptions.
+
+Models often operate over latent structures—whether
+in probabilistic graphical models, structured prediction,
+or sequential reasoning—yet the assumptions driving
+inference are rarely surfaced or audited. As a result,
+predictions may depend on unsupported or speculative
+
+Khalid Qaraqe Hasan Kurban
+Hamad Bin Khalifa University
+Doha, Qatar
+{kqarage, hkurban}@hbku.edu.qa
+
+A factory produces 120 widgets in 8 hours. How many
+ry widgets can it produce in 14 hours, assuming
+production continues at the same rate?
+
+Around 300 widgets — longer
+shifts usually get more
+efficient.
+
+Al: The factory produces 120 widgets in 8 hours. (Z)
+A2: The production rate is constant.
+
+A3: Number of widgets = rate x time. A)
+
+AA: Longer shifts are more efficient.
+
+of Audit-of-
+
+Illustrative
+The top shows reasoning with
+unchecked assumptions leading to an _ incorrect
+answer, while the bottom shows AoU filtering invalid
+assumptions, yielding the correct answer.
+
+Figure 1: example
+
+Understanding.
+
+premises, yielding outputs that appear coherent but
+are not logically grounded. This problem cuts across
+domains: from structured prediction in vision and lan-
+guage, to decision-making in reinforcement learning, to
+scientific and medical reasoning systems. LLMs pro-
+vide a vivid illustration of this issue. While capable of
+impressive multi-step reasoning, they frequently pro-
+duce hallucinations—outputs that rely on assumptions
+not given or entailed by the input (Maynez et al., 2020;
+Pagnoni et al., 2021; Ji et al., 2024).
+
+Prior work highlights that these hallucinations often
+emerge not from faulty recall, but from flawed inter-
+mediate reasoning steps (Turpin et al., 2023; Press
+et al., 2023). Existing mitigation strategies—retrieval
+augmentation (Lewis et al., 2020), post-hoc verifica-
+tion (Gao et al., 2022; Zheng et al., 2024), and self-
+evaluation (Manakul et al., 2023; Dhuliawala et al.,
+
+
+Audit-of-Understanding: Posterior-Constrained Inference for Mathematical Reasoning
+
+2023; Shinn et al., 2023)—primarily address factual-
+ity after inference has already occurred. Prompting
+methods such as Chain-of-Thought (Wei et al., 2022)
+improve transparency but often introduce fabricated
+bridging facts, reinforcing the problem rather than elim-
+inating it. What is missing is a principled approach
+that constrains inference to validated assumptions be-
+fore prediction.
+
+We introduce Audit-of-Understanding (AoU), a general
+framework for faithful inference under partial support.
+AoU decomposes a query into candidate premises, val-
+idates which are supported, and conditions inference
+only on the validated subset. Fig. 1 presents an ex-
+ample that illustrates how AoU works. Formally, AoU
+can be cast as a constrained inference problem (see
+Section 3) (Cortes et al., 2016; Chow, 2009) as well as
+constrained inference in probabilistic graphical models
+(Koller and Friedman, 2009). Eliminating unsupported
+assumptions prior to prediction yields formal faithful-
+ness and risk-control guarantees (see Section 3), while
+producing interpretable reasoning traces.
+
+Our contributions are threefold: (1) We formalize
+AoU as posterior-constrained inference, with defini-
+tions, guarantees, and complexity analysis; (2) We
+derive excess risk bounds under imperfect validation,
+linking validator reliability to prediction risk; and (3)
+We demonstrate empirically, on mathematical reason-
+ing benchmarks, that AoU substantially reduces hal-
+lucinations while preserving accuracy. Although our
+experiments focus on LLM reasoning, the framework
+applies broadly to any learning setting where inference
+depends on unvalidated intermediate assumptions.
+
+2 BACKGROUND AND RELATED
+WORK
+
+2.1 Faithful Inference and Selective
+Classification
+
+Ensuring that predictions are faithful to validated infor-
+mation is a longstanding problem in machine learning.
+Selective classification and rejection-option learning
+(Chow, 2009; Cortes et al., 2016) formalize settings
+where a predictor abstains rather than risk making un-
+supported inferences. Similarly, probabilistic graphical
+models study inference under structural or evidence con-
+straints, where efficiency depends on bounded treewidth
+and principled marginalization strategies (Koller and
+Friedman, 2009). Our work extends these ideas by
+proposing a framework in which inference is explicitly
+conditioned on validated premises, providing guaran-
+tees against unsupported reasoning traces.
+
+2.2 Hallucination in Generative Models
+
+Generative models, and particularly LLMs, make
+the challenge of faithfulness concrete. Hallucina-
+tion—defined as producing fluent but factually unsup-
+ported content—has been studied extensively in sum-
+marization (Maynez et al., 2020; Pagnoni et al., 2021),
+question answering (Manakul et al., 2023), and instruc-
+tion following (Ji et al., 2024). Most approaches aim to
+reduce factual errors through retrieval-augmented gen-
+eration (Lewis et al., 2020), post-hoc verification (Gao
+et al., 2022; Zheng et al., 2024; Gou et al., 2024), or self-
+consistency checks (Dhuliawala et al., 2023; Shinn et al.,
+2023). While effective at improving factual alignment,
+these methods largely address hallucinations after the
+reasoning process has already occurred.
+
+2.3. Reasoning-Induced Hallucination
+
+Recent work highlights that hallucinations can also
+arise from flawed intermediate reasoning. Chain-of-
+Thought prompting (Wei et al., 2022) improves per-
+formance but often introduces fabricated intermediate
+steps (Turpin et al., 2023), while methods such as Self-
+Ask (Press et al., 2023) and ReAct (Yao et al., 2022)
+scaffold reasoning into subproblems without distinguish-
+ing between grounded and speculative assumptions.
+Post-hoc methods like Chain-of-Verification (Dhuli-
+awala et al., 2023) or Critic-Prompting (Zheng et al.,
+2024; Gou et al., 2024) add verification after inference,
+but unsupported assumptions may already have influ-
+enced predictions. Our work differs by introducing an
+explicit audit phase, which separates given, inferred,
+and missing premises before inference begins.
+
+2.4 Mathematical Reasoning
+
+Large language models have recently demonstrated sur-
+prising competence in mathematical problem solving,
+but their reasoning remains inconsistent and prone
+to systematic errors. Early studies (e.g., Cobbe et al.
+(2021)) showed that transformer-based models can solve
+arithmetic and algebraic problems when trained on syn-
+thetic data, but their performance sharply drops on
+out-of-distribution tasks. Chain-of-thought prompt-
+ing (Wei et al., 2022) and self-consistency decoding
+(Wang et al., 2023) improve accuracy by encouraging
+step-by-step derivations, yet they also introduce hallu-
+cinated intermediate steps and unstable final answers,
+particularly on multi-step or compositional tasks. Our
+AoU framework complements this line of research by
+introducing an explicit pre-generation audit of assump-
+tions and intermediate claims, with the goal of reducing
+unsupported steps and increasing faithfulness in math-
+ematical reasoning without relying on external tools.
+
+
+Samir Abdaljalil, Erchin Serpedin, Khalid Qaraqe, Hasan Kurban
+
+7 ASSUME
+G = faec(Q)
+List key
+
+assumptions to
+solve the problem
+
+Atrain travels 60 miles in 1.5
+hours. How long will it take to
+travel 180 miles at the same
+speed?
+
+4 AUDIT
+Gt = {Gi m(Gi) = 1},
+
+=
+
+G1; "at the same speed" implies constant speed.
+
+G =G\G.
+
+Assess whether
+each assumption is
+SUPPORTED (G+) or
+
+MISSING (G-)
+
+SUPPORTED - G+
+
+G2: Given in the question.
+
+G3: Common definition of speed.
+
+—
+
++ From G2 and G3: Speed = 60+ 1.5=40 mph.
+
++ From G4: 180 miles is 3x the original distance.
+
++ So time = 1.5 hours x 3 = 4.5 hours.
+
+G1: The speed of the train is constant.
+
+G2: The train travels 60 miles in 1.5 hours.
+
+G3: Speed = Distance / Time.
+
+G4: 180 miles is 3 times the original distance.
+\ G5: The new trip includes a stop that adds time. / \
+
+J G4: 180+ 60=3.
+
+MISSING - G-
+
+Praanener
+
+4.5 hours
+
+/ =
+
+Figure 2: Illustration of the Audit-of-Understanding (AoU) pipeline on a real math word problem. The pipeline
+consists of three phases: (1) Assume, (2) Audit, and (3) Solve. This prevents hallucinated reasoning steps and
+ensures faithfulness. The model uses G1—G4 to compute the speed and deduce that the 180-mile trip will take 4.5
+
+hours.
+
+3 Methodology
+
+We formalize AoU as a posterior-constrained infer-
+ence framework over latent assumptions. Let Q de-
+note the input query, A the finite action space, and
+G = {G,...,Gm} the set of candidate assumptions
+generated by the model. Whereas standard prompting
+marginalizes over all of G, AoU restricts reasoning to a
+validated subset G* C G. The pipeline is illustrated in
+Fig. 2.
+
+Notation. For a set of variables H, let S(#) denote
+their joint configuration space, and for a single variable
+Gi, let S(G;) denote its state space. Bold symbols rep-
+resent tuples, e.g., g € S(G). The ground-truth answer
+for query Q is denoted A* € Y (we suppress the explicit
+dependence on Q when unambiguous), and losses are
+measured by a bounded function L : Ax Y — [0,1].
+We denote by G@(Q) an arbitrary predictor, by Gaou(Q)
+the AoU predictor under perfect validation, by @,(Q)
+the AoU predictor with a (possibly imperfect) valida-
+tor 7, and by a'(Q) the Bayes action under perfect
+validation. Let Q denote the space of possible queries
+Q.
+
+Semantics. Each G; is a proposition encoded as a dis-
+crete random variable (G; € S(G;)); support means
+G; € S* C S(G;). Under perfect validation, Si is the
+true set of supported states (no uncertainty).
+
+Standing assumptions. We assume the action set
+A is finite (ties broken by a fixed rule) and use a
+bounded loss L € [0, 1].
+
+Cost model. Unless stated otherwise, we adopt a
+unit-cost oracle model in which each validator call
+
+and each evaluation of a label-conditional probability
+P(y | -) costs O(1). In concrete LLM settings, token-
+level computation implies non-constant costs; with
+per-call constants C, and Cp, complexities become
+O(mC;,,) for validation and the stated inference terms
+multiplied by Cp.
+
+3.1 Phase 1: Decomposition of Reasoning
+Requirements
+
+Given an input Q, the model produces a set of required
+
+premises
+where fagec is a decomposition function. Each G; € G
+
+is labeled as
+
+é; © {GIVEN, INFERRED, MISSING}.
+
+(2)
+
+This step surfaces the model’s internal assumptions
+before inference. In Prompt Card 1, we show the
+prompt designed to enumerate all assumptions required
+to answer the question.
+
+Prompt Card: 1 - Assumption Enumera-
+tion
+
+Instruction. Given a task or question, enumerate
+the minimal set of assumptions, facts, or subgoals
+
+required to reach a solution. Do not solve the task.
+
+Constraints.
+e List only essential items, labeled G1, G2, G3,
+
+e Avoid trivial, vague, or redundant statements
+
+
+Audit-of-Understanding: Posterior-Constrained Inference for Mathematical Reasoning
+
+3.2. Phase 2: Assumption Validation
+
+A validator a: G — {0,1} audits each premise:
+1 if G; is supported or logically entailed,
+(Gi) = ;
+0 otherwise.
+(3)
+We define the validated and rejected subsets:
+F={Gi:n(Gi)=1, G =G\G". (4)
+Unless stated otherwise, 7 is assumed deterministic.
+Section 3.6 treats probabilistic validators with per-
+premise false-positive/false-negative rates, modeling
+auditing errors. Note. The validated set G* is deter-
+mined solely by 7, regardless of the Phase 1 tags @;;
+i.e., 7 overrides £; when forming G+. Consequently,
+all faithfulness guarantees below are independent of
+Phase 1 tagging accuracy. In Prompt Card 2, we show-
+case the prompt used to audit the assumptions.
+
+Prompt Card: 2 - Audit Phase
+
+Instruction. Given (i) a question and (ii) a set
+of assumptions (G1, G2,...), assess whether each as-
+sumption is supported by the question or by un-
+ambiguous implications thereof. Do not introduce
+external knowledge.
+
+Evaluation Rules.
+
+e For each Gi, assign a label: [SUPPORTED] or
+[MISSING].
+
+e Provide a brief justification for every label; be
+strict and conservative.
+
+e Do not invent facts; rely only on what is explic-
+itly stated or clearly inferable.
+
+Input.
+Question: {q}
+
+Assumptions: {G1, G2, ...}
+
+Output. One line per assumption, e.g.:
+Gi | [SUPPORTED]:
+G2 | [MISSING]: <short reason>
+G3 | [SUPPORTED] :
+
+<short reason>
+
+<short reason>
+
+3.3. Phase 3: Constrained Inference
+
+AoU conditions inference on G* and defines the AoU
+predictor
+
+E[L(a, A*) | Q,Gt]. (5)
+
+daou(Q) € arg min
+
+Special case (0-1 loss). When A = ¥ and L is 0-1, (5)
+reduces to G@aou(Q) € arg maxyey P(y | Q,G*).
+
+Shorthand. We write P(y | Q,G*) for the predictive
+distribution over labels conditioned on the conjunction
+of validation events, i.e., P(y | Q,Miza,eg+ {Gi € Si}).
+(Throughout this section we write P(y | -) for brevity
+when referring to the predictive distribution over la-
+
+bels.) When essential information is missing, we
+marginalize over G~ conditioned on Gt:
+PYy|Q,97) = S> Ply|@,9*,9) P(g\@,9*).
+
+gES(G-)
+(6)
+
+Equivalently, the decision risk can be written as
+
+[L(a, A*) | Q,9*] = S> L(a,y) Ply | Q,G*).
+
+yey
+
+Remark (Hypothetical completions). The distribution
+P(g | Q,G*) is a device for marginalizing over unvali-
+dated premises; it need not represent grounded evidence.
+In applications, one may choose conservative families
+(e.g., low-entropy or adversarial priors) or trigger ab-
+stention when the posterior mass on G~ is large.
+
+In Prompt Card 3, we provide the prompt used to elicit
+the final answer through constrained inference, relying
+only on the supported assumptions.
+
+Prompt Card: 3 - Constrained Reasoning
+
+Instruction. Given a question and a set of audited
+assumptions (Gi,G2,...) with labels [SUPPORTED]
+or [MISSING], answer the question using only the
+[SUPPORTED] assumptions.
+
+Rules.
+
+e Reference assumptions by index (e.g., “Using
+G2 ae”):
+
+e If any critical assumptions are [MISSING], pro-
+vide a conditional answer or state why an exact
+answer is not possible.
+
+e Keep the explanation clear, concise, and strictly
+grounded in the cited assumptions.
+
+Input.
+
+Question: {q}
+
+Audited Assumptions: {G1: [SUPPORTED]
+<reason>, G2: [MISSING] <reason>, ...}
+
+
+Samir Abdaljalil, Erchin Serpedin, Khalid Qaraqe, Hasan Kurban
+
+3.4 Bayesian Interpretation
+
+Standard prompting computes
+
+Py|Q)= S> Piy|@,9)P(g1Q). (7)
+
+gES(G)
+
+Standard prompting marginalizes over all premises
+(Eq. 7); AoU replaces this with the constrained de-
+cision in Eq. 5.
+
+3.5 Faithfulness and Complexity Guarantees
+
+Definition 1 (Reasoning trace and minimal depen-
+dence set). For S CG, write g =s g' if 9; = 9; for all
+G;,€ S. Let Ka(a|Q,g) denote the (possibly random-
+ized) conditional kernel used at inference time, where
+g © S(G) assigns values to all premises. In generative
+settings, Kg may coincide with sampling or decoding
+procedures derived from the posterior P(-); we keep
+them notationally distinct to separate model posteriors
+from the decision kernel.
+
+A set S CG is a support set for a(Q) if
+
+Ki(a|Q,g) = Kala|Q,9') VaeA
+whenever g =s g’. Since G is finite, inclusion-minimal
+support sets exist but need not be unique. We de-
+fine the reasoning trace T(4(Q)) as the intersection of
+all inclusion-minimal support sets (the indispensable
+premises). Its length 18 ktrace = |T(@(Q))|.
+
+Theorem 1 (Trace faithfulness without unsupported
+premises). Under perfect validation, the reasoning trace
+of Grou satisfies
+
+T(G@aou(Q)) CG* and T(aaou(Q))NG- =@.
+
+Proof. By construction, yoy depends only on (Q,G7).
+Thus for any g,g’ agreeing on Gt, Ka,.u(-| Q,g) =
+Kasou( | Q,g'), so the decision is invariant to as-
+signments on G~. Therefore T(@aou(Q)) C G* and
+T (@aou(Q)) NG = 9.
+
+The decision may depend on realized values within Gr,
+so the trace is a subset of G* in general.
+
+Definition 2 (Hallucination). For a predictor a, define
+the hallucination event
+
+H(@) := [T(a(Q)) NG #4].
+
+Corollary 1 (No hallucination under perfect valida-
+tion). With perfect validation,
+
+P| H(@aou)] = 0.
+
+Proof. Under perfect validation, G* contains only sup-
+ported/entailed items and G~ only unsupported ones.
+Since Gaou conditions solely on GT, its reasoning trace
+cannot use any premise in G~. Hence H(G@aov) is im-
+possible, so its probability is 0.
+
+We write u(G*) for the number of constant-time statis-
+tic updates required to incorporate Gt into the fac-
+torization used to evaluate P(y | -) (e.g., the predic-
+tive distribution); in a log-linear model each validated
+premise triggers an O(1) feature update.
+
+Theorem 2 (Complexity Bound). Let m = |G| and
+k =|G~|. Then:
+
+1. Validation requires O(m) calls to 7.
+
+2. Decision cost. Under a scoring oracle that eval-
+uates E[L(a, A*) | Q,G*] in O(1) pera (e.g., via
+P(y | Q,G*) and a finite Y), computing (5) costs
+O(|A|). If the predictive distribution factorizes so
+that each validated premise updates sufficient statis-
+tics in O(1), the additional incorporation cost is
+u(Gr), yielding O(|A| + u(G*)) overall (times a
+per-call constant Cp in autoregressive settings).
+
+8. Let k =|G~| and let n denote the number of vari-
+ables in the factorization used for marginalization
+over G-. Worst-case complexity is O(2") for bi-
+nary premises, and more generally O( Te |S(Gi)|).
+Under bounded treewidth t and bounded domain
+sizes, junction-tree inference runs in O(nexp(t+1)),
+polynomial in n for fixed t (Koller and Friedman,
+2009). More generally, complexity scales with the
+product of domain sizes over maximal cliques. If
+independence holds across G;, the cost reduces to
+
+o(e IS(@)l).
+
+Proof. Validation inspects each G;, giving O(m)
+calls. For Item 2, computing Gaou(Q) =
+arg minge 4 E[L(a, A*) | Q,G*] by a naive scan over
+A uses O(|.A|) expected-loss evaluations (e.g., via
+P(y | Q,G*) and finite VY). If the predictive distri-
+bution factorizes with O(1)-time updates per validated
+premise, the total becomes O(|A| + u(G*)) (as stated),
+times a per-call constant Cp in autoregressive set-
+tings. For Item 3, marginalizing over k = |G~| binary
+premises is O(2"); more generally O([][/_, |S(Gi)|).
+
+
+
+Audit-of-Understanding: Posterior-Constrained Inference for Mathematical Reasoning
+
+Under bounded treewidth t, junction-tree inference
+costs O(nexp(t+1)) over n variables in the G~ sub-
+graph.
+
+3.6 Error Decomposition and Imperfect
+Validation
+
+Validator error rates. For each premise Gj, let
+a; := Pr[x(G;) = 0 | G; supported] (false negative)
+and 6; := Pr[z(G,;) = 1 | G; unsupported] (false posi-
+tive).
+
+This analysis parallels selective classification and
+rejection-option learning (Cortes et al., 2016; Chow,
+2009), where the reliability of the validator directly
+bounds the excess risk of the predictor.
+
+Definition 3 (Indicator Function). For any event E,
+
+ite} — f if E. holds,
+
+0 otherwise.
+
+Probability space. All probabilities and expecta-
+tions are taken with respect to the joint measure over
+queries Q ~ Pg, the ground-truth label A* given Q,
+any internal randomization of the inference kernel Kg,
+and (when applicable) the validator 7. Unless stated
+otherwise, per-premise validator error rates (a;, 3;) are
+assumed query-averaged and uniform; the non-uniform
+case follows by replacing a;, 8; with Eg[a;(Q)] and
+59(8:(@)I-
+
+Risk. We define the total risk of a predictor @ under
+the joint probability space specified above as
+
+R(a) = E[L(a(Q), A*)],
+
+where the expectation is taken over queries Q ~ Pg, the
+ground-truth A* given Q, and any internal randomness
+of the inference kernel Kg and, when applicable, the
+validator 7. For AoU with abstention cost \ € [0, 1],
+we use the modified loss
+
+Ly(a, A*) “|
+
+L(a, A*)
+r a=,
+
+and write R)(a@) := E[L)(a(Q), A*)].
+Lemma 1 (Error Decomposition). Let H(a) denote
+the hallucination event. Then the total risk R(G@) de-
+composes as
+R = E[L(4, A*) 1{H(a)}] +
+SE
+
+assumption error
+
+i[L(a, A*) 1{H(a)}].
+
+inference error
+
+(8)
+Equivalently,
+R= E[L(a, A*) | H(a)] P(@))
++ E[L(a, A*) | >H(a)] P(-H(4)).
+e—————————_~
+
+inference error
+
+Proof. Since 1{H(a@)} + 1{=H(a)} = 1, we have
+L(a, A*) = L(a, A*) 1{H(a@)} + L(a, A*) 1{-H(a)}.
+
+Taking expectations yields the first decomposition. For
+the second form, apply the law of total expectation:
+
+[L(@, A") 1{1(4)}] = E[L(@, A*) | H(a)|P(A(a)),
+
+and similarly for ~H(@). This completes the proof.
+
+Bayes action under AoU. Let al(Q) €
+arg mingc.4 E[L(a, A*) | Q,G*]. A premise is “used”
+when G; € T(-). Let A; € [0,1] upper bound the
+marginal loss increase from withholding such an indis-
+pensable premise.
+
+Theorem 3 (Excess-risk upper bound under probabilis-
+tic validation). Using the bounded loss from Section 3,
+let al(Q) € argmin, E[L(a, A*) | Q,G*] be the Bayes
+action under perfect validation. Let a, be AoU with
+a validator having per-premise rates (a;, B;). Define
+U; (unsupported and used in T(@x(Q))) and S; (sup-
+ported, would be used by at, but excluded due to FN).
+Let pis’ := Eg[1{G; € T(al(Q))}] and A; € [0,1] be
+the maximal marginal loss increase when withholding
+Gi.
+
+Then
+
+R(ax) — Ral) < Ss? 8; P(G; unsupported) ps"?
+
+a=,
+
+FP inclusion
+m
+= S- pe ai AG.
+w=1
+FN exclusion
+
+where puselunsup is the probability that G; enters the
+trace given it slipped in unsupported.
+
+The FN term is a union-bound-style decomposition:
+it sums marginal loss increments and can over-count
+when multiple premises are jointly excluded. Thus the
+bound may be loose, but it is always safe. A refinement
+conditions on trace usage under unsupported premises
+(for the FP part) and on counterfactual trace usage
+when supported premises are withheld (for the FN
+part): P[U;] < 6; P(G; unsupported) Cae at the
+
+cost of introducing pyeclunsep
+
+Proof. By decomposition, validation errors affect risk
+in two ways: (i) false positives (FP) allow unsup-
+ported premises into G*, creating events U;, and (ii)
+false negatives (FN) remove supported premises that
+would otherwise be useful, creating events S;. Since
+LE < 1, the contribution of FP errors is at most
+the expected number of unsupported premises used,
+
+
+Samir Abdaljalil, Erchin Serpedin, Khalid Qaraqe, Hasan Kurban
+
+>>; P[Ui]. FN errors contribute at most 5°, p¥*° a; Aj,
+where A; bounds marginal loss increase from exclud-
+ing G;. This yields the stated decomposition. The
+upper bound on 5°, P[U;] follows from P[7(G;) = 1 |
+G; unsupported] = ;.
+
+Corollary 2 (Tightened homogeneous-rate bound).
+Under homogeneous rates a; = a, Bi = 6 and the
+bounded loss of Section 3,
+
+Riaz) < R(at) + E[min{1, Kpp}] + a Amax [kt
+
+tracel>
+
+where kh ace = |T (at (Q))| is the trace length under per-
+fect validation, Amax ‘= MaxXje{1,....m} Ai, and K pp is
+the (random) number of false-positive premises actually
+used in the reasoning trace.
+
+Abstention.
+
+Definition 4 (Abstention Action). We extend the
+action space to AU{L}, where L denotes the abstention
+(or rejection) option: the model outputs no answer.
+
+With abstention loss
+
+L(a, A*)
+Ly (a, A*) = ,
+\( ) ‘ a=,
+where A € [0,1], all results extend. Since the loss
+is bounded, choosing below the expected loss of
+uninformed guessing ensures a strict risk reduction,
+consistent with Chow’s rejection rule (Chow, 2009).
+
+Decision rule with abstention. For general loss L
+and abstention cost  € [0, 1], abstain whenever
+
+min {[L(a, A*) |Q,G*] > A,
+
+and otherwise output arg mingc,4 E[L(a, A*) | Q,G*].
+In the 0-1 case with A = J, this reduces to abstaining
+whenever maxycy P(y | Q,G*t) <1—2.
+
+4 Experiments
+
+Datasets. Our approach was evaluated on three
+mathematical reasoning benchmarks. MULTI-
+ARITH (Roy and Roth, 2015) consists of multi-step
+arithmetic word problems requiring compositional nu-
+merical reasoning, GSM8K (Cobbe et al., 2021), which
+contains high school mathematical word problems, and
+SVAMP (Patel et al., 2021), a dataset of mathematical
+problems of fourth grade level, which require no more
+than two-hop reasoning.
+
+Models. Three publicly available LLMs were used
+to evaluate AoU against several baselines. (1)
+MIsTRAL-7B (Jiang et al., 2023)! is a general-purpose
+
+'nttps://huggingface.co/mistralai/
+Mistral-7B-Instruct-v0.3
+
+decoder model optimized for scalable performance,
+(2) DEEPSEEK-7B (DeepSeek-AI et al., 2025)? is
+instruction-tuned for multi-turn dialogue and enhanced
+reasoning alignment, and (3) PHI-3.5 MInr (Abdin
+et al., 2024)? is a compact, cost-efficient model designed
+for educational and low-resource reasoning scenarios.
+This model selection enables evaluation across different
+reasoning behaviors and architectural priors.
+
+Baselines. We compare our method against three
+strong prompting-based _ baselines. CHAIN-OF-
+THOUGHT (COT) (Wei et al., 2022) guides the model
+to articulate intermediate reasoning steps before pro-
+ducing a final answer. SELF-CONSISTENCY (Wang
+et al., 2023) increases samples n = 20 reasoning
+paths and returns the most frequent outcome. CoT-
+DECODING (Wang and Zhou, 2024) removes explicit
+reasoning instructions, instead relying on various decod-
+ing paths to elicit inherent reasoning strategies in LLMs.
+These baselines represent standard approaches for en-
+couraging multi-step reasoning without assumption-
+level control.
+
+Experimental Setup. All models are evaluated
+as released, without any additional fine-tuning or
+instruction-tuning. Generation is carried out using
+a fixed temperature of 1.0 and a maximum output
+length of 526 tokens. Each input is processed with a
+single decoding pass. The experiments were carried out
+on a high performance set-up equipped with a NVIDIA
+A100 GPU. To ensure reproducibility, random seeds
+are fixed and all decoding parameters remain constant
+across experiments.
+
+5 Results
+
+Experimental results are illustrated in Fig. 3. AoU
+prompting achieves state-of-the-art performance across
+a range of LLMs and math reasoning tasks without
+relying on external tools. Its ability to constrain reason-
+ing to validated assumptions leads to higher accuracy,
+improved robustness, and reduced variability compared
+to standard chain-of-thought strategies. Note that our
+guarantees concern trace-level faithfulness (no unsup-
+ported premises enter the reasoning trace); correctness
+still depends on the choice of P(g | Q,G*) used to
+marginalize unvalidated premises.
+
+Overall Performance. Across all datasets and mod-
+els, AoU consistently outperforms or matches the
+strongest baseline. On MISTRAL-7B, AoU achieves
+48%, 64%, and 74% accuracy on GSM8k, MultiArith,
+
+*nttps: //huggingface.co/deepseek-ai/
+deepseek-11m-7b- chat
+
+Snttps: //huggingface.co/microsoft/Phi-3.
+5-mini-instruct
+
+
+Audit-of-Understanding: Posterior-Constrained Inference for Mathematical Reasoning
+
+@ CoT-Greedy @™ Self Consistency ™® CoT-Decoding ™ AoU (Ours)
+
+110
+
+Phi-3.5
+100 H
+Deepseek-7b : 98
+i 90 90
+Mistral-7b i
+80
+79
+70 74
+68 70
+66 66 o7
+60 64
+60
+57
+50
+48 46
+40 oa .
+40
+30
+27
+20 21
+10
+0
+GSM8k MultiArith SVAMP GSM8k MultiArith SVAMP GSM8k MultiArith SVAMP
+Figure 3: Performance comparison of different models (MISTRAL-7B-v0.3, DEEPSEEK-7B, and PHI-3.5)
+
+across three datasets (GSM8k, MultiArith, SVAMP) under various decoding strategies: CoT-Greedy (blue),
+Self-Consistency (red), CoT-Decoding (yellow), and our proposed AoU (green).
+
+and SVAMP respectively, improving over CoT-Greedy
+by +4-8% and outperforming Self-Consistency by wide
+margins (e.g., +45% on MultiArith). Similar trends
+hold for DEEPSEEK-7B, where AoU reaches 90% on
+GSM8k, 52% on MultiArith, and 68% on SVAMP,
+matching or exceeding the strongest competing rea-
+soning baseline on each task. On the more capable
+PuI-3.5, the gains narrow as base model performance
+saturates, but AoU still yields marginal improvements
+and demonstrates consistent behavior across all tasks.
+
+Comparisons with Baselines. Self-
+Consistency (Wang et al., 2023) performs incon-
+sistently across models, often underperforming
+CoT-Greedy (Wei et al., 2022), particularly on GSM8k
+and MultiArith. This suggests that sampling-based di-
+versity does not reliably enhance reasoning faithfulness
+without structured constraint. CoT-Decoding (Wang
+and Zhou, 2024), which removes explicit prompting
+and relies on latent reasoning patterns, offers notice-
+able improvements over greedy decoding in some
+cases, but remains less stable than AoU. In contrast,
+AoU delivers robust improvements across models and
+datasets, highlighting its effectiveness in controlling
+hallucinated reasoning.
+
+Effect of Model Type. As expected, more
+reasoning-tuned models such as PHI-3.5 show smaller
+absolute gains from AoU, though improvements re-
+main consistent. This suggests that AoU not only
+
+helps weaker models reason more faithfully, but also
+encourages even stronger models to avoid inaccurate
+inferences and hallucinations, particularly on under-
+determined or adversarially structured problems.
+
+6 Limitations
+
+While AoU prompting improves reasoning faithfulness
+across tasks and models, it has some limitations.
+
+Model Dependence. AoU assumes the model can
+reliably judge which assumptions are supported or miss-
+ing—a form of meta-reasoning that may not generalize
+across weaker or poorly aligned models. In such cases,
+the audit step may be overly strict or lenient.
+
+No External Verification. AoU operates without
+retrieval or external tools, improving simplicity and
+interpretability. However, this limits its ability to fact-
+check assumptions that are not explicitly stated but
+necessary for correct answers.
+
+7 Conclusion and Future Work
+
+This work introduces AoU prompting, a structured
+framework for reducing reasoning-induced hallucina-
+tions in LLMs. By explicitly separating assumption
+identification, validation, and constrained reasoning,
+AoU improves accuracy, interpretability, and faithful-
+ness across diverse mathematical benchmarks. Our
+
+
+Samir Abdaljalil, Erchin Serpedin, Khalid Qaraqe, Hasan Kurban
+
+method operates without access to external tools or
+post-hoc verification, offering a lightweight and gen-
+eralizable approach to controlled generation. While
+AoU shows strong performance gains, it also opens
+several avenues for future research. These include ex-
+tending the framework to non-mathematical domains
+such as commonsense or scientific reasoning, integrating
+uncertainty-aware reasoning over weakly supported as-
+sumptions, and scaling to longer, multi-turn dialogues.
+Further, combining AoU with retrieval or formal ver-
+ification could enhance both factual grounding and
+logical consistency.
+
+References
+
+Abdin, M., Aneja, J., Awadalla, H., Awadallah, A.,
+Awan, A. A., Bach, N., Bahree, A., Bakhtiari, A.,
+Bao, J., Behl, H., Benhaim, A., Bilenko, M., Bjorck,
+J., Bubeck, S., Cai, M., Cai, Q., Chaudhary, V.,
+Chen, D., Chen, D., Chen, W., Chen, Y.-C., Chen,
+Y.-L., Cheng, H., Chopra, P., Dai, X., Dixon, M.,
+Eldan, R., Fragoso, V., Gao, J., Gao, M., Gao, M.,
+Garg, A., Giorno, A. D., Goswami, A., Gunasekar, S.,
+Haider, E., Hao, J., Hewett, R. J.. Hu, W., Huynh,
+J., Iter, D., Jacobs, S. A., Javaheripi, M., Jin, X.,
+Karampatziakis, N., Kauffmann, P., Khademi, M.,
+Kim, D., Kim, Y. J., Kurilenko, L., Lee, J. R., Lee,
+Y. T., Li, Y., Li, Y., Liang, C., Liden, L., Lin, X.,
+Lin, Z., Liu, C., Liu, L., Liu, M., Liu, W., Liu, X.,
+Luo, C., Madan, P., Mahmoudzadeh, A., Majercak,
+D., Mazzola, M., Mendes, C. C. T., Mitra, A., Modi,
+H., Nguyen, A., Norick, B., Patra, B., Perez-Becker,
+D., Portet, T., Pryzant, R., Qin, H., Radmilac, M.,
+Ren, L., de Rosa, G., Rosset, C., Roy, S., Ruwase, O.,
+Saarikivi, O., Saied, A., Salim, A., Santacroce, M.,
+Shah, S., Shang, N., Sharma, H., Shen, Y., Shukla,
+S., Song, X., Tanaka, M., Tupini, A., Vaddamanu,
+P., Wang, C., Wang, G., Wang, L., Wang, S., Wang,
+X., Wang, Y., Ward, R., Wen, W., Witte, P., Wu,
+H., Wu, X., Wyatt, M., Xiao, B., Xu, C., Xu, J., Xu,
+W., Xue, J., Yadav, S., Yang, F., Yang, J., Yang,
+Y., Yang, Z., Yu, D., Yuan, L., Zhang, C., Zhang,
+C., Zhang, J., Zhang, L. L., Zhang, Y., Zhang, Y..,
+Zhang, Y., and Zhou, X. (2024). Phi-3 technical
+report: A highly capable language model locally on
+your phone.
+
+Chow, C.-K. (2009). An optimum character recognition
+system using decision functions. IRE Transactions
+on Electronic Computers, (4):247-254.
+
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun,
+H., Kaiser, L., Plappert, M., Tworek, J., Hilton,
+J., Nakano, R., Hesse, C., and Schulman, J. (2021).
+Training verifiers to solve math word problems.
+
+Cortes, C., DeSalvo, G., and Mohri, M. (2016). Learn-
+
+ing with rejection. In International conference on
+algorithmic learning theory, pages 67-82. Springer.
+
+DeepSeek-AI, Guo, D., Yang, D., Zhang, H., Song, J.,
+Zhang, R., Xu, R., Zhu, Q., Ma, S., Wang, P., Bi,
+X., Zhang, X., Yu, X., Wu, Y., Wu, Z. F., Gou, Z.,
+Shao, Z., Li, Z., Gao, Z., Liu, A., Xue, B., Wang,
+B., Wu, B., Feng, B., Lu, C., Zhao, C., Deng, C.,
+Zhang, C., Ruan, C., Dai, D., Chen, D., Ji, D., Li,
+E., Lin, F., Dai, F., Luo, F., Hao, G., Chen, G., Li,
+G., Zhang, H., Bao, H., Xu, H., Wang, H., Ding,
+H., Xin, H., Gao, H., Qu, H., Li, H., Guo, J., Li, J.,
+Wang, J., Chen, J., Yuan, J., Qiu, J., Li, J., Cai,
+J. L., Ni, J., Liang, J., Chen, J., Dong, K., Hu, K.,
+Gao, K., Guan, K., Huang, K., Yu, K., Wang, L.,
+Zhang, L., Zhao, L., Wang, L., Zhang, L., Xu, L.,
+Xia, L., Zhang, M., Zhang, M., Tang, M., Li, M.,
+Wang, M., Li, M., Tian, N., Huang, P., Zhang, P.,
+Wang, Q., Chen, Q., Du, Q., Ge, R., Zhang, R., Pan,
+R., Wang, R., Chen, R. J., Jin, R. L., Chen, R., Lu,
+S., Zhou, $., Chen, S., Ye, S., Wang, S., Yu, S., Zhou,
+S., Pan, S., Li, S. S., Zhou, $., Wu, S., Ye, S., Yun,
+T., Pei, T., Sun, T., Wang, T., Zeng, W., Zhao, W.,
+Liu, W., Liang, W., Gao, W., Yu, W., Zhang, W.,
+Xiao, W. L., An, W., Liu, X., Wang, X., Chen, X.,
+Nie, X., Cheng, X., Liu, X., Xie, X., Liu, X., Yang,
+X., Li, X., Su, X., Lin, X., Li, X. Q., Jin, X., Shen,
+X., Chen, X., Sun, X., Wang, X., Song, X., Zhou, X.,
+Wang, X., Shan, X., Li, Y. K., Wang, Y. Q., Wei,
+Y. X., Zhang, Y., Xu, Y., Li, Y., Zhao, Y., Sun, Y.,
+Wang, Y., Yu, Y., Zhang, Y., Shi, Y., Xiong, Y.,
+He, Y., Piao, Y., Wang, Y., Tan, Y., Ma, Y., Liu,
+Y., Guo, Y., Ou, Y., Wang, Y., Gong, Y., Zou, Y.,
+He, Y., Xiong, Y., Luo, Y., You, Y., Liu, Y., Zhou,
+Y., Zhu, Y. X., Xu, Y., Huang, Y., Li, Y., Zheng,
+Y., Zhu, Y., Ma, Y., Tang, Y., Zha, Y., Yan, Y.,
+Ren, Z. Z., Ren, Z., Sha, Z., Fu, Z., Xu, Z., Xie, Z.,
+Zhang, Z., Hao, Z., Ma, Z., Yan, Z., Wu, Z., Gu, Z.,
+Zhu, Z., Liu, Z., Li, Z., Xie, Z., Song, Z., Pan, Z.,
+Huang, Z., Xu, Z., Zhang, Z., and Zhang, Z. (2025).
+Deepseek-r1: Incentivizing reasoning capability in
+lms via reinforcement learning.
+
+Dhuliawala, S., Komeili, M., Xu, J., Raileanu, R., Li,
+X., Celikyilmaz, A., and Weston, J. (2023). Chain-of-
+verification reduces hallucination in large language
+models. arXiv preprint arXiv:2309. 11495.
+
+Gao, L., Dai, Z., Pasupat, P., Chen, A., Chaganty, A.,
+Fan, Y., Zhao, V., Lao, N., Lee, H., Juan, D.-C.,
+and Guu, K. (2022). Attributed text generation via
+post-hoc research and revision.
+
+Gou, Z., Shao, Z., Gong, Y., yelong shen, Yang, Y.,
+Duan, N., and Chen, W. (2024). CRITIC: Large
+language models can self-correct with tool-interactive
+critiquing. In The Twelfth International Conference
+on Learning Representations.
+
+
+Audit-of-Understanding: Posterior-Constrained Inference for Mathematical Reasoning
+
+Ji, Z., Chen, D., Ishii, E., Cahyawijaya, S., Bang,
+Y., Wilie, B., and Fung, P. (2024). LLM internal
+states reveal hallucination risk faced with a query.
+In Belinkov, Y., Kim, N., Jumelet, J., Mohebbi,
+H., Mueller, A., and Chen, H., editors, Proceedings
+of the 7th BlackboxNLP Workshop: Analyzing and
+Interpreting Neural Networks for NLP, pages 88-104,
+Miami, Florida, US. Association for Computational
+Linguistics.
+
+Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford,
+C., Chaplot, D. S., de las Casas, D., Bressand, F.,
+Lengyel, G., Lample, G., Saulnier, L., Lavaud, L. R.,
+Lachaux, M.-A., Stock, P., Scao, T. L., Lavril, T.,
+Wang, T., Lacroix, T., and Sayed, W. E. (2023).
+Mistral 7b.
+
+Koller, D. and Friedman, N. (2009). Probabilistic graph-
+ical models: principles and techniques. MIT press.
+
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin,
+
+V., Goyal, N., Kutttler, H., Lewis, M., Yih,
+W.-t., Rocktaschel, T., Riedel, S., and Kiela,
+D. (2020). Retrieval-augmented generation for
+
+knowledge-intensive nlp tasks. In Proceedings of
+the 34th International Conference on Neural Infor-
+mation Processing Systems, NIPS ’20, Red Hook,
+NY, USA. Curran Associates Inc.
+
+Manakul, P., Liusie, A., and Gales, M. (2023). Self-
+CheckGPT: Zero-resource black-box hallucination
+detection for generative large language models. In
+Bouamor, H., Pino, J., and Bali, K., editors, Proceed-
+ings of the 2023 Conference on Empirical Methods in
+Natural Language Processing, pages 9004-9017, Sin-
+gapore. Association for Computational Linguistics.
+
+Maynez, J., Narayan, S., Bohnet, B., and McDonald, R.
+(2020). On faithfulness and factuality in abstractive
+summarization. In Jurafsky, D., Chai, J., Schluter,
+N., and Tetreault, J., editors, Proceedings of the 58th
+Annual Meeting of the Association for Computational
+Linguistics, pages 1906-1919, Online. Association for
+Computational Linguistics.
+
+Pagnoni, A., Balachandran, V., and Tsvetkov, Y.
+(2021). Understanding factuality in abstractive sum-
+marization with FRANK: A benchmark for factuality
+metrics. In Toutanova, K., Rumshisky, A., Zettle-
+moyer, L., Hakkani-Tur, D., Beltagy, I., Bethard, S.,
+Cotterell, R., Chakraborty, T., and Zhou, Y., edi-
+tors, Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+pages 4812-4829, Online. Association for Computa-
+tional Linguistics.
+
+Patel, A., Bhattamishra, S., and Goyal, N. (2021). Are
+NLP models really able to solve simple math word
+problems? In Proceedings of the 2021 Conference
+
+of the North American Chapter of the Association
+for Computational Linguistics: Human Language
+Technologies, pages 2080-2094, Online. Association
+for Computational Linguistics.
+
+Press, O., Zhang, M., Min, S., Schmidt, L., Smith,
+N., and Lewis, M. (2023). Measuring and narrow-
+ing the compositionality gap in language models.
+In Bouamor, H., Pino, J., and Bali, K., editors,
+Findings of the Association for Computational Lin-
+guistics: EMNLIP 2028, pages 5687-5711, Singapore.
+Association for Computational Linguistics.
+
+Roy, S. and Roth, D. (2015). Solving general arithmetic
+word problems. In Marquez, L., Callison-Burch, C.,
+and Su, J., editors, Proceedings of the 2015 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 1743-1752, Lisbon, Portugal. As-
+sociation for Computational Linguistics.
+
+Shinn, N., Cassano, F., Gopinath, A., Narasimhan, K.,
+and Yao, S. (2023). Reflexion: Language agents with
+verbal reinforcement learning. Advances in Neural
+Information Processing Systems, 36:8634-8652.
+
+Turpin, M., Michael, J., Perez, E., and Bowman, S. R.
+(2023). Language models don’t always say what they
+think: Unfaithful explanations in chain-of-thought
+prompting. In Thirty-seventh Conference on Neural
+Information Processing Systems.
+
+Wang, X., Wei, J., Schuurmans, D., Le, Q. V., Chi,
+E. H., Narang, S., Chowdhery, A., and Zhou, D.
+(2023). Self-consistency improves chain of thought
+reasoning in language models. In The Eleventh In-
+ternational Conference on Learning Representations.
+
+Wang, X. and Zhou, D. (2024). Chain-of-thought rea-
+soning without prompting. In The Thirty-eighth
+Annual Conference on Neural Information Process-
+ing Systems.
+
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., Ichter,
+B., Xia, F., Chi, E. H., Le, Q. V., and Zhou, D.
+(2022). Chain-of-thought prompting elicits reason-
+ing in large language models. In Proceedings of the
+36th International Conference on Neural Information
+Processing Systems, NIPS ’22, Red Hook, NY, USA.
+Curran Associates Inc.
+
+Yao, S., Zhao, J., Yu, D., Du, N., Shafran, L.,
+Narasimhan, K., and Cao, Y. (2022). React: Syn-
+ergizing reasoning and acting in language models.
+CoRR, abs/2210.03629.
+
+Zheng, X., Lou, J., Cao, B., Wen, X., Ji, Y., Lin, H.,
+Lu, Y., Han, X., Zhang, D., and Sun, L. (2024).
+Critic-cot: Boosting the reasoning abilities of large
+language model via chain-of-thoughts critic. arXiv
+preprint arXiv:2408.16326.

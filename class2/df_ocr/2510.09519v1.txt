@@ -1,0 +1,1421 @@
+arXiv:2510.09519v1 [cs.CL] 10 Oct 2025
+
+Can We Reliably Rank Model Performance across Domains
+without Labeled Data?
+
+Veronica Rammouz!, Aaron Gonzalez', Carlos Cruzportillo', Adrian Tan’,
+Nicole Beebe’, Anthony Rios!
+‘The University of Texas at San Antonio
+“TIlinois Institute of Technology
+{veronica.rammouz, anthony.rios}@utsa.edu
+
+Abstract
+
+Estimating model performance without labels
+is an important goal for understanding how
+NLP models generalize. While prior work has
+proposed measures based on dataset similar-
+ity or predicted correctness, it remains unclear
+when these estimates produce reliable perfor-
+mance rankings across domains. In this paper,
+we analyze the factors that affect ranking reli-
+ability using a two-step evaluation setup with
+four base classifiers and several large language
+models as error predictors. Experiments on
+the GeoOLID and Amazon Reviews datasets,
+spanning 15 domains, show that large language
+model-based error predictors produce stronger
+and more consistent rank correlations with true
+accuracy than drift-based or zero-shot baselines.
+Our analysis reveals two key findings: ranking
+is more reliable when performance differences
+across domains are larger, and when the error
+model’s predictions align with the base model’s
+true failure patterns. These results clarify when
+performance estimation methods can be trusted
+and provide guidance for their use in cross-
+domain model evaluation.
+
+1 Introduction
+
+Evaluating NLP models across every possible do-
+main and setting is expensive, yet performance can
+vary widely with changes in topic, geography, or
+language use. For instance, a sentiment classifier
+that performs well on urban reviews may degrade
+sharply on rural dialects; a toxicity detector trained
+on social media English may underperform on re-
+gional variants. Because collecting labeled data
+in each new domain is costly, practitioners often
+rely on proxy signals, such as dataset similarity or
+linguistic drift, to estimate whether a model will
+generalize(Chang et al., 2023; Ramesh Kashyap
+et al., 2021; Pudasaini et al., 2025; Elsahar and
+Gallé, 2019; Sun et al., 2025; Ramesh Kashyap
+et al., 2021). However, while these estimates may
+correlate with accuracy in aggregate, it remains
+
+Model
+
+GPT n@
+@ LLaMa Lincoln) 4
+os {
+Wasningten
+
+Virginia Beack
+
+Raleigh
+
+Nuevo Laredo
+
+© OpenStreetMap contributors
+
+Figure 1: Geographic illustration of our estimated per-
+formance over different states in the United States of
+America.
+
+unclear whether they can reliably indicate which
+models or datasets will perform better than others
+in practice.
+
+Prior work has explored diverse strategies for
+predicting model performance without direct eval-
+uation. Chang et al. (2023) examined how vocab-
+ulary and structural drift affect robustness; Xia
+et al. (2020) proposed similarity metrics based on
+n-gram overlap; and transfer learning studies have
+analyzed how pre-trained language models such
+as BERT and GPT adapt to new domains through
+fine-tuning (Patankar et al., 2022). More recent
+work extends these ideas to multilingual and low-
+resource settings (Khiu et al., 2024), and to cor-
+rectness estimation itself, where Xiao et al. (2025)
+showed that even large models lack reliable self-
+knowledge of their own correctness, motivating
+cross-model approaches that learn from historical
+prediction patterns. Together, these efforts have
+advanced our understanding of model generaliza-
+tion, yet they largely focus on predicting absolute
+accuracy scores. In real deployments, however, the
+more actionable question is often ordinal: can we
+rank which datasets or domains are likely to yield
+
+
+stronger or weaker performance, before collecting
+new labels? It is important to rank reliably for
+model selection and development purposes.
+
+In this paper, we investigate performance pre-
+diction from a different perspective. Rather than
+introducing a new predictive model, we ask a more
+fundamental question: Can current approaches
+rank model performance correctly across diverse
+datasets and architectures? We conduct a system-
+atic analysis of this problem using a simple two-
+step framework: a base classifier (ROBERTa (Liu,
+2019), a linear model, or large language models
+such as GPT-40-mini (OpenAI, 2023) and LLaMa-
+3.1-8B) (Touvron et al., 2023a) trained on the
+source task, and an auxiliary error model that es-
+timates instance-level failures from the different
+base classifiers. This setup serves as a controlled
+environment for testing ranking reliability under
+varying conditions of domain shift, dataset size,
+and model type. By decoupling the method from
+the analysis, we can isolate where the predictions
+succeed and where they fail, providing insights into
+the advantages and limitations of each model. This
+approach is illustrated in Figure 1: if an LLM clas-
+sifier were to be applied to different cities within
+the United States, we would like a method that can
+accurately rank the performance of the for each
+city, with the ultimate goal of predicting where the
+classifier would yield poor results.
+
+Our results reveal that existing predictors and
+drift-based heuristics are often unstable when rank-
+ing datasets, even when they correlate well with
+accuracy. Performance rankings fluctuate across
+architectures and domains, indicating that current
+estimation techniques are less robust than previ-
+ously assumed. We identify key factors, such as
+calibration quality, representational alignment, and
+domain heterogeneity, that systematically drive
+these failures. These findings suggest that there
+remains a gap in knowledge for reliable ranking
+based on simplified grounded evaluation protocols.
+The present study addresses this gap in knowledge
+through the following:
+
+¢ We present the first large-scale study analyz-
+ing when and why model performance predic-
+tors succeed or fail at ranking datasets across
+domains.
+
+¢ We introduce a controlled two-step framework
+that enables consistent comparison of ranking
+reliability across model families and datasets.
+
+¢ We provide empirical evidence that commonly
+used error-prediction and drift-based methods
+are fragile under real distributional variation,
+offering new insights for improving model se-
+lection, fairness assessment, and deployment-
+time evaluation.
+
+2 Related Work
+
+Instance-Level Complexity. Existing work ex-
+amines the complexity of classification tasks
+through the lens of dataset complexity, or instance-
+level complexity measures, to understand the hard-
+ness of a given prediction task (Cook et al., 2025;
+Lorena et al., 2024). Prior work leverages a
+plethora of dataset-level complexity metrics (e.g.,
+feature importance or class overlap) or model-
+based evaluations, (e.g., cross-validation or training
+loss) to allow for the prioritization of classification
+tasks and benchmarking. However, existing meth-
+ods fail to address a fine-grained evaluation of in-
+stance hardness, specifically at the point of an NLP
+model’s failure in a prediction task over out-of-
+domain datasets. We examine instance complexity
+through a novel two-step framework tailored to in-
+stance failures in such contexts. We employ our
+approach at scale to demonstrate its ranking capa-
+bility across different model variants and out-of-
+domain datasets (Eberlein et al., 2025; Zhou et al.,
+2023; Kwon et al., 2024; Mallick et al., 2022).
+
+Dataset Drift. Much of the existing work in
+this area focuses on quantifying dataset drift,
+or covariate drift, through various metrics, such
+as token frequency divergences, TF-IDF vectors,
+and embedding-based distances (Ramesh Kashyap
+et al., 2021; Dredze et al., 2010; Elsahar and
+Gallé, 2019; Ruder et al., 2017). These meth-
+ods have been used to predict performance degra-
+dations when moving from in-domain to out-of-
+domain data (Feldhans et al., 2021). For instance,
+Ramesh Kashyap et al. (2021) highlight the effec-
+tiveness of Jensen-Shannon divergence (Lin, 2002)
+in assessing dataset shift, particularly in domain
+adaptation scenarios.
+
+Traditional approaches to dataset drift have typi-
+cally focused on holistic measures that treat the
+problem as a single monolithic concept, where
+the performance degradation is predicted based on
+overall divergence metrics. While useful, this ap-
+proach has limitations, as it does not account for the
+fact that different dimensions of linguistic variation,
+such as changes in vocabulary, syntax, or seman-
+
+
+tics, can affect model performance in distinct ways.
+For example, a model’s performance might degrade
+drastically with a change in vocabulary while being
+less sensitive to syntactic variations (Chang et al.,
+2023). Prior work has shown that NLP models can
+exhibit high sensitivity to even small shifts in word
+distributions across domains, such as in the case of
+domain-specific jargon or regionally varied dialects
+(Yamshchikov et al., 2021; Ramesh Kashyap et al.,
+2021).
+
+Recent studies have started decomposing dataset
+drift into specific linguistic components, aiming
+to capture finer-grained distinctions. Chang et al.
+(2023) introduce the idea of breaking down drift
+into vocabulary, structural, and semantic dimen-
+sions. This decomposition offers a more inter-
+pretable view of how different types of changes
+in the data affect model predictions. For instance,
+vocabulary drift focuses on divergences in con-
+tent word usage, structural drift captures syntactic
+differences, and semantic drift identifies shifts in
+meaning that may not be detectable by simply look-
+ing at word distributions. This framework allows
+for more precise predictions of how models will
+generalize to new data, especially in low-resource
+or highly variable domains. We leverage drift met-
+rics as a baseline and demonstrate that they are
+inconsistent for ranking out-of-domain datasets.
+
+Model-Based Methods. In addition to dataset-
+level drift metrics, some researchers have explored
+the use of model-based methods, such as embed-
+ding distances, to predict how models perform on
+new data. Embedding-based methods, particularly
+those using contextualized representations from
+models like BERT and RoBERTa, have shown
+promise in capturing both syntactic and seman-
+tic shifts between datasets (Feldhans et al., 2021).
+Elango et al. (2022) found that fine-tuned embed-
+ding distances are particularly effective for ranking
+examples by expected performance, as they cap-
+ture nuances that are missed by simpler, frequency-
+based metrics. However, while these distances can
+rank examples well, they are often less reliable at
+providing accurate performance predictions at the
+dataset level, particularly in out-of-domain scenar-
+ios (Nigenda et al., 2022).
+
+Finally, model-based methods are limited by fo-
+cusing either on dataset-level drift or assuming
+access to labeled data across multiple domains.
+Ramesh Kashyap et al. (2021) and Patankar et al.
+(2022) highlight the need for more robust metrics
+
+that can work in low-data settings, where labeled
+data may only be available for a single domain.
+In such settings, the ability to predict model per-
+formance at the example level becomes crucial,
+especially when models need to be deployed in
+real-time applications. Our work contributes to this
+gap by leveraging error prediction models trained
+on one domain and applying them to estimate per-
+formance across multiple, unseen datasets. By pre-
+dicting errors made by the base model, we intro-
+duce a second layer of predictions, which allows
+for more accurate estimates of model performance
+across a range of held-out datasets.
+
+LLM-as-a-Judge. LLMs are increasingly em-
+ployed as evaluators, so-called LLMs-as-Judges,
+to replace or augment human annotation in bench-
+marking and meta-evaluation tasks (Gu et al.,
+2024). Early studies showed that models such as
+GPT-4 can approximate human preferences and
+provide consistent rankings across diverse tasks
+(OpenAI, 2023; Zheng et al., 2023). This paradigm
+has since evolved into both general-purpose evalu-
+ators and fine-tuned judge models. General LLMs
+are directly prompted for evaluation, as in AlpacaE-
+val (Li et al., 2023), while specialized systems
+such as PandaLM (Wang et al., 2023), JudgeLM
+(Zhu et al., 2023), and Prometheus (Kim et al.,
+2023) fine-tune open-source backbones (e.g., Vi-
+cuna (Touvron et al., 2023b)) on curated evaluation
+datasets to increase stability and interpretability.
+
+Recent work extends these efforts beyond pair-
+wise comparison toward calibrated, correctness-
+aware judging. Self-evaluation frameworks like
+Constitutional AI (Bai et al., 2022) and reasoning-
+centered evaluation (Hao et al., 2023) integrate
+judgment into the model’s own feedback loop,
+allowing iterative refinement of reasoning and
+decision-making. Meanwhile, meta-evaluation re-
+search highlights the need to examine how such
+judges generalize and whether their evaluation sig-
+nals align with factual correctness rather than stylis-
+tic or lexical bias (Trung et al., 2024; Zhuge et al.,
+2024). Despite strong correlation with human pref-
+erence scores, these systems often lack calibration
+or robustness across domains.
+
+Most relevant to our work, recent studies on
+Generalized Correctness Models argue that LLMs
+lack privileged “self-knowledge”: a model predict-
+ing the correctness of its own answers is typically
+no better than another LLM doing the same task,
+while training on historical prediction data (and
+
+
+Step 1: Train Models for a
+Downstream Task on
+Different Domains
+
+Step 2: Create an Error
+Classification Model
+
+Wu
+util
+
+Correct Wrong Correct
+
+Predict Correct or Wrong
+
+Step 3: Estimate Model
+Performance on
+Out-of-Domain data.
+
+Step 4: Rank based on
+Estimated Model
+Performance
+
+1) New York
+2) Texas
+3) Ohio
+Estimated
+Performance
+
+Figure 2: Overview of our two-step performance-ranking framework. In Step 1, base models are trained on source
+domains (e.g., different cities or product categories) for a downstream classification task. In Step 2, an error-
+prediction model learns to identify which instances the base model is likely to misclassify. Using these predicted
+errors, we estimate unlabeled accuracy on new domains and rank datasets by their expected model performance.
+
+applying light calibration) yields cross-model cor-
+rectness predictors that can match or even surpass
+self-emitted confidences in practice (Xiao et al.,
+2025). Rather than estimating absolute accuracy,
+we ask a complementary question: do such correct-
+ness estimates preserve ordinal relationships across
+datasets and models? Unlike GCMs, which target
+calibrated probabilities, we study the robustness of
+ranking under prediction error.
+
+3 Methodology
+
+Our goal is to estimate how well models will per-
+form across unseen datasets by learning to predict
+model errors rather than relying on direct evalu-
+ation. As illustrated in Figure 2, our approach
+proceeds in four stages: (1) train a base model
+on a downstream classification task, (2) collect
+instance-level errors from this model, (3) train a
+secondary model (i.e., an error predictor) to predict
+those errors, and (4) use the predictions to estimate
+and rank the performance of models across multi-
+ple held-out datasets. We explore both supervised
+classifiers and LLMs in each stage, enabling us to
+compare traditional learning and LLM-as-a-judge
+paradigms under a unified framework.
+
+Formally, let D®) = {(x;,y;)}"*, denote a
+dataset from domain k, and let fg denote a model
+trained on labeled data Drain. The model produces
+predictions 9; = fg(a;) on held-out data Dest. We
+define the instance-level error as e; = [y; A ji].
+Our objective is to estimate dataset-level perfor-
+mance p\*)—e, g., accuracy or Fl—without direct
+access to y;, using the predicted probability of cor-
+rectness from an auxiliary model gg.
+
+Step 1: Training the Base Model. The first step
+is to train or prompt a model to perform the target
+classification task. For smaller models, such as
+RoBERTa-base, we fine-tune parameters 0 using
+standard cross-entropy loss:
+
+1
+Lrask (9) = hh So yi log fo(i).
+a1
+
+For LLMs such as GPT-40-mini and LLaMa 3.1
+8B, we instead use few-shot prompting. Each
+model’s outputs 7; and confidence scores (when
+available) serve as the foundation for error analysis
+in later steps. See the Appendix for the complete
+prompts.
+
+Step 2: Learning to Predict Errors. Next, we
+train a second model gg to predict whether a
+given instance will be correctly classified by fo.
+This model is conceptually similar to a gener-
+alized correctness model (Xiao et al., 2025): it
+estimates gg(v;) ~ P(e; = 1 | 2;) using ei-
+ther fine-tuned encoders or instruction-tuned LLMs
+prompted for binary correctness judgments (e.g.,
+“Will the model’s answer likely be correct or in-
+correct?”). For smaller models, gg is trained via
+binary cross-entropy loss:
+
+Lerror(?) = — S lei log ge (xi)+
+
+i=l
+(1 — e;) log(1 — gg(zi))]-
+
+Sle
+
+When using LLMs as error predictors, we replace
+supervised training with in-context exemplars of
+correct and incorrect predictions and prompt the
+LLM to judge correctness. This enables direct
+
+
+comparison between learned error predictors and
+judgment-based estimations. See the Appendix for
+the complete prompts.
+
+Step 3: Estimating Dataset-Level Performance.
+Given the predicted error classes, we estimate the
+expected accuracy on a new dataset D(*) as
+
+1
+5(k) — 7
+pra |D()| »—
+(xi,ys)ED™
+
+which intuitively counts the number of predicted
+errors in the dataset. This provides a label-free
+proxy for model performance on unseen domains
+or datasets. For the LLMs, this is simply the pre-
+diction without any thresholding.
+
+Performance Ranking Evaluation. To evaluate
+the overall method, we measure the correlation
+between the predicted performance p“*) and the
+true performance p) across all held-out datasets.
+We compute the Spearman rank (Spearman, 1961)
+correlation coefficient p to quantify the relationship
+between predicted and true performance and rank
+datasets,
+
+p= ao — (6-1)
+VIR e® —7))/T 6 — 5?
+
+where and 7 are the means of the true and pre-
+dicted performance scores across all datasets. High
+correlation values indicate that our method accu-
+rately estimates model performance across diverse
+datasets, even in out-of-domain scenarios. The
+metric we used in our experiments is Accuracy for
+consistency with prior work (Chang et al., 2023).
+
+4 Results
+
+We present the results of our experiments, where
+we evaluate the performance of models trained on
+different cities and test their generalization across
+other cities. Our key evaluation metrics are accu-
+racy and the correlation between the estimated and
+true accuracy across the held-out datasets.
+
+Baseline Models. Our baseline classifiers for pre-
+dicting offensive language and sentiment across
+both datasets include three models of increasing
+complexity. (1) A Linear model, which uses lex-
+ical and confidence-based features (details in the
+Appendix). (2) A RoBERTa-base model, fine-
+tuned for each task using standard cross-entropy
+loss (training details in the Appendix). (3) A
+
+LLaMa-3.1-8B model evaluated in a few-shot set-
+ting, where task-specific examples are provided
+through in-context prompting (the full prompt is
+shown in the Appendix).
+
+Baselines Error Models/Methods. We evaluate
+four baselines that estimate performance without la-
+beled data, matching the names used in Tables 1-2.
+The Zero-Shot Baseline uses GPT-40-mini to pro-
+duce label predictions directly; we treat the model’s
+confidence for the predicted label as a proxy for
+correctness and average these probabilities within
+each domain to obtain an estimated accuracy (cf.
+OpenAI 2023). The Semantic Drift baseline mea-
+sures semantic proximity between predicted and
+reference label texts using SBERT embeddings
+(Reimers and Gurevych, 2019). For each example
+7 we compute the maximum cosine similarity over
+candidate labels,s; = maxycy Cos (eg, , ey), and
+estimate domain-level performance by averaging
+these scores, Ay = Ny ye s;. The RoBERTa
+baseline trains a ROBERT*~-base error model (Liu,
+2019) to predict whether a base classifier’s output
+is correct given the input and predicted label; we av-
+erage predicted correctness probabilities over each
+domain at inference. The Linear Model baseline is
+a logistic regression error model ngram features; as
+with RoBERTa, we average predicted correctness
+to estimate accuracy. Training and optimization
+details for the learned error models are in the Ap-
+pendix.
+
+Datasets. We use two datasets in our study:
+GeoOLID and Amazon Reviews 2023.
+
+GeoOLID. The GeoOLID dataset was introduced
+by Lwowski et al. (2022) and used to investigate
+the geographic performance disparities of offen-
+sive language classifiers. GeoOLID contains over
+14,000 annotated examples of tweets from 15 ge-
+ographically and demographically diverse cities
+across the United States. The regional variability
+of language use presented in this dataset allows
+for studying the effect of linguistic and topical dif-
+ferences on model accuracies. We leverage these
+variations to test whether our base classifier mod-
+els can accurately predict offensive language when
+trained on one city.
+
+Amazon Reviews 2023. The second dataset used
+in our study is the Amazon Reviews 2023 dataset
+introduced by Hou et al. (2024). This dataset
+comprises over 570 million reviews and 48 mil-
+lion items across 33 product categories. To create a
+
+
+BR
+foo)
+L
+
+Model
+Hy gpt
+9 llama
+
+2S
+0
+
+2
+fon)
+
+eS
+iN
+
+2S
+N
+
+5 1 0 20 60 95
+Error-Informed Percent Margin
+
+Spearman Rank Correlation
+
+2S
+°
+
+Figure 3: Figure showing the performance as a result
+of error-informed variations in true accuracy with a de-
+creasing margin over datasets for the Software training
+
+category.
+
+_i 2 5 10
+Percent Margin
+
+Model
+| HE gpt
+9) llama
+
+2
+(or)
+
+2
+fos)
+
+2
+iN
+
+2
+N
+
+Spearman Rank Correlation
+oO
+°
+
+|
+oS
+N
+
+Figure 4: Figure showing the performance as a result
+of variations in true accuracy with a decreasing margin
+over datasets for the Software training category.
+
+balanced and more manageable subset for analysis,
+we selected 15 distinct product categories, assigned
+a label of either "positive", "neutral", or "negative"
+based on the review’s numerical rating, and ran-
+domly sampled 1,000 reviews for each label. Each
+review in the dataset is paired with detailed product
+metadata, including titles, features, and descrip-
+tions. This sampled subset facilitates exploring
+the relationship between textual reviews and item
+metadata for recommendation and retrieval tasks.
+We can use it to understand how sentiment (product
+rating) prediction models perform across different
+products.
+
+Variation Study Figures 8 and 4 present vari-
+ation studies that analyze how ranking reliability
+changes when we systematically (synthetically at
+random) increase the difference in true accuracy
+between the best and worst performing domains.
+These figures are on the Amazon dataset; see the
+Appendix for GeoOLID results that follow a sim-
+ilar pattern. Intuitively, we start with completely
+
+25 4
+
+1 SD =0.716
+
+204
+
+(a Sa
+
+ee ee ee
+
+0.68 0.69 0.70 0.71 0.72 0.73
+Mean Actual Accuracy
+
+0.67
+
+0.66
+
+Figure 5: Histogram showing the base model accuracy
+ranges with their respective statistics on the Amazon
+Dataset.
+
+1
+1
+i
+1
+-1SD 0.784 1 SD = 0.838
+
+ae
+
+0.78 0.80 0.82 0.84
+
+Mean Actual Accuracy
+
+0.74
+
+0.76 0.86 0.88
+
+Figure 6: Histogram showing the base model accuracy
+ranges with their respective statistics on the GeoOLID
+Dataset.
+
+correct predictions for one city/domain, and then
+for each subsequent city/domain, we add errors to
+the predictions. We explore two conditions: (1) er-
+rors are injected at random across all instances, and
+(2) errors are added only to examples where the
+error model originally predicted a mistake. These
+two settings allow us to test whether ranking corre-
+lations remain stable when the true accuracy gap of
+what we are trying to estimate widens uniformly.
+In the random setting (Figure 4, correlations
+rise gradually as the difference in true accuracy
+increases, showing that larger performance gaps
+make it easier to identify correct rankings. When
+errors are injected based on the error model’s orig-
+inal mistakes (Figure 8), the ranking correlations
+remain more stable, suggesting that the model’s in-
+ternal error patterns capture some real structure in
+where performance decays. Together, these results
+indicate that reliable ranking depends not only on
+
+
+Bal. Chi. Col. Det. EP Hou. Ind. LA Mem. Mia. NO NY Phi. Pho. SA AVG
+Baselines
+Semantic Drift -.004 420 -.145 -.170 -.001 .096 -114 177 -.283 .062 .300 .312 097 017 -.129 042
+Zero-Shot Baseline .256 .254 277 .234 = .254 «= .273, 289.281 262.231) 234 205) 252) 242) 253.253.
+Performance Estimation Approach
+RoBERTa A472 «512 389) 301 3864714495160 .270 S512 411) 316) «=.576) 28941219
+Linear Model -.029 -.038 077.286) «©.072.) 030) .212) -.018 = .123) 251.185) 169.132) 136 301 ~~ «126
+GPT-40-mini 599 556 =.494. 525) 567) 5537S 539111 448 549 556) «575 «490 =.462)—S 401527
+LLaMa-3.1-8B 583.580) )=6.640 S662. 535) 690) 687) 657i 609.627) .631) = 658) =S77)— 620.625
+Gemma-3-12B-it 619 623 .654 .682 586 .707 .689 .683 562 .608 .625 .662 .656 580 .602 .635
+Qwen-3-32B 285 369 371 441 314 316 388 273) 300) 436.142) 216.218) S307) 339 Ssiw3314
+
+Table 1: Spearman correlation between estimated performance and true performance when training on each of the
+different cities, using the following acronyms for clarity: Bal.: Baltimore, Chi.: Chicago, Col.: Colorado, Det.:
+Detroit, EP: El Paso, Hou.: Houston, Ind.: Indianapolis, LA: Los Angeles, Mem.: Memphis, Mia.: Miami, NO:
+New Orleans, NY: New York, Phi.: Philadelphia, Pho.: Phoenix, SA: San Antonio.
+
+AB AP BP DM GC_ GGF HP HPC MT MI OP PS SW SB VG AVG
+Baselines
+Semantic Drift AS51641 = .348 325, -.051_ = 176s 405504 -.164 303) 571) = 582.014. 035.390 ~——«.302
+Zero-Shot Baseline .162 .145 .185 211 099 195 149 174 197 154 .140 1147) 118 152.140 .157
+Performance Estimation Approach
+RoBERTa -.084 -.270 012 .141 -.021 -175 051 -.013) .133) 112 -125  -.35 -.172  .032 -125  -.057
+Linear Model 588 436 468 209 166 .374 207) 527 086 .392 475 494 200 .208 .354 .346
+GPT-40-mini -.086 -.079 -.030 -.123 .174 -.048 -.056 -.072 -.193 -.143 -131 -.141 -.236 -.076 -.045 -.086
+LLaMa-3.1-8B 353 467 477 — 430) 588) 574.275 397) 253 395476535005 321) 331.392
+Gemma-3-12B-it -119 145 044 -.119 054 039 -.049 010 -.145 030 039 018 -.242 -.050 .108 -.015
+Qwen-3-32B 124-347) -.283) -.112) -.308 -.130 -.301 -111 -.112 -.297 -.022 -.229 -.035 -.135 -.027  -.139
+
+Table 2: Spearman correlation between estimated performance and true performance when training on each of the
+different categories, using the following acronyms for clarity: AB: All Beauty, AP: Appliances, BP: Baby Products,
+DM: Digital Music, GC: Gift Cards, GGF: Grocery and Gourmet Food, HP: Handmade Products, HPC: Health
+and Personal Care, MT: Movies and TV, MI: Musical Instruments, OP: Office Products, PS: Pet Supplies, SW:
+
+Software, SB: Subscription Boxes, VG: Video Games.
+
+the scale of accuracy differences but also on how
+those differences relate to model-specific errors.
+Figures 6 and 5 display histograms of the true
+performance distributions for the Amazon and
+GeoOLID datasets, respectively. Each histogram
+shows the mean and one standard deviation range
+of base model accuracies across all domains. The
+Amazon dataset (mean = 0.70, SD = 0.015) has
+a narrow and concentrated accuracy range, while
+GeoOLID (mean = 0.81, SD = 0.028) exhibits a
+wider and more uniform distribution. These dif-
+ferences explain why ranking results are stronger
+for GeoOLID: when performance values are more
+spread out, correlations between predicted and true
+rankings are easier to recover. In contrast, the Ama-
+zon accuracies are tightly clustered, so even small
+estimation errors can change the rank order.
+
+Real Data Results. Tables 1 and 2 present the
+Spearman rank correlation between estimated and
+true model performance across different domains.
+Each value represents how well the ranking pro-
+
+duced by the error-prediction method aligns with
+the actual ranking of accuracies across cities in
+GeoOLID or product categories in Amazon Re-
+views. The average scores at the rightmost column
+are computed across all training domains. For com-
+parison, the baseline results are the average of three
+approaches: semantic drift, covariate shift, and a
+zero-shot baseline. These baselines capture how
+similarity-based or unsupervised methods perform
+when no explicit error modeling is used.
+
+Table 1 reports results on GeoOLID. The base-
+line measures yield weak or inconsistent results,
+with average correlations below .30 across all three
+baselines. In contrast, the error-prediction ap-
+proaches show much stronger and more stable cor-
+relations. The large language model predictors
+perform best, with LLaMa-3.1-8B and Gemma-3-
+12B-it achieving average correlations of .625 and
+.635, respectively. These models capture consistent
+ranking differences across cities such as Houston
+(.707) and Memphis (.562), indicating that rank-
+
+
+ing reliability improves when true accuracy differ-
+ences are larger and geographically structured. The
+smaller ROBERTa and linear models perform less
+consistently, averaging .419 and .126, respectively,
+suggesting that they capture less of the structure in
+regional variation.
+
+Table 2 shows results for the Amazon product
+review dataset. Here, ranking performance is no-
+tably weaker, with most correlations close to zero.
+The Linear model and LLaMa-3.1-8B again per-
+form best, with average correlations of .346 and
+.392, while other models show low or negative
+values. This pattern aligns with the narrow accu-
+racy distribution seen in Figure 5, where accura-
+cies cluster near 0.70 with a standard deviation of
+only .015. When the range of true performance
+is small, small prediction errors can easily change
+rank order, leading to unstable results. In contrast,
+Figure 6 shows a wider spread in GeoOLID ac-
+curacies (mean = 0.81, SD = 0.028), producing
+stronger signals for ranking. The relatively strong
+performance of the Linear model aligns with the
+Semantic Drift baseline, as both rely on shallow lex-
+ical or confidence-based cues that generalize well
+across categories. These features capture broad
+sentiment polarity and stylistic consistency across
+product types, allowing both methods to recover
+smooth, monotonic estimates even when absolute
+performance differences are minimal.
+
+Together, these findings align with the variation
+studies in Figures 4 and 8. When we artificially
+increased the difference in true accuracy across do-
+mains, Spearman correlations rose from roughly .2
+to .8 in GeoOLID-like conditions, especially when
+variations matched the model’s original errors. This
+supports the hypothesis that ranking reliability de-
+pends jointly on the magnitude of true performance
+variation and the alignment between predicted and
+actual error patterns. The higher and more con-
+sistent correlations in GeoOLID, compared to the
+tightly clustered results in Amazon, confirm that
+ranking becomes more reliable when underlying
+performance differences are broader and system-
+atically captured by the error models. As shown
+in Appendix Table 4, the Linear and GPT-40-mini
+error models achieve the highest accuracies across
+datasets (.734 and .825 for Amazon and GeoOLID,
+respectively), demonstrating that even simple mod-
+els can effectively capture structured error variation.
+These results reinforce that performance prediction
+benefits from both model-informed error structure
+and sufficient spread in true accuracies, which to-
+
+gether enable more stable ranking across domains.
+
+Implications. Ranking performance depends on
+two main factors: the size of true performance
+differences across domains and the accuracy of
+the error predictions. When these conditions hold,
+rankings are more stable and reliable. We also find
+that the accuracy of the error models correlates with
+overall task performance, suggesting that better
+error estimation supports more trustworthy model
+evaluation without labels.
+
+5 Conclusion
+
+In this paper, we introduced a framework for pre-
+dicting model performance across diverse datasets
+using paired base and error models. Base classifiers
+are first trained on source domains, and secondary
+error models are trained to predict where those
+classifiers will fail on unseen data. We evaluated
+this dual-model setup across multiple datasets and
+architectures, measuring how well the predicted
+rankings align with true performance without using
+labeled evaluation data.
+
+Our findings show that reliable performance
+ranking depends on two interacting factors: the
+amount of true variation in accuracy across do-
+mains and the alignment between predicted and
+actual error patterns. In datasets such as GeoOLID,
+where accuracies are more widely distributed, large
+language model predictors like Gemma-3-12B-it
+and LLaMa-3.1-8B achieved average correlations
+above .62, effectively recovering the relative or-
+dering of model performance. In contrast, when
+accuracies are tightly clustered, as in the Amazon
+dataset (mean = 0.70, SD = 0.015), ranking relia-
+bility declines, and simpler models such as the Lin-
+ear error model perform competitively by capturing
+lexical and confidence-based regularities similar
+to those exploited by the Semantic Drift baseline.
+These results suggest that strong ranking perfor-
+mance does not necessarily require complex mod-
+eling capacity but benefits most from structured
+variation in the underlying task space.
+
+Taken together, our results establish a founda-
+tion for label-free performance estimation that can
+guide model selection and deployment across do-
+mains. By quantifying when and how model pre-
+dictions can be used to rank expected accuracy, this
+framework provides a scalable and interpretable
+alternative to exhaustive retraining and evaluation.
+Future work will extend this analysis to genera-
+tion and multimodal tasks, where the sources of
+
+
+variation and error alignment may differ, and inves-
+tigate how task-specific priors can improve ranking
+stability across heterogeneous datasets.
+
+Acknowledgements
+
+This material is based upon work supported by the
+National Science Foundation (NSF) under Grant
+No. 2145357. This work was also supported in
+part by the U.S. Army Combat Capabilities De-
+velopment Command (DEVCOM), the U.S. Army
+Research Laboratory (ARL), ARL South at the Uni-
+versity of Texas at San Antonio (UTSA), and the
+Army Educational Outreach Program(AEOP).
+
+6 Limitations
+
+This study has several limitations that outline the
+scope of our analysis rather than fundamental weak-
+nesses. First, the reliability of ranking depends on
+how well the error models capture model failures.
+These predictors may not represent all sources of
+variation in generalization, especially when data
+are highly imbalanced or differ in structure. Sec-
+ond, our experiments focus on classification tasks
+and two datasets, which limits how far the find-
+ings can be extended to other types of problems.
+Third, some domains in our study are more uniform
+than others, which may influence how correlations
+appear. Future work can test whether these pat-
+terns hold in more diverse domains, larger model
+families, or tasks such as text generation and multi-
+modal learning.
+
+References
+
+Yuntao Bai, Saurav Kadavath, Sandipan Kundu,
+Amanda Askell, Jackson Kernion, Andy Jones, Anna
+Chen, Anna Goldie, Azalia Mirhoseini, Cameron
+McKinnon, Carol Chen, Catherine Olsson, Christo-
+pher Olah, Danny Hernandez, Dawn Drain, Deep
+Ganguli, Dustin Li, Eli Tran-Johnson, Ethan Perez,
+Jamie Kerr, Jared Mueller, Jeffrey Ladish, Joshua
+Landau, Kamal Ndousse, Kamile Lukosuite, Liane
+Lovitt, Michael Sellitto, Nelson Elhage, Nicholas
+Schiefer, Noemi Mercado, Nova DasSarma, Robert
+Lasenby, Robin Larson, Sam Ringer, Scott John-
+ston, Shauna Kravec, Sheer El] Showk, Stanislav Fort,
+Tamera Lanham, Timothy Telleen-Lawton, Tom Con-
+erly, Tom Henighan, Tristan Hume, Samuel R. Bow-
+man, Zac Hatfield-Dodds, Ben Mann, Dario Amodei,
+Nicholas Joseph, Sam McCandlish, Tom Brown, and
+Jared Kaplan. 2022. Constitutional ai: Harmlessness
+from ai feedback. Preprint, arXiv:2212.08073.
+
+Tyler Chang, Kishaloy Halder, Neha Anna John, Yo-
+garshi Vyas, Yassine Benajiba, Miguel Ballesteros,
+
+and Dan Roth. 2023. Characterizing and measuring
+linguistic dataset drift. In Proceedings of the 61st An-
+nual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 8953-
+8967.
+
+Ryan A Cook, John P Lalor, and Ahmed Abbasi. 2025.
+No simple answer to data complexity: An examina-
+tion of instance-level complexity metrics for classi-
+fication tasks. In Proceedings of the 2025 Confer-
+ence of the Nations of the Americas Chapter of the
+Association for Computational Linguistics: Human
+Language Technologies (Volume 1: Long Papers),
+pages 2553-2573.
+
+Mark Dredze, Tim Oates, and Christine Piatko. 2010.
+We’re not in Kansas anymore: Detecting domain
+changes in streams. In Proceedings of the 2010 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 585-595, Cambridge, MA. Asso-
+ciation for Computational Linguistics.
+
+Jonas Eberlein, Daniel Rodriguez, and Rachel Harri-
+son. 2025. The effect of data complexity on classi-
+fier performance. Empirical Software Engineering,
+30(1):16.
+
+Vikram Elango, Tony Chen, and Raghu Ramesha. 2022.
+Detect NLP data drift using custom Amazon Sage-
+Maker Model Monitor. AWS Machine Learning
+Blog. Accessed: 2022-09-01.
+
+Hady Elsahar and Matthias Gallé. 2019. To annotate
+or not? predicting performance drop under domain
+shift. In Proceedings of the 2019 Conference on
+Empirical Methods in Natural Language Processing
+and the 9th International Joint Conference on Natu-
+ral Language Processing (EMNLP-IJCNLP), pages
+2163-2173, Hong Kong, China. Association for Com-
+putational Linguistics.
+
+Robert Feldhans, Adrian Wilke, Stefan Heindorf, Mo-
+hammad Hossein Shaker, Barbara Hammer, Axel-
+Cyrille Ngonga Ngomo, and Eyke Hiillermeier. 2021.
+Drift detection in text data with document embed-
+dings. In Intelligent Data Engineering and Auto-
+mated Learning, pages 107-118. Springer Interna-
+tional Publishing.
+
+Jiawei Gu, Xuhui Jiang, Zhichao Shi, Hexiang Tan,
+Xuehao Zhai, Chengjin Xu, Wei Li, Yinghan Shen,
+Shengjie Ma, Honghao Liu, et al. 2024. A survey on
+Ilm-as-a-judge. arXiv preprint arXiv:2411.15594.
+
+Shibo Hao, Yi Gu, Haodi Ma, Joshua Hong, Zhen
+Wang, Daisy Wang, and Zhiting Hu. 2023. Rea-
+soning with language model is planning with world
+model. In Proceedings of the 2023 Conference on
+Empirical Methods in Natural Language Processing,
+pages 8154-8173, Singapore. Association for Com-
+putational Linguistics.
+
+Eric Khiu, Hasti Toossi, David Anugraha, Jinyu Liu,
+Jiaxu Li, Juan Armando Parra Flores, Leandro Acros
+Roman, A Seza Dogru6z, and En-Shiun Annie Lee.
+2024. Predicting machine translation performance
+
+
+on low-resource languages: The role of domain simi-
+larity. arXiv preprint arXiv:2402.02633.
+
+Seungone Kim, Jamin Shin, Yejin Cho, Joel Jang,
+Shayne Longpre, Hwaran Lee, Sangdoo Yun,
+Seongjin Shin, Sungdong Kim, James Thorne, et al.
+2023. Prometheus: Inducing fine-grained evalua-
+tion capability in language models. ArXiv preprint,
+abs/2310.08491.
+
+Hyunjin Kwon, Matthew Greenberg, Colin Bruce
+Josephson, and Joon Lee. 2024. Measuring the pre-
+diction difficulty of individual cases in a dataset using
+machine learning. Scientific Reports, 14(1):10474.
+
+Xuechen Li, Tianyi Zhang, Yann Dubois, Rohan Taori,
+Ishaan Gulrajani, Carlos Guestrin, Percy Liang, and
+Tatsunori B. Hashimoto. 2023. Alpacaeval: An au-
+tomatic evaluator of instruction-following models.
+https: //github.com/tatsu-lab/alpaca_eval.
+
+Jianhua Lin. 2002. Divergence measures based on the
+shannon entropy. [EEE Transactions on Information
+theory, 37(1):145-151.
+
+Yinhan Liu. 2019. Roberta: A robustly opti-
+mized bert pretraining approach. arXiv preprint
+arXiv: 1907.11692.
+
+Ana C Lorena, Pedro YA Paiva, and Ricardo BC Prudén-
+cio. 2024. Trusting my predictions: on the value of
+
+instance-level analysis. ACM Computing Surveys,
+56(7): 1-28.
+
+Brandon Lwowski, Paul Rad, and Anthony Rios. 2022.
+Measuring geographic performance disparities of of-
+fensive language classifiers. In Proceedings of the
+29th International Conference on Computational Lin-
+guistics, pages 6600-6616.
+
+Ankur Mallick, Kevin Hsieh, Behnaz Arzani, and Gauri
+Joshi. 2022. Matchmaker: Data drift mitigation in
+machine learning for large-scale systems. Proceed-
+ings of Machine Learning and Systems, 4:77-94.
+
+David Nigenda, Zohar Karnin, Bilal Zafar, Raghu Rame-
+sha, Alan Tan, Michele Donini, and Krishnaram Ken-
+thapadi. 2022. Amazon SageMaker Model Monitor:
+A system for real-time insights into deployed ma-
+chine learning models. In Proceedings of the 28th
+ACM SIGKDD Conference on Knowledge Discovery
+and Data Mining.
+
+OpenAI. 2023. Gpt-4 technical report.
+arXiv:2303.08774.
+
+Preprint,
+
+Shantanu Patankar, Omkar Gokhale, Onkar Litake,
+Aditya Mandke, and Dipali Kadam. 2022. To train
+or not to train: Predicting the performance of mas-
+sively multilingual models. In Proceedings of the
+First Workshop on Scaling Up Multilingual Evalua-
+tion, pages 8-12.
+
+Shushanta Pudasaini, Luis Miralles, David Lillis, and
+Marisa Llorens Salvador. 2025. Benchmarking
+ai text detection: Assessing detectors against new
+
+datasets, evasion tactics, and enhanced Ilms. In Pro-
+ceedings of the IstWorkshop on GenAI Content De-
+tection (GenAIDetect), pages 68-77.
+
+Abhinav Ramesh Kashyap, Devamanyu Hazarika, Min-
+Yen Kan, and Roger Zimmermann. 2021. Domain
+divergences: A survey and empirical analysis. In
+Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+pages 1830-1849, Online. Association for Computa-
+tional Linguistics.
+
+Nils Reimers and Iryna Gurevych. 2019. Sentence-bert:
+Sentence embeddings using siamese bert-networks.
+arXiv preprint arXiv: 1908. 10084.
+
+Sebastian Ruder, Parsa Ghaffari, and John G. Breslin.
+2017. Data selection strategies for multi-domain
+sentiment analysis. arXiv, abs/1702.02426.
+
+Charles Spearman. 1961. The proof and measurement
+of association between two things.
+
+Jun Sun, Xinxin Zhang, Simin Hong, Jian Zhu, and
+Lingfang Zeng. 2025. Adversarial alignment with
+anchor dragging drift (a3d2): Multimodal domain
+adaptation with partially shifted modalities. In Pro-
+ceedings of the 63rd Annual Meeting of the Associa-
+tion for Computational Linguistics (Volume 1: Long
+Papers), pages 19680-19690.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal
+Azhar, et al. 2023a. Llama: Open and effi-
+cient foundation language models. ArXiv preprint,
+abs/2302.13971.
+
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier
+Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Baptiste Roziére, Naman Goyal, Eric Hambro, Faisal
+Azhar, et al. 2023b. Vicuna: Open and effi-
+cient foundation language models. ArXiv preprint,
+abs/2302.13971.
+
+Luong Trung, Xinbo Zhang, Zhanming Jie, Peng Sun,
+Xiaoran Jin, and Hang Li. 2024. Reft: Reasoning
+with reinforced fine-tuning. In Proceedings of the
+62nd Annual Meeting of the Association for Compu-
+tational Linguistics (Volume 1: Long Papers), pages
+7601-7614.
+
+Yidong Wang, Zhuohao Yu, Zhengran Zeng, Linyi
+Yang, Cunxiang Wang, Hao Chen, Chaoya Jiang,
+Rui Xie, Jindong Wang, Xing Xie, et al. 2023.
+Pandalm: An automatic evaluation benchmark for
+Ilm instruction tuning optimization. ArXiv preprint,
+abs/2306.05087.
+
+Mengzhou Xia, Antonios Anastasopoulos, Ruochen Xu,
+Yiming Yang, and Graham Neubig. 2020. Predicting
+performance for natural language processing tasks.
+In Proceedings of the 58th Annual Meeting of the As-
+sociation for Computational Linguistics, pages 8625—
+8646.
+
+
+Hanqi Xiao, Vaidehi Patil, Hyunji Lee, Elias Stengel-
+Eskin, and Mohit Bansal. 2025. Generalized correct-
+ness models: Learning calibrated and model-agnostic
+correctness predictors from historical patterns. arXiv
+preprint arXiv:2509.24988.
+
+Ivan P. Yamshchikov, Viacheslav Shibaev, Nikolay
+Khlebnikov, and Alexey Tikhonov. 2021. Style-
+transfer and paraphrase: Looking for a sensible se-
+mantic similarity metric. Proceedings of the AAAI
+Conference on Artificial Intelligence, 35(16):14213-
+14220.
+
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan
+Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang,
+Joseph E. Gonzalez, and Ion Stoica. 2023. Judging
+Ilm-as-a-judge with mt-bench and chatbot arena. In
+Advances in Neural Information Processing Systems
+36: Annual Conference on Neural Information Pro-
+cessing Systems 2023, NeurIPS 2023, New Orleans,
+LA, USA, December 10 - 16, 2023.
+
+Helen Zhou, Yuwen Chen, and Zachary Lipton. 2023.
+Evaluating model performance in medical datasets
+over time. In Conference on Health, Inference, and
+Learning, pages 498-508. PMLR.
+
+Lianghui Zhu, Xinggang Wang, and Xinlong Wang.
+2023. Judgelm: Fine-tuned large language models
+are scalable judges. ArXiv preprint, abs/2310.17631.
+
+Mingchen Zhuge, Changsheng Zhao, Dylan Ashley,
+Wenyi Wang, Dmitrii Khizbullin, Yunyang Xiong,
+Zechun Liu, Ernie Chang, Raghuraman Krishnamoor-
+thi, Yuandong Tian, et al. 2024. Agent-as-a-
+judge: Evaluate agents with agents. ArXiv preprint,
+abs/2410.10934.
+
+A Appendix
+
+A.1 RoBERTa Model Hyper-parameters
+
+We set the tokenizer for RoBERTa_ to
+roberta-base, learning rate of the base model
+to 1e-5, learning rate of the error model to 5e-5,
+max length to 128, base model epochs to 20, error
+model epochs to 20, training batch size to 16,
+evaluation batch size to 32, warmup steps to 500,
+weight decay to .01, train-test split seed to 42, and
+internal evaluation size to .1.
+
+A.2. Linear Model
+
+Based on a comparison of prediction accuracies
+between the Count and TF-IDF vectorizers, the
+selected linear classifier model used TF-IDF vec-
+torization with stop-word elimination and unigram
+tokenization. The linear error model employed TF-
+IDF vectorization with stop-word elimination and
+bigram tokenization. Bigrams were selected based
+on having the highest Spearman rank coefficients
+
+Base Model Dataset Average Acc.
+RoBERTa Amazon .730
+RoBERTa GeoOLID .878
+Linear Amazon 574
+Linear GeoOLID .790
+GPT-40-mini Amazon 751
+GPT-40-mini GeoOLID .782
+LLaMa-3.1-8B Amazon 745
+LLaMa-3.1-8B GeoOLID .793
+
+Table 3: Base models’ average accuracy.
+
+for error prediction of other models, e.g., ROBERTa
+and LLMs, when compared with unigram and tri-
+gram tokenization.
+
+A.3. LLM Prompts
+(a.1) Base Model System Prompt for GeoOLID
+
+SYSTEM
+
+You are a helpful assistant. Your task is to provide
+sound judgement on the nature of the text that
+will be provided to you. If you think the text is
+offensive, please say offensive’. If you think the
+text is not offensive, please say ’not offensive’.
+Take into consideration human tone. Here are
+some examples:
+
+User/Assistant Few-shot Examples
+Text: {text}
+Label: {label}
+
+User
+Text: {text}
+
+(a.2) Base Model System Prompt for Amazon
+
+SYSTEM
+
+You are a helpful assistant. Your task is to provide
+sound judgement on the nature of the text that will
+be provided to you. Your task is sentiment anal-
+ysis. If you think the text is positive, please say
+*positive’. If you think the text is neutral, please
+say ‘neutral’. If you think it is negative, please
+say negative’. Only say ’ positive’, negative’, or
+neutral’. Here are some examples:
+
+User/Assistant Few-shot Examples
+
+Text: {text}
+Label: {label}
+
+User
+Text: {text}
+
+(b) Error Model System Prompt
+
+SYSTEM
+
+You are a helpful assistant. Your task is to check
+whether our prediction is an error or not based
+on sound judgment about the nature of the text.
+You will check if the predicted label is correct for
+
+
+Error Model Dataset Average Acc. Average F1
+Linear Amazon .734 -
+Linear GeoOLID 825 -
+GPT-40-mini Amazon .674 .750
+GPT-40-mini GeoOLID 737 812
+LLaMa-3.1-8B Amazon .716 .780
+LLaMa-3.1-8B GeoOLID 644 .728
+Gemma Amazon 632 453
+Gemma GeoOLID .687 487
+Qwen Amazon 372 457
+Qwen GeoOLID 644 .203
+
+Table 4: Error models’ average accuracy and average F1
+scores per dataset.
+
+the given text. If you think the predicted label
+is correct, please say correct’. If you think the
+predicted label is wrong, please say ’error’. Only
+say ‘error’ or ‘correct’. Please note that the order
+of the examples does not matter - the content
+matters. Here are some examples:
+
+User/Assistant Few-shot Examples
+Text: {text} -> Predicted Label: {label}
+Error Label: {label}
+
+User
+Text: {text} -> Predicted Label: {label}
+
+B_ Additional Results
+
+Table 3 reports the average accuracy of the base
+models across the Amazon and GeoOLID datasets.
+Performance varies by model and dataset, with
+RoBERTa achieving the highest overall accuracies
+(.730 on Amazon and .878 on GeoOLID). The
+Linear model performs lowest on both datasets
+(.574 and .790), while the large language mod-
+els (GPT-40-mini and LLaMa-3.1-8B) fall in be-
+tween, averaging around .75 on Amazon and .79 on
+GeoOLID. These results show that base model per-
+formance differs across datasets and model types,
+with GeoOLID generally yielding higher accura-
+cies.
+
+Table 4 presents the average accuracy and Fl
+scores for the error prediction models. The Linear
+error model achieves the highest accuracies over-
+all (.734 on Amazon and .825 on GeoOLID),
+followed by GPT-40-mini (.674 and .737) and
+LLaMa-3.1-8B (.716 and .644). Gemma and Qwen
+perform worse across both datasets, with notably
+low F1 scores on GeoOLID (.487 and .203). These
+results indicate that while larger models can learn
+complex patterns, simpler error models can pro-
+duce stable and competitive accuracy estimates
+across datasets.
+
+Figures 8 illustrate the relationship between per-
+
+Model
+Hd opt
+0.6 7 Ga lama
+
+0.44
+0.0 |
+-0.24
+1 2 5 10 20
+
+Error-Informed Percent Margin
+
+Spearman Rank Correlation
+
+Figure 7: Figure showing the performance as a result
+of variations in true accuracy with a decreasing margin
+over datasets for the Detroit training category.
+
+BR
+fo)
+1
+
+Model
+Ga gpt
+| we llama
+
+LLL
+
+Error-Informed Percent Margin
+
+2
+oo
+
+=
+fon)
+
+S
+iN
+
+o
+Nu
+
+Spearman Rank Correlation
+oO
+oO
+
+60
+
+Figure 8: Figure showing the performance as a result
+of error-informed variations in true accuracy with a
+decreasing margin over datasets for the Detroit training
+category.
+
+formance ranking and the margin of true accu-
+racy differences for the Detroit training category in
+GeoOLID. The first figure shows how Spearman
+rank correlation decreases as the margin between
+true accuracies narrows, demonstrating that rank-
+ing reliability weakens when performance gaps are
+smaller. The second figure applies the same analy-
+sis under an error-informed setting, where perfor-
+mance variation is guided by the model’s predicted
+error distribution. In this case, correlations remain
+higher across decreasing margins, suggesting that
+model-informed variation better preserves ranking
+consistency. Together, the figures highlight how
+performance differences and error structure influ-
+ence correlation stability across datasets.
+
+C. Use of AI
+
+We used AI only to help write the paper, e.g., to fix
+grammar and sentences. All ideas are our own.
